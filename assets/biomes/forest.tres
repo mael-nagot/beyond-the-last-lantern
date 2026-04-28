@@ -1,0 +1,7 @@
+[gd_resource type="Resource" script_class="BiomeData" format=3 uid="uid://xevqf0q5x5fk"]
+
+[ext_resource type="Script" uid="uid://bentd6twklhjr" path="res://scripts/Biomedata.gd" id="1_5w715"]
+
+[resource]
+script = ExtResource("1_5w715")
+metadata/_custom_type_script = "uid://bentd6twklhjr"

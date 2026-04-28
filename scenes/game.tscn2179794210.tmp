@@ -1,0 +1,27 @@
+[gd_scene format=3 uid="uid://dqdy8hslfxwta"]
+
+[ext_resource type="PackedScene" uid="uid://umuljyp6m4k4" path="res://scenes/TestLevel.tscn" id="1_yqjtg"]
+[ext_resource type="Script" uid="uid://dvl2r7kqys22n" path="res://scripts/test_level.gd" id="2_lnu2h"]
+[ext_resource type="PackedScene" uid="uid://rjiab05yloo3" path="res://scenes/DungeonView.tscn" id="3_lnu2h"]
+[ext_resource type="Script" uid="uid://8wx4r3ovqbx4" path="res://scripts/DungeonView.gd" id="4_lbhrr"]
+[ext_resource type="Script" uid="uid://tb2pryd03sv0" path="res://scenes/PlayerController.gd" id="5_iywne"]
+
+[node name="Game" type="Node3D" unique_id=885827904]
+
+[node name="TestLevel" parent="." unique_id=1269994164 instance=ExtResource("1_yqjtg")]
+script = ExtResource("2_lnu2h")
+
+[node name="DungeonView" parent="." unique_id=1783904942 instance=ExtResource("3_lnu2h")]
+script = ExtResource("4_lbhrr")
+
+[node name="Camera" type="Camera3D" parent="DungeonView" unique_id=1422391017]
+near = 0.1
+
+[node name="Light" type="DirectionalLight3D" parent="DungeonView" unique_id=1578391482]
+transform = Transform3D(0.70710677, -0.49999997, 0.49999997, 0, 0.70710677, 0.70710677, -0.70710677, -0.49999997, 0.49999997, 0, 0, 0)
+shadow_enabled = true
+
+[node name="PlayerController" type="Node" parent="DungeonView" unique_id=1804659185]
+script = ExtResource("5_iywne")
+
+[node name="DungeonRoot" type="Node3D" parent="DungeonView" unique_id=1788726038]
