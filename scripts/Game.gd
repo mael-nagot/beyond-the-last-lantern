@@ -17,6 +17,7 @@ func _ready() -> void:
 	add_child(gen)
 	gen.generate()
 
+	dungeon_view.biome = load("res://assets/biomes/forest.tres")
 	dungeon_view.setup(gen)
 	player_controller.setup(dungeon_view, gen)
 

@@ -4,7 +4,9 @@ extends Node3D
 @export var show_ceiling: bool = true
 @export var camera_eye_height: float = 1.8
 @export var wall_height: float = 6.3
-const CELL_SIZE   = 4.6
+@export var biome: BiomeData
+
+const CELL_SIZE = 4.6
 const FACING_ANGLES = {
 	Vector2i( 0, -1):    0.0,   # North
 	Vector2i( 1,  0):  -90.0,   # East
@@ -14,8 +16,9 @@ const FACING_ANGLES = {
 
 var _current_angle: float = 0.0
 
-@onready var camera      : Camera3D = $Camera
-@onready var dungeon_root: Node3D   = $DungeonRoot
+@onready var camera      : Camera3D         = $Camera
+@onready var dungeon_root: Node3D           = $DungeonRoot
+@onready var world_env   : WorldEnvironment = $WorldEnvironment
 
 var generator: LevelGenerator
 
@@ -23,6 +26,7 @@ func setup(gen: LevelGenerator) -> void:
 	generator = gen
 	_build_mesh()
 	_place_camera_at_entrance()
+	_apply_biome_environment()
 
 func _build_mesh() -> void:
 	for child in dungeon_root.get_children():
@@ -31,65 +35,116 @@ func _build_mesh() -> void:
 	for x in range(generator.grid_width):
 		for y in range(generator.grid_height):
 			var cell = generator.get_cell(x, y)
-			if cell == null:
+			if cell == null or cell.cell_type == GridCell.CellType.WALL:
 				continue
 
 			var cx = x * CELL_SIZE + CELL_SIZE * 0.5
 			var cy = y * CELL_SIZE + CELL_SIZE * 0.5
 
-			if cell.cell_type == GridCell.CellType.WALL:
-				_add_box(
-					Vector3(cx, wall_height * 0.5, cy),
-					CELL_SIZE, wall_height, CELL_SIZE,
-					Color(0.6, 0.5, 0.4)
+			# Floor
+			_add_horizontal_quad(
+				Vector3(cx, 0.0, cy),
+				_make_material(biome.floor_albedo, biome.floor_normal)
+			)
+
+			# Ceiling
+			if show_ceiling:
+				_add_horizontal_quad(
+					Vector3(cx, wall_height, cy),
+					_make_material(biome.ceiling_albedo, biome.ceiling_normal),
+					true
 				)
-			else:
-				_add_box(
-					Vector3(cx, 0.05, cy),
-					CELL_SIZE, 0.1, CELL_SIZE,
-					Color(0.4, 0.35, 0.3)
-				)
-				if show_ceiling:
-					_add_box(
-						Vector3(cx, wall_height - 0.05, cy),
-						CELL_SIZE, 0.1, CELL_SIZE,
-						Color(0.25, 0.22, 0.20)
-					)
 
-func _add_box(pos: Vector3, sx: float, sy: float, sz: float, color: Color) -> void:
-	var mesh_instance  = MeshInstance3D.new()
-	var box            = BoxMesh.new()
-	box.size           = Vector3(sx, sy, sz)
+			# Wall faces — only draw where this floor cell meets a wall
+			var neighbours = [
+				[Vector2i( 0, -1), Vector3(cx, wall_height * 0.5, cy - CELL_SIZE * 0.5),   0.0],
+				[Vector2i( 0,  1), Vector3(cx, wall_height * 0.5, cy + CELL_SIZE * 0.5), 180.0],
+				[Vector2i(-1,  0), Vector3(cx - CELL_SIZE * 0.5, wall_height * 0.5, cy),  90.0],
+				[Vector2i( 1,  0), Vector3(cx + CELL_SIZE * 0.5, wall_height * 0.5, cy), 270.0],
+			]
+			for n in neighbours:
+				var dir   = n[0] as Vector2i
+				var npos  = Vector2i(x + dir.x, y + dir.y)
+				var ncell = generator.get_cell(npos.x, npos.y)
+				if ncell and ncell.cell_type == GridCell.CellType.WALL:
+					_add_vertical_quad(n[1], n[2], _make_material(biome.wall_albedo, biome.wall_normal))
 
-	var mat          = StandardMaterial3D.new()
-	mat.albedo_color = color
-	box.surface_set_material(0, mat)
+func _make_material(albedo_set: Array, normal_set: Array = []) -> StandardMaterial3D:
+	var mat = StandardMaterial3D.new()
 
-	mesh_instance.mesh     = box
-	mesh_instance.position = pos
+	if albedo_set.size() > 0:
+		mat.albedo_texture = albedo_set[randi() % albedo_set.size()]
+
+	if normal_set.size() > 0:
+		mat.normal_enabled = true
+		mat.normal_texture = normal_set[randi() % normal_set.size()]
+		mat.normal_scale   = 0.5
+
+	if biome.use_triplanar:
+		var scale_x = 1.0 / CELL_SIZE
+		var scale_y = 1.0 / wall_height
+		var scale_z = 1.0 / CELL_SIZE
+		mat.uv1_triplanar           = true
+		mat.uv1_triplanar_sharpness = biome.triplanar_sharpness
+		mat.uv1_scale               = Vector3(scale_x, scale_y, scale_z)
+		mat.uv1_offset              = Vector3(0.0, biome.triplanar_y_offset, 0.0)
+
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+
+	return mat
+
+func _apply_biome_environment() -> void:
+	var env = world_env.environment
+	if env == null:
+		push_error("No Environment resource on WorldEnvironment node")
+		return
+
+	env.fog_enabled              = biome.fog_enabled
+	env.fog_light_color          = biome.fog_color
+	env.fog_light_energy         = 1.0
+	env.fog_density              = biome.fog_density
+	env.fog_aerial_perspective   = biome.fog_aerial
+
+	env.ambient_light_source     = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color      = biome.ambient_color
+	env.ambient_light_energy     = biome.ambient_energy
+
+func _add_horizontal_quad(pos: Vector3, mat: StandardMaterial3D, flip: bool = false) -> void:
+	var mesh_instance              = MeshInstance3D.new()
+	var quad                       = QuadMesh.new()
+	quad.size                      = Vector2(CELL_SIZE, CELL_SIZE)
+	quad.surface_set_material(0, mat)
+	mesh_instance.mesh             = quad
+	mesh_instance.position         = pos
+	mesh_instance.rotation_degrees = Vector3(-90.0 if not flip else 90.0, 0, 0)
+	dungeon_root.add_child(mesh_instance)
+
+func _add_vertical_quad(pos: Vector3, y_rotation: float, mat: StandardMaterial3D) -> void:
+	var mesh_instance              = MeshInstance3D.new()
+	var quad                       = QuadMesh.new()
+	quad.size                      = Vector2(CELL_SIZE, wall_height)
+	quad.surface_set_material(0, mat)
+	mesh_instance.mesh             = quad
+	mesh_instance.position         = pos
+	mesh_instance.rotation_degrees = Vector3(0, y_rotation, 0)
 	dungeon_root.add_child(mesh_instance)
 
 func _place_camera_at_entrance() -> void:
 	var ep = generator.entrance_pos
 	camera.position = _grid_to_world(ep.x, ep.y)
-	# Angle is set later by PlayerController via set_initial_facing
 
 func set_initial_facing(facing: Vector2i) -> void:
-	_current_angle = FACING_ANGLES.get(facing, 0.0)
+	_current_angle            = FACING_ANGLES.get(facing, 0.0)
 	camera.rotation_degrees.y = _current_angle
-	print("Initial facing vector: ", facing)
-	print("Initial facing direction: ", _current_angle)
-	
+
 func move_camera_to(grid_pos: Vector2i, facing: Vector2i) -> void:
 	var target_pos = _grid_to_world(grid_pos.x, grid_pos.y)
-	var tween = create_tween()
+	var tween      = create_tween()
 	tween.set_parallel(true)
 	tween.tween_property(camera, "position", target_pos, 0.12)
 	tween.tween_property(camera, "rotation_degrees:y", _current_angle, 0.12)
 
 func rotate_camera_to(turn_right: bool) -> void:
-	# If we turn RIGHT, the angle should decrease (0 -> -90 -> -180)
-	# If we turn LEFT, the angle should increase
 	_current_angle += -90.0 if turn_right else 90.0
 	var tween = create_tween()
 	tween.tween_property(camera, "rotation_degrees:y", _current_angle, 0.12)

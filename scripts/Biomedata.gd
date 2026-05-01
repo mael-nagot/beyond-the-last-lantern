@@ -4,21 +4,28 @@ extends Resource
 @export var biome_name: String = "Forest"
 
 @export_group("Wall Textures")
-@export var wall_albedo_textures: Array[Texture2D] = []
-@export var wall_normal_textures: Array[Texture2D] = []
+@export var wall_albedo: Array[Texture2D] = []
+@export var wall_normal: Array[Texture2D] = []
 
 @export_group("Floor Textures")
-@export var floor_albedo_textures: Array[Texture2D] = []
-@export var floor_normal_textures: Array[Texture2D] = []
+@export var floor_albedo: Array[Texture2D] = []
+@export var floor_normal: Array[Texture2D] = []
 
 @export_group("Ceiling Textures")
-@export var ceiling_albedo_textures: Array[Texture2D] = []
-@export var ceiling_normal_textures: Array[Texture2D] = []
+@export var ceiling_albedo: Array[Texture2D] = []
+@export var ceiling_normal: Array[Texture2D] = []
 
 @export_group("Appearance")
-@export var wall_height: float = 2.5
-@export var show_ceiling: bool = true
-@export var ambient_light_color: Color = Color(0.2, 0.35, 0.15)
-@export var ambient_light_energy: float = 0.8
-@export var fog_color: Color = Color(0.1, 0.2, 0.1)
-@export var fog_density: float = 0.04
+@export var wall_height:    float = 6.3
+@export var show_ceiling:   bool  = true
+@export var fog_enabled:    bool  = true
+@export var fog_color:      Color = Color(0.05, 0.10, 0.03)
+@export var fog_density:    float = 0.04
+@export var fog_aerial:     float = 0.1
+@export var ambient_color:  Color = Color(0.6, 0.55, 0.4)
+@export var ambient_energy: float = 1.2
+
+@export_group("Texture Mapping")
+@export var use_triplanar: bool = false
+@export var triplanar_sharpness: float = 0.5
+@export var triplanar_y_offset: float = 0.5

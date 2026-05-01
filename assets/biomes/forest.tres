@@ -1,7 +1,21 @@
 [gd_resource type="Resource" script_class="BiomeData" format=3 uid="uid://xevqf0q5x5fk"]
 
 [ext_resource type="Script" uid="uid://bentd6twklhjr" path="res://scripts/Biomedata.gd" id="1_5w715"]
+[ext_resource type="Texture2D" uid="uid://ebx3msr2yhig" path="res://assets/textures/biomes/forest/ceilings/forest ceiling_01_albedo.jpg" id="1_bq1p8"]
+[ext_resource type="Texture2D" uid="uid://do12vq4fygnrp" path="res://assets/textures/biomes/forest/floors/forest floor_01_albedo.jpg" id="1_ve4a7"]
+[ext_resource type="Texture2D" uid="uid://dyvsvxp7uv6mi" path="res://assets/textures/biomes/forest/floors/forest floor_01_normal.png" id="3_0wobd"]
+[ext_resource type="Texture2D" uid="uid://ca8l5y3ywlnv1" path="res://assets/textures/biomes/forest/ceilings/forest ceiling_01_normal.png" id="3_fvx5y"]
+[ext_resource type="Texture2D" uid="uid://eaqrrmrm74gy" path="res://assets/textures/biomes/forest/walls/forest_wall_01_albedo.jpg" id="7_bq1p8"]
+[ext_resource type="Texture2D" uid="uid://cipdynsyi30nw" path="res://assets/textures/biomes/forest/walls/forest_wall_01_normal.png" id="9_fvx5y"]
 
 [resource]
 script = ExtResource("1_5w715")
+wall_albedo = Array[Texture2D]([ExtResource("7_bq1p8")])
+wall_normal = Array[Texture2D]([ExtResource("9_fvx5y")])
+floor_albedo = Array[Texture2D]([ExtResource("1_ve4a7")])
+floor_normal = Array[Texture2D]([ExtResource("3_0wobd")])
+ceiling_albedo = Array[Texture2D]([ExtResource("1_bq1p8")])
+ceiling_normal = Array[Texture2D]([ExtResource("3_fvx5y")])
+fog_density = 0.2
+triplanar_sharpness = 0.2
 metadata/_custom_type_script = "uid://bentd6twklhjr"

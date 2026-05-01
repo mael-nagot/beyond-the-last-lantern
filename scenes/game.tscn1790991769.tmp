@@ -7,8 +7,7 @@
 
 [sub_resource type="Environment" id="Environment_iywne"]
 ambient_light_source = 2
-ambient_light_color = Color(0.79595864, 0.76737565, 0.6651851, 1)
-ambient_light_energy = 1.2
+ambient_light_color = Color(1, 1, 1, 1)
 
 [node name="Game" type="Node3D" unique_id=885827904]
 script = ExtResource("1_p57ef")
@@ -19,6 +18,10 @@ script = ExtResource("4_lbhrr")
 [node name="Camera" type="Camera3D" parent="DungeonView" unique_id=1422391017]
 fov = 87.4
 near = 0.1
+
+[node name="Light" type="DirectionalLight3D" parent="DungeonView" unique_id=1578391482]
+transform = Transform3D(0.70710677, -0.49999997, 0.49999997, 0, 0.70710677, 0.70710677, -0.70710677, -0.49999997, 0.49999997, 0, 0, 0)
+shadow_enabled = true
 
 [node name="PlayerController" type="Node" parent="DungeonView" unique_id=1804659185]
 script = ExtResource("5_iywne")
