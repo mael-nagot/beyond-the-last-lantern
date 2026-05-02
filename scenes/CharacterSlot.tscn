@@ -10,9 +10,16 @@ script = ExtResource("1_c0oo1")
 [node name="LeftSide" type="VBoxContainer" parent="." unique_id=1954762126]
 layout_mode = 2
 
-[node name="Portrait" type="TextureButton" parent="LeftSide" unique_id=1659012613]
-custom_minimum_size = Vector2(96, 96)
+[node name="PortraitFrame" type="Panel" parent="LeftSide" unique_id=1061581945]
+custom_minimum_size = Vector2(68, 68)
 layout_mode = 2
+
+[node name="Portrait" type="TextureButton" parent="LeftSide/PortraitFrame" unique_id=1659012613]
+custom_minimum_size = Vector2(96, 96)
+layout_mode = 0
+offset_top = -100.0
+offset_right = 96.0
+offset_bottom = -4.0
 ignore_texture_size = true
 stretch_mode = 0
 
@@ -23,6 +30,10 @@ layout_mode = 2
 [node name="MPBar" type="ProgressBar" parent="LeftSide" unique_id=1934130479]
 custom_minimum_size = Vector2(0, 12)
 layout_mode = 2
+
+[node name="NameLabel" type="Label" parent="LeftSide" unique_id=1509703354]
+layout_mode = 2
+text = "Charname"
 
 [node name="ActionButtons" type="VBoxContainer" parent="." unique_id=2112115696]
 layout_mode = 2
