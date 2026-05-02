@@ -1,0 +1,18 @@
+[gd_scene format=3 uid="uid://clcor54gdenm5"]
+
+[ext_resource type="Script" uid="uid://bqjifjos0cm1" path="res://scripts/PartyPanel.gd" id="1_oqee1"]
+[ext_resource type="PackedScene" uid="uid://chnnqd80nfqnh" path="res://scenes/CharacterSlot.tscn" id="2_oqee1"]
+
+[node name="PartyPanel" type="HBoxContainer" unique_id=583003364]
+offset_right = 40.0
+offset_bottom = 40.0
+script = ExtResource("1_oqee1")
+
+[node name="Slot0" parent="." unique_id=1729730036 instance=ExtResource("2_oqee1")]
+layout_mode = 2
+
+[node name="Slot1" parent="." unique_id=1554839694 instance=ExtResource("2_oqee1")]
+layout_mode = 2
+
+[node name="Slot2" parent="." unique_id=912847259 instance=ExtResource("2_oqee1")]
+layout_mode = 2

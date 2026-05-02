@@ -1,0 +1,19 @@
+[gd_scene format=3 uid="uid://c74gdkoj42a0b"]
+
+[node name="TopBar" type="HBoxContainer" unique_id=92961221]
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="BtnSettings" type="Button" parent="." unique_id=1093642928]
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+text = "⚙"
+
+[node name="BtnMap" type="Button" parent="." unique_id=539833784]
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+text = "🗺"
+
+[node name="Spacer" type="Control" parent="." unique_id=1643695278]
+layout_mode = 2
+size_flags_horizontal = 3

@@ -1,16 +1,14 @@
-extends Node
+extends Node3D
 
 var _player_controller = null
 
 func _ready() -> void:
 	var dungeon_view      = $DungeonView
 	var player_controller = $DungeonView/PlayerController
+	var hud               = $HUD
 
-	if dungeon_view == null:
-		push_error("DungeonView node not found")
-		return
-	if player_controller == null:
-		push_error("PlayerController node not found")
+	if dungeon_view == null or player_controller == null or hud == null:
+		push_error("Required node missing")
 		return
 
 	var gen = LevelGenerator.new()
@@ -22,6 +20,15 @@ func _ready() -> void:
 	player_controller.setup(dungeon_view, gen)
 
 	_player_controller = player_controller
+
+	# Movement pad signals
+	var pad = hud.movement_pad
+	pad.forward_pressed.connect(player_controller.move_forward)
+	pad.backward_pressed.connect(player_controller.move_backward)
+	pad.turn_left_pressed.connect(player_controller.turn_left)
+	pad.turn_right_pressed.connect(player_controller.turn_right)
+	pad.strafe_left_pressed.connect(player_controller.strafe_left)
+	pad.strafe_right_pressed.connect(player_controller.strafe_right)
 
 func _input(event: InputEvent) -> void:
 	if _player_controller == null:

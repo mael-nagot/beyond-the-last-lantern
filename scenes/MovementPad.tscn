@@ -1,0 +1,33 @@
+[gd_scene format=3 uid="uid://b1fv0wj23v1kq"]
+
+[ext_resource type="Script" uid="uid://cqusm36cbky7g" path="res://scripts/MovementPad.gd" id="1_usdp5"]
+
+[node name="MovementPad" type="GridContainer" unique_id=1295749151]
+offset_right = 40.0
+offset_bottom = 40.0
+columns = 3
+script = ExtResource("1_usdp5")
+
+[node name="BtnTurnLeft" type="Button" parent="." unique_id=104233053]
+layout_mode = 2
+text = "◁"
+
+[node name="BtnForward" type="Button" parent="." unique_id=354916510]
+layout_mode = 2
+text = "▲"
+
+[node name="BtnTurnRight" type="Button" parent="." unique_id=433408336]
+layout_mode = 2
+text = "▷"
+
+[node name="BtnStrafeLeft" type="Button" parent="." unique_id=999658459]
+layout_mode = 2
+text = "◀"
+
+[node name="BtnBackward" type="Button" parent="." unique_id=883361552]
+layout_mode = 2
+text = "▼"
+
+[node name="BtnStrafeRight" type="Button" parent="." unique_id=1190855420]
+layout_mode = 2
+text = "▶"

@@ -1,0 +1,40 @@
+[gd_scene format=3 uid="uid://chnnqd80nfqnh"]
+
+[ext_resource type="Script" uid="uid://c755w2x5ax4sw" path="res://scripts/CharacterSlot.gd" id="1_c0oo1"]
+
+[node name="CharacterSlot" type="BoxContainer" unique_id=1843678421]
+offset_right = 208.0
+offset_bottom = 131.0
+script = ExtResource("1_c0oo1")
+
+[node name="LeftSide" type="VBoxContainer" parent="." unique_id=1954762126]
+layout_mode = 2
+
+[node name="Portrait" type="TextureButton" parent="LeftSide" unique_id=1659012613]
+custom_minimum_size = Vector2(96, 96)
+layout_mode = 2
+ignore_texture_size = true
+stretch_mode = 0
+
+[node name="HPBar" type="ProgressBar" parent="LeftSide" unique_id=1484194797]
+custom_minimum_size = Vector2(0, 12)
+layout_mode = 2
+
+[node name="MPBar" type="ProgressBar" parent="LeftSide" unique_id=1934130479]
+custom_minimum_size = Vector2(0, 12)
+layout_mode = 2
+
+[node name="ActionButtons" type="VBoxContainer" parent="." unique_id=2112115696]
+layout_mode = 2
+
+[node name="BtnAttack" type="Button" parent="ActionButtons" unique_id=1529862801]
+layout_mode = 2
+text = "AT"
+
+[node name="BtnSpell" type="Button" parent="ActionButtons" unique_id=2039707114]
+layout_mode = 2
+text = "SP"
+
+[node name="BtnDefense" type="Button" parent="ActionButtons" unique_id=1272800528]
+layout_mode = 2
+text = "DF"
