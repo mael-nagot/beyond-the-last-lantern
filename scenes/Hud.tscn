@@ -18,7 +18,7 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 1
 
-[node name="ItemBar" type="HBoxContainer" parent="HUDRoot" unique_id=872961369]
+[node name="ItemBar" type="Container" parent="HUDRoot" unique_id=968095580]
 layout_mode = 0
 offset_right = 40.0
 offset_bottom = 40.0

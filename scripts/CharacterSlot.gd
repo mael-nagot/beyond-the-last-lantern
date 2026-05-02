@@ -19,7 +19,7 @@ func _ready() -> void:
 	var screen      = get_viewport().get_visible_rect().size
 	var short_side  = min(screen.x, screen.y)
 	var is_portrait = screen.y > screen.x
-	var unit        = short_side * (0.008 if is_portrait else 0.01)
+	var unit        = short_side * (0.012 if is_portrait else 0.01)
 
 	# Portrait frame and portrait
 	portrait_frame.custom_minimum_size = Vector2(unit * 12, unit * 12)

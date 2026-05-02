@@ -1,5 +1,5 @@
 class_name ItemBar
-extends HBoxContainer
+extends Container
 
 const SLOT_COUNT   = 10
 const SLOT_SPACING = 4
@@ -9,8 +9,6 @@ signal slot_clicked(index: int)
 var _slots: Array = []
 
 func _ready() -> void:
-	add_theme_constant_override("separation", SLOT_SPACING)
-
 	for i in range(SLOT_COUNT):
 		var slot = Panel.new()
 
@@ -31,18 +29,34 @@ func _ready() -> void:
 		add_child(slot)
 		_slots.append({"panel": slot, "button": btn})
 
-	get_viewport().size_changed.connect(_resize_slots)
-	_resize_slots()
+func relayout(available_width: float) -> void:
+	var screen      = get_viewport().get_visible_rect().size
+	var short_side  = min(screen.x, screen.y)
+	var is_portrait = screen.y > screen.x
 
-func _resize_slots() -> void:
-	var screen          = get_viewport().get_visible_rect().size
-	var short_side      = min(screen.x, screen.y)
-	var total_spacing   = SLOT_SPACING * (SLOT_COUNT - 1)
-	var slot_size       = floor((screen.x - total_spacing) / SLOT_COUNT)
-	slot_size           = clamp(slot_size, short_side * 0.06, short_side * 0.10)
+	var columns = 5 if is_portrait else 10
+	var rows    = 2 if is_portrait else 1
 
-	for entry in _slots:
-		entry["panel"].custom_minimum_size = Vector2(slot_size, slot_size)
+	var slot_size = floor((available_width - SLOT_SPACING * (columns - 1)) / columns)
+	var min_size  = short_side * (0.08 if is_portrait else 0.06)
+	var max_size  = short_side * (0.14 if is_portrait else 0.10)
+	slot_size     = clamp(slot_size, min_size, max_size)
+
+	for i in range(_slots.size()):
+		var col = i % columns
+		var row = i / columns
+		var slot_panel = _slots[i]["panel"]
+		slot_panel.custom_minimum_size = Vector2(slot_size, slot_size)
+		slot_panel.position = Vector2(
+			col * (slot_size + SLOT_SPACING),
+			row * (slot_size + SLOT_SPACING)
+		)
+		slot_panel.size = Vector2(slot_size, slot_size)
+
+	custom_minimum_size = Vector2(
+		columns * slot_size + (columns - 1) * SLOT_SPACING,
+		rows * slot_size + (rows - 1) * SLOT_SPACING
+	)
 
 func set_slot_icon(index: int, icon: Texture2D) -> void:
 	if index >= 0 and index < _slots.size():

@@ -12,7 +12,7 @@ func _ready() -> void:
 	var screen     = get_viewport().get_visible_rect().size
 	var short_side = min(screen.x, screen.y)
 	var is_portrait = screen.y > screen.x
-	var btn_size   = short_side * (0.10 if is_portrait else 0.13)
+	var btn_size   = short_side * (0.12 if is_portrait else 0.13)
 
 	for child in get_children():
 		if child is Button:
