@@ -1,6 +1,7 @@
 extends Node3D
 
 var _player_controller = null
+var _hud = null
 
 func _ready() -> void:
 	var dungeon_view      = $DungeonView
@@ -19,16 +20,40 @@ func _ready() -> void:
 	dungeon_view.setup(gen)
 	player_controller.setup(dungeon_view, gen)
 
+	# Setup map
+	hud.setup_map(gen)
+
 	_player_controller = player_controller
+	_hud = hud
 
 	# Movement pad signals
 	var pad = hud.movement_pad
-	pad.forward_pressed.connect(player_controller.move_forward)
-	pad.backward_pressed.connect(player_controller.move_backward)
-	pad.turn_left_pressed.connect(player_controller.turn_left)
-	pad.turn_right_pressed.connect(player_controller.turn_right)
-	pad.strafe_left_pressed.connect(player_controller.strafe_left)
-	pad.strafe_right_pressed.connect(player_controller.strafe_right)
+	pad.forward_pressed.connect(_on_move.bind("forward"))
+	pad.backward_pressed.connect(_on_move.bind("backward"))
+	pad.turn_left_pressed.connect(_on_move.bind("turn_left"))
+	pad.turn_right_pressed.connect(_on_move.bind("turn_right"))
+	pad.strafe_left_pressed.connect(_on_move.bind("strafe_left"))
+	pad.strafe_right_pressed.connect(_on_move.bind("strafe_right"))
+
+	# Initial map reveal
+	_update_map()
+
+func _on_move(action: String) -> void:
+	match action:
+		"forward":     _player_controller.move_forward()
+		"backward":    _player_controller.move_backward()
+		"turn_left":   _player_controller.turn_left()
+		"turn_right":  _player_controller.turn_right()
+		"strafe_left": _player_controller.strafe_left()
+		"strafe_right":_player_controller.strafe_right()
+	_update_map()
+
+func _update_map() -> void:
+	if _hud and _player_controller:
+		_hud.update_player_on_map(
+			_player_controller.grid_pos,
+			PlayerController.DIR_VECTORS[_player_controller.facing]
+		)
 
 func _input(event: InputEvent) -> void:
 	if _player_controller == null:
@@ -44,3 +69,4 @@ func _input(event: InputEvent) -> void:
 		KEY_E:           _player_controller.turn_right()
 		KEY_A:           _player_controller.strafe_left()
 		KEY_D:           _player_controller.strafe_right()
+	_update_map()

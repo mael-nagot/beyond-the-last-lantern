@@ -1,16 +1,35 @@
 class_name HUD
 extends CanvasLayer
 
-@onready var hud_root      : Control         = $HUDRoot
-@onready var top_bar       : Control         = $HUDRoot/TopBar
+const UI_MARGIN     = 4.0
+const SCREEN_MARGIN = 4.0
 
-@onready var party_panel   : Control         = $HUDRoot/PartyPanel
-@onready var item_bar      : Control         = $HUDRoot/ItemBar
-@onready var movement_pad  : Control         = $HUDRoot/MovementPad
+@onready var hud_root     : Control       = $HUDRoot
+@onready var top_bar      : Control       = $HUDRoot/TopBar
+@onready var party_panel  : Control       = $HUDRoot/PartyPanel
+@onready var item_bar     : Control       = $HUDRoot/ItemBar
+@onready var movement_pad : Control       = $HUDRoot/MovementPad
+@onready var map_popup    : MapPopup      = $HUDRoot/MapPopup
+
+var map_data: MapData
 
 func _ready() -> void:
 	get_viewport().size_changed.connect(_on_viewport_resized)
 	_apply_layout()
+
+	# Wire map button
+	var btn_map = top_bar.get_node("BtnMap")
+	if btn_map:
+		btn_map.pressed.connect(func(): map_popup.open())
+
+func setup_map(gen: LevelGenerator) -> void:
+	map_data = MapData.new()
+	map_data.setup(gen)
+	map_popup.setup(gen, map_data)
+
+func update_player_on_map(pos: Vector2i, facing: Vector2i) -> void:
+	if map_popup:
+		map_popup.update_player(pos, facing)
 
 func _on_viewport_resized() -> void:
 	_apply_layout()
@@ -23,9 +42,6 @@ func _apply_layout() -> void:
 		_layout_portrait(size)
 	else:
 		_layout_landscape(size)
-
-const UI_MARGIN     = 4.0
-const SCREEN_MARGIN = 4.0
 
 func _layout_landscape(size: Vector2) -> void:
 	var pad_size   = movement_pad.get_minimum_size()

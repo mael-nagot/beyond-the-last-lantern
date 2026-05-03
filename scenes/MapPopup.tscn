@@ -1,0 +1,27 @@
+[gd_scene format=3 uid="uid://ef6u61b7ecu2"]
+
+[ext_resource type="Script" uid="uid://fbs0ypf3kvle" path="res://scripts/MapPopup.gd" id="1_bw7h0"]
+
+[node name="MapPopup" type="Control" unique_id=946535958]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_bw7h0")
+
+[node name="Background" type="ColorRect" parent="." unique_id=1029367139]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="CloseButton" type="Button" parent="." unique_id=1228523048]
+layout_mode = 1
+offset_right = 8.0
+offset_bottom = 8.0
+
+[node name="MapDrawArea" type="Control" parent="." unique_id=838912154]
+anchors_preset = 0
+offset_right = 40.0
+offset_bottom = 40.0

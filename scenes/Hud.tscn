@@ -5,6 +5,7 @@
 [ext_resource type="PackedScene" uid="uid://clcor54gdenm5" path="res://scenes/PartyPanel.tscn" id="2_b0yg8"]
 [ext_resource type="Script" uid="uid://igj1cmd7yb6x" path="res://scripts/ItemBar.gd" id="3_8n4j0"]
 [ext_resource type="PackedScene" uid="uid://b1fv0wj23v1kq" path="res://scenes/MovementPad.tscn" id="4_gfly3"]
+[ext_resource type="PackedScene" uid="uid://ef6u61b7ecu2" path="res://scenes/MapPopup.tscn" id="6_8n4j0"]
 
 [node name="HUD" type="CanvasLayer" unique_id=675997743]
 script = ExtResource("1_b0yg8")
@@ -32,3 +33,6 @@ layout_mode = 0
 
 [node name="PartyPanel" parent="HUDRoot" unique_id=583003364 instance=ExtResource("2_b0yg8")]
 layout_mode = 0
+
+[node name="MapPopup" parent="HUDRoot" unique_id=946535958 instance=ExtResource("6_8n4j0")]
+layout_mode = 1
