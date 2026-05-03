@@ -5,6 +5,10 @@ extends Node3D
 @export var camera_eye_height: float = 1.8
 @export var wall_height: float = 6.3
 @export var biome: BiomeData
+@export var fov_landscape: float = 87.4
+@export var fov_portrait:  float = 105.0
+@export var camera_back_offset_portrait:  float = 0.5
+@export var camera_back_offset_landscape: float = 0.0
 
 const CELL_SIZE = 4.6
 const FACING_ANGLES = {
@@ -15,6 +19,8 @@ const FACING_ANGLES = {
 }
 
 var _current_angle: float = 0.0
+var _current_facing: Vector2i = Vector2i(0, -1)
+var _current_grid_pos: Vector2i = Vector2i.ZERO
 
 @onready var camera      : Camera3D         = $Camera
 @onready var dungeon_root: Node3D           = $DungeonRoot
@@ -27,6 +33,18 @@ func setup(gen: LevelGenerator) -> void:
 	_build_mesh()
 	_place_camera_at_entrance()
 	_apply_biome_environment()
+	update_fov()
+	get_viewport().size_changed.connect(_on_viewport_resized)
+
+func _on_viewport_resized() -> void:
+	update_fov()
+	# Reposition camera with new offset for the new orientation
+	camera.position = _grid_to_world(_current_grid_pos.x, _current_grid_pos.y, _current_facing)
+
+func update_fov() -> void:
+	var screen      = get_viewport().get_visible_rect().size
+	var is_portrait = screen.y > screen.x
+	camera.fov      = fov_portrait if is_portrait else fov_landscape
 
 func _build_mesh() -> void:
 	for child in dungeon_root.get_children():
@@ -131,27 +149,53 @@ func _add_vertical_quad(pos: Vector3, y_rotation: float, mat: StandardMaterial3D
 
 func _place_camera_at_entrance() -> void:
 	var ep = generator.entrance_pos
+	_current_grid_pos = ep
 	camera.position = _grid_to_world(ep.x, ep.y)
 
 func set_initial_facing(facing: Vector2i) -> void:
+	_current_facing           = facing
 	_current_angle            = FACING_ANGLES.get(facing, 0.0)
 	camera.rotation_degrees.y = _current_angle
+	camera.position           = _grid_to_world(_current_grid_pos.x, _current_grid_pos.y, facing)
 
 func move_camera_to(grid_pos: Vector2i, facing: Vector2i) -> void:
-	var target_pos = _grid_to_world(grid_pos.x, grid_pos.y)
-	var tween      = create_tween()
+	_current_grid_pos = grid_pos
+	_current_facing   = facing
+	var target_pos    = _grid_to_world(grid_pos.x, grid_pos.y, facing)
+	var tween         = create_tween()
 	tween.set_parallel(true)
 	tween.tween_property(camera, "position", target_pos, 0.12)
 	tween.tween_property(camera, "rotation_degrees:y", _current_angle, 0.12)
 
-func rotate_camera_to(turn_right: bool) -> void:
-	_current_angle += -90.0 if turn_right else 90.0
-	var tween = create_tween()
+func rotate_camera_to(turn_right: bool, new_facing: Vector2i) -> void:
+	_current_angle  += -90.0 if turn_right else 90.0
+	_current_facing  = new_facing
+	var target_pos   = _grid_to_world(_current_grid_pos.x, _current_grid_pos.y, new_facing)
+	var tween        = create_tween()
+	tween.set_parallel(true)
 	tween.tween_property(camera, "rotation_degrees:y", _current_angle, 0.12)
+	tween.tween_property(camera, "position", target_pos, 0.12)
 
-func _grid_to_world(x: int, y: int) -> Vector3:
-	return Vector3(
+	var screen      = get_viewport().get_visible_rect().size
+	var is_portrait = screen.y > screen.x
+	print("Is portrait: ", is_portrait)
+	print("Back offset: ", camera_back_offset_portrait if is_portrait else camera_back_offset_landscape)
+	print("Facing: ", new_facing)
+	print("Target pos: ", target_pos)
+	print("Grid center: ", Vector3(_current_grid_pos.x * CELL_SIZE + CELL_SIZE * 0.5, camera_eye_height, _current_grid_pos.y * CELL_SIZE + CELL_SIZE * 0.5))
+
+func _grid_to_world(x: int, y: int, facing: Vector2i = Vector2i.ZERO) -> Vector3:
+	var screen      = get_viewport().get_visible_rect().size
+	var is_portrait = screen.y > screen.x
+	var back_offset = camera_back_offset_portrait if is_portrait else camera_back_offset_landscape
+
+	var base = Vector3(
 		x * CELL_SIZE + CELL_SIZE * 0.5,
 		camera_eye_height,
 		y * CELL_SIZE + CELL_SIZE * 0.5
 	)
+
+	if facing != Vector2i.ZERO and back_offset > 0.0:
+		base -= Vector3(facing.x, 0, facing.y) * CELL_SIZE * back_offset
+
+	return base
