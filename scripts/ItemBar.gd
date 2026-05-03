@@ -29,7 +29,7 @@ func _ready() -> void:
 		add_child(slot)
 		_slots.append({"panel": slot, "button": btn})
 
-func relayout(available_width: float) -> void:
+func relayout(available_width: float) -> Vector2:
 	var screen      = get_viewport().get_visible_rect().size
 	var short_side  = min(screen.x, screen.y)
 	var is_portrait = screen.y > screen.x
@@ -53,10 +53,12 @@ func relayout(available_width: float) -> void:
 		)
 		slot_panel.size = Vector2(slot_size, slot_size)
 
-	custom_minimum_size = Vector2(
+	var total_size = Vector2(
 		columns * slot_size + (columns - 1) * SLOT_SPACING,
 		rows * slot_size + (rows - 1) * SLOT_SPACING
 	)
+	custom_minimum_size = total_size
+	return total_size
 
 func set_slot_icon(index: int, icon: Texture2D) -> void:
 	if index >= 0 and index < _slots.size():

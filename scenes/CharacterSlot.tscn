@@ -40,12 +40,15 @@ layout_mode = 2
 
 [node name="BtnAttack" type="Button" parent="ActionButtons" unique_id=1529862801]
 layout_mode = 2
-text = "AT"
+theme_override_font_sizes/font_size = 24
+text = "⚔️"
 
 [node name="BtnSpell" type="Button" parent="ActionButtons" unique_id=2039707114]
 layout_mode = 2
-text = "SP"
+theme_override_font_sizes/font_size = 30
+text = "★"
 
 [node name="BtnDefense" type="Button" parent="ActionButtons" unique_id=1272800528]
 layout_mode = 2
-text = "DF"
+theme_override_font_sizes/font_size = 24
+text = "⛨"
