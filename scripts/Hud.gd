@@ -24,14 +24,15 @@ func _apply_layout() -> void:
 	else:
 		_layout_landscape(size)
 
-const UI_MARGIN = 4.0
+const UI_MARGIN     = 4.0
+const SCREEN_MARGIN = 4.0
 
 func _layout_landscape(size: Vector2) -> void:
 	var pad_size   = movement_pad.get_minimum_size()
 	var party_size = party_panel.get_minimum_size()
 	var top_height = max(top_bar.get_minimum_size().y, 60)
 
-	var item_size  = item_bar.relayout(size.x)
+	var item_size  = item_bar.relayout(size.x - SCREEN_MARGIN * 2)
 
 	var bottom_row  = max(party_size.y, pad_size.y)
 	var total       = bottom_row + item_size.y + UI_MARGIN
@@ -40,34 +41,34 @@ func _layout_landscape(size: Vector2) -> void:
 	var s_item_h    = item_size.y * scale
 	var s_bottom    = bottom_row * scale
 
-	top_bar.position = Vector2(0, 0)
-	top_bar.size     = Vector2(size.x, top_height)
+	top_bar.position = Vector2(SCREEN_MARGIN, SCREEN_MARGIN)
+	top_bar.size     = Vector2(size.x - SCREEN_MARGIN * 2, top_height)
 
-	item_bar.position = Vector2(size.x * 0.5 - item_size.x * 0.5, size.y - s_item_h)
+	item_bar.position = Vector2(size.x * 0.5 - item_size.x * 0.5, size.y - s_item_h - SCREEN_MARGIN)
 	item_bar.size     = item_size
 
-	movement_pad.position = Vector2(size.x - pad_size.x, size.y - s_item_h - UI_MARGIN - s_bottom)
+	movement_pad.position = Vector2(size.x - pad_size.x - SCREEN_MARGIN, size.y - s_item_h - UI_MARGIN - s_bottom - SCREEN_MARGIN)
 	movement_pad.size     = Vector2(pad_size.x, s_bottom)
 
-	party_panel.position = Vector2(0, size.y - s_item_h - UI_MARGIN - party_panel.get_minimum_size().y)
-	party_panel.size     = Vector2(size.x - pad_size.x, party_panel.get_minimum_size().y)
+	party_panel.position = Vector2(SCREEN_MARGIN, size.y - s_item_h - UI_MARGIN - party_panel.get_minimum_size().y - SCREEN_MARGIN)
+	party_panel.size     = Vector2(size.x - pad_size.x - SCREEN_MARGIN * 2, party_panel.get_minimum_size().y)
 
 func _layout_portrait(size: Vector2) -> void:
 	var pad_size   = movement_pad.get_minimum_size()
 	var top_height = max(top_bar.get_minimum_size().y, 60)
 
-	top_bar.position = Vector2(0, 0)
-	top_bar.size     = Vector2(size.x, top_height)
+	top_bar.position = Vector2(SCREEN_MARGIN, SCREEN_MARGIN)
+	top_bar.size     = Vector2(size.x - SCREEN_MARGIN * 2, top_height)
 
-	movement_pad.position = Vector2(size.x - pad_size.x, size.y - pad_size.y)
+	movement_pad.position = Vector2(size.x - pad_size.x - SCREEN_MARGIN, size.y - pad_size.y - SCREEN_MARGIN)
 	movement_pad.size     = pad_size
 
-	var item_width = size.x - pad_size.x
+	var item_width = size.x - pad_size.x - SCREEN_MARGIN * 2
 	var item_size  = item_bar.relayout(item_width)
 
-	item_bar.position = Vector2(0, size.y - pad_size.y)
+	item_bar.position = Vector2(SCREEN_MARGIN, size.y - pad_size.y - SCREEN_MARGIN)
 	item_bar.size     = item_size
 
 	var bottom_height = max(pad_size.y, item_size.y)
-	party_panel.position = Vector2(0, size.y - bottom_height - party_panel.get_minimum_size().y - UI_MARGIN)
-	party_panel.size     = Vector2(size.x, party_panel.get_minimum_size().y)
+	party_panel.position = Vector2(SCREEN_MARGIN, size.y - bottom_height - party_panel.get_minimum_size().y - UI_MARGIN - SCREEN_MARGIN)
+	party_panel.size     = Vector2(size.x - SCREEN_MARGIN * 2, party_panel.get_minimum_size().y)

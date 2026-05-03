@@ -10,26 +10,30 @@ script = ExtResource("1_usdp5")
 
 [node name="BtnTurnLeft" type="Button" parent="." unique_id=104233053]
 layout_mode = 2
-theme_override_font_sizes/font_size = 30
+theme_override_font_sizes/font_size = 40
 text = "↰"
 
 [node name="BtnForward" type="Button" parent="." unique_id=354916510]
 layout_mode = 2
+theme_override_font_sizes/font_size = 26
 text = "▲"
 
 [node name="BtnTurnRight" type="Button" parent="." unique_id=433408336]
 layout_mode = 2
-theme_override_font_sizes/font_size = 30
+theme_override_font_sizes/font_size = 40
 text = "↱"
 
 [node name="BtnStrafeLeft" type="Button" parent="." unique_id=999658459]
 layout_mode = 2
+theme_override_font_sizes/font_size = 26
 text = "◀"
 
 [node name="BtnBackward" type="Button" parent="." unique_id=883361552]
 layout_mode = 2
+theme_override_font_sizes/font_size = 26
 text = "▼"
 
 [node name="BtnStrafeRight" type="Button" parent="." unique_id=1190855420]
 layout_mode = 2
+theme_override_font_sizes/font_size = 26
 text = "▶"
