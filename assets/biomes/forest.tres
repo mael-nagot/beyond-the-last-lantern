@@ -17,5 +17,7 @@ floor_normal = Array[Texture2D]([ExtResource("3_0wobd")])
 ceiling_albedo = Array[Texture2D]([ExtResource("1_bq1p8")])
 ceiling_normal = Array[Texture2D]([ExtResource("3_fvx5y")])
 fog_density = 0.2
+ambient_color = Color(0.85430586, 0.82665706, 0.76737565, 1)
+ambient_energy = 1.8
 triplanar_sharpness = 0.2
 metadata/_custom_type_script = "uid://bentd6twklhjr"

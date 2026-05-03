@@ -35,6 +35,8 @@ func _input(event: InputEvent) -> void:
 		return
 	if not event is InputEventKey or not event.pressed:
 		return
+	if event.is_echo():
+		return
 	match event.keycode:
 		KEY_W, KEY_UP:   _player_controller.move_forward()
 		KEY_S, KEY_DOWN: _player_controller.move_backward()

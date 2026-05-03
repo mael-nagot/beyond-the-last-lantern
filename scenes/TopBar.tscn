@@ -7,11 +7,13 @@ offset_bottom = 40.0
 [node name="BtnSettings" type="Button" parent="." unique_id=1093642928]
 custom_minimum_size = Vector2(64, 64)
 layout_mode = 2
+theme_override_font_sizes/font_size = 25
 text = "⚙"
 
 [node name="BtnMap" type="Button" parent="." unique_id=539833784]
 custom_minimum_size = Vector2(64, 64)
 layout_mode = 2
+theme_override_font_sizes/font_size = 25
 text = "🗺"
 
 [node name="Spacer" type="Control" parent="." unique_id=1643695278]
