@@ -20,13 +20,12 @@ func _ready() -> void:
 	dungeon_view.setup(gen)
 	player_controller.setup(dungeon_view, gen)
 
-	# Setup map
 	hud.setup_map(gen)
+	hud.setup_dungeon_view(dungeon_view)
 
 	_player_controller = player_controller
 	_hud = hud
 
-	# Movement pad signals
 	var pad = hud.movement_pad
 	pad.forward_pressed.connect(_on_move.bind("forward"))
 	pad.backward_pressed.connect(_on_move.bind("backward"))
@@ -35,7 +34,6 @@ func _ready() -> void:
 	pad.strafe_left_pressed.connect(_on_move.bind("strafe_left"))
 	pad.strafe_right_pressed.connect(_on_move.bind("strafe_right"))
 
-	# Initial map reveal
 	_update_map()
 
 func _on_move(action: String) -> void:

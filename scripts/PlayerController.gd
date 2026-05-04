@@ -65,11 +65,11 @@ func strafe_right() -> void:
 
 func turn_left() -> void:
 	facing = _turn_left(facing)
-	_view.rotate_camera_to(false, DIR_VECTORS[facing])
+	_view.rotate_camera_to(false)
 
 func turn_right() -> void:
 	facing = _turn_right(facing)
-	_view.rotate_camera_to(true, DIR_VECTORS[facing])
+	_view.rotate_camera_to(true)
 
 func _step(delta: Vector2i) -> void:
 	var target = grid_pos + delta

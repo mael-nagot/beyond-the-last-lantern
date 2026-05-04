@@ -1,4 +1,4 @@
-[gd_scene format=3 uid="uid://dqdy8hslfxwta"]
+[gd_scene format=3 uid="uid://b8dkajhvqmn22"]
 
 [ext_resource type="Script" uid="uid://b1sapmoe1pp04" path="res://scripts/Game.gd" id="1_aug50"]
 [ext_resource type="PackedScene" uid="uid://rjiab05yloo3" path="res://scenes/DungeonView.tscn" id="2_kiw3p"]
@@ -16,17 +16,26 @@ script = ExtResource("1_aug50")
 
 [node name="DungeonView" parent="." unique_id=1783904942 instance=ExtResource("2_kiw3p")]
 script = ExtResource("3_400sg")
-
-[node name="Camera" type="Camera3D" parent="DungeonView" unique_id=1422391017]
-fov = 87.4
-near = 0.1
+fov = 105.0
 
 [node name="PlayerController" type="Node" parent="DungeonView" unique_id=1804659185]
 script = ExtResource("4_g4kob")
 
-[node name="DungeonRoot" type="Node3D" parent="DungeonView" unique_id=1788726038]
+[node name="SubViewportContainer" type="SubViewportContainer" parent="DungeonView" unique_id=1288211026]
+offset_right = 40.0
+offset_bottom = 40.0
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="DungeonView" unique_id=2119673496]
+[node name="SubViewport" type="SubViewport" parent="DungeonView/SubViewportContainer" unique_id=648298094]
+handle_input_locally = false
+render_target_update_mode = 4
+
+[node name="Camera" type="Camera3D" parent="DungeonView/SubViewportContainer/SubViewport" unique_id=1422391017]
+fov = 87.4
+near = 0.1
+
+[node name="DungeonRoot" type="Node3D" parent="DungeonView/SubViewportContainer/SubViewport" unique_id=1788726038]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="DungeonView/SubViewportContainer/SubViewport" unique_id=2119673496]
 environment = SubResource("Environment_iywne")
 
 [node name="HUD" parent="." unique_id=675997743 instance=ExtResource("5_qy1jj")]

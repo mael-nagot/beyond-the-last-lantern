@@ -32,14 +32,13 @@ func _ready() -> void:
 func relayout(available_width: float) -> Vector2:
 	var screen      = get_viewport().get_visible_rect().size
 	var short_side  = min(screen.x, screen.y)
-	var is_portrait = screen.y > screen.x
 
-	var columns = 5 if is_portrait else 10
-	var rows    = 2 if is_portrait else 1
+	var columns = 5
+	var rows    = 2
 
 	var slot_size = floor((available_width - SLOT_SPACING * (columns - 1)) / columns)
-	var min_size  = short_side * (0.08 if is_portrait else 0.06)
-	var max_size  = short_side * (0.14 if is_portrait else 0.10)
+	var min_size  = short_side * 0.06
+	var max_size  = short_side * 0.12
 	slot_size     = clamp(slot_size, min_size, max_size)
 
 	for i in range(_slots.size()):
