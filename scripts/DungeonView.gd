@@ -3,7 +3,6 @@ extends Node3D
 
 @export var show_ceiling: bool = true
 @export var camera_eye_height: float = 1.8
-@export var camera_pitch_portrait: float = -5.0
 @export var wall_height: float = 6.3
 @export var biome: BiomeData
 @export var fov_landscape: float = 87.4
@@ -39,9 +38,7 @@ func setup(gen: LevelGenerator) -> void:
 
 func _on_viewport_resized() -> void:
 	update_fov()
-	var screen      = get_viewport().get_visible_rect().size
-	var is_portrait = screen.y > screen.x
-	camera.rotation_degrees.x = camera_pitch_portrait if is_portrait else 0.0
+	# Reposition camera with new offset for the new orientation
 	camera.position = _grid_to_world(_current_grid_pos.x, _current_grid_pos.y, _current_facing)
 
 func update_fov() -> void:

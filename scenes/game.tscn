@@ -4,7 +4,6 @@
 [ext_resource type="PackedScene" uid="uid://rjiab05yloo3" path="res://scenes/DungeonView.tscn" id="2_kiw3p"]
 [ext_resource type="Script" uid="uid://8wx4r3ovqbx4" path="res://scripts/DungeonView.gd" id="3_400sg"]
 [ext_resource type="Script" uid="uid://tb2pryd03sv0" path="res://scripts/PlayerController.gd" id="4_g4kob"]
-[ext_resource type="Script" uid="uid://btbo712cqixp0" path="res://scripts/LetterboxBars.gd" id="5_aug50"]
 [ext_resource type="PackedScene" uid="uid://dmwaivy5woho2" path="res://scenes/Hud.tscn" id="5_qy1jj"]
 
 [sub_resource type="Environment" id="Environment_iywne"]
@@ -30,18 +29,4 @@ script = ExtResource("4_g4kob")
 [node name="WorldEnvironment" type="WorldEnvironment" parent="DungeonView" unique_id=2119673496]
 environment = SubResource("Environment_iywne")
 
-[node name="LetterBox" type="CanvasLayer" parent="DungeonView" unique_id=566837847]
-layer = 2
-script = ExtResource("5_aug50")
-top_bar_portrait = 0.15
-
-[node name="TopBar" type="ColorRect" parent="DungeonView/LetterBox" unique_id=54740063]
-offset_right = 40.0
-offset_bottom = 40.0
-
-[node name="BottomBar" type="ColorRect" parent="DungeonView/LetterBox" unique_id=2040804262]
-offset_right = 40.0
-offset_bottom = 40.0
-
 [node name="HUD" parent="." unique_id=675997743 instance=ExtResource("5_qy1jj")]
-layer = 3
