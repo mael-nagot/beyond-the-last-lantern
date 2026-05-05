@@ -123,6 +123,6 @@ Tests for these scripts live in `res://tests/`. See `res://tests/README.md` for 
 
 ### MapPopup.gd
 **Type:** Control (attached to the MapPopup scene root)
-**Purpose:** Full-screen map overlay. Draws the dungeon map using Godot's 2D draw functions on a Control node. Shows explored floor tiles as shaded rectangles, walls as lines, exit as a green diamond, and the player as a blinking red arrow. Handles open/close, blink timer, and layout for portrait/landscape.
+**Purpose:** Full-screen map overlay. Draws the dungeon map using Godot's 2D draw functions on a Control node. Shows explored floor tiles as shaded rectangles, walls as lines, exit as a green diamond, and the player as a blinking red arrow. Handles open/close (with a page-flip-style scale + tilt + fade animation that pairs with the `map_open` / `map_close` SFX), blink timer, and layout for portrait/landscape. Spamming the map button is safe — an in-flight animation is killed and the transform reset before a new one starts.
 **Key exports:** debug_reveal_all (reveals entire map for testing)
 **Key methods:** setup(gen, map_data), open(), close(), update_player(pos, facing)
