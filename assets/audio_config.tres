@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="AudioConfig" format=3 uid="uid://k7si6i16qxar"]
+
+[ext_resource type="AudioStream" uid="uid://dnrcjp1wa8jwt" path="res://assets/sounds/ui/map_close.ogg" id="1_insc8"]
+[ext_resource type="Script" uid="uid://bn48fkgdupdjl" path="res://scripts/AudioConfig.gd" id="1_qdlas"]
+[ext_resource type="AudioStream" uid="uid://bx5t77yir8po3" path="res://assets/sounds/ui/map_open.ogg" id="2_0ltva"]
+[ext_resource type="AudioStream" uid="uid://cwewtshdwgimy" path="res://assets/sounds/ui/negative.ogg" id="3_g11e5"]
+[ext_resource type="AudioStream" uid="uid://cseogysq5flj0" path="res://assets/sounds/movement/turn/turn_01.ogg" id="5_q34ou"]
+[ext_resource type="AudioStream" uid="uid://ij1j8do2472m" path="res://assets/sounds/movement/turn/turn_02.ogg" id="6_pko5a"]
+[ext_resource type="AudioStream" uid="uid://clucqhv3xsi1d" path="res://assets/sounds/movement/wall_bump.ogg" id="7_f7x8s"]
+
+[resource]
+script = ExtResource("1_qdlas")
+map_open_sound = ExtResource("2_0ltva")
+map_close_sound = ExtResource("1_insc8")
+negative_sound = ExtResource("3_g11e5")
+wall_bump_sound = ExtResource("7_f7x8s")
+turn_sounds = Array[AudioStream]([ExtResource("5_q34ou"), ExtResource("6_pko5a")])
+metadata/_custom_type_script = "uid://bn48fkgdupdjl"

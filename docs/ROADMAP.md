@@ -13,6 +13,15 @@
 ### Localization scaffolding ✅
 - See Phase 17 entry below
 
+### Sound effects framework ✅
+- `SoundManager` autoload with 8-player SFX pool + dedicated ambient player (overlap-friendly playback for rapid actions)
+- `AudioConfig.gd` resource holds global UI + player-action sounds (`audio_config.tres`)
+- Sound fields on `ItemData` (`pickup_drop_sound`, `use_sound`) and `BiomeData` (`move_sounds: Array[AudioStream]`)
+- Item sounds are reusable across items by category (e.g. every potion shares `potion_pickup_drop1.ogg`)
+- All trigger points wired: pickup, drop on dungeon, drop on character (use), no-effect rejection, bag-full rejection, move (biome-specific), turn (global rustle), wall bump, map open/close
+- CLAUDE.md mandates SFX for every new player-facing action; `assets/sounds/README.md` documents conventions
+- Per-biome ambient loops + music are deferred to Phase 19
+
 ## Completed Phases
 
 ### Phase 1 — Level Generator ✅
@@ -338,7 +347,13 @@ Future-friendly behaviours:
 
 **Priority: LOW — Pre-release**
 
-1. Sound effects and music per biome
+1. **Audio: ambient + music per biome** (SFX framework already exists — see Cross-Cutting Infrastructure)
+   - Add `ambient_loop: AudioStream` to `BiomeData`
+   - Add `music_track: AudioStream` to `BiomeData`
+   - Hook up via `SoundManager.play_ambient()` (ambient player slot already reserved)
+   - Author / source loops for each biome (forest = birds + wind, dungeon = drips + distant moans, swamp = frogs + bubbles, …)
+   - Crossfade on biome transitions
+   - Volume sliders in Options screen (Master / Music / SFX buses)
 2. Particle effects (dust, leaves, fire, magic)
 3. Screen transitions between levels
 4. Tutorial / first-time player guidance

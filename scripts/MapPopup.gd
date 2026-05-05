@@ -37,9 +37,11 @@ func open() -> void:
 	visible = true
 	_layout()
 	map_draw.queue_redraw()
+	SoundManager.play_map_open()
 
 func close() -> void:
 	visible = false
+	SoundManager.play_map_close()
 
 func update_player(pos: Vector2i, facing: Vector2i) -> void:
 	player_pos    = pos

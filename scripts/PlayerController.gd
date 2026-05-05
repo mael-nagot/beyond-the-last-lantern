@@ -66,10 +66,12 @@ func strafe_right() -> void:
 func turn_left() -> void:
 	facing = _turn_left(facing)
 	_view.rotate_camera_to(false)
+	SoundManager.play_turn()
 
 func turn_right() -> void:
 	facing = _turn_right(facing)
 	_view.rotate_camera_to(true)
+	SoundManager.play_turn()
 
 func _step(delta: Vector2i) -> void:
 	var target = grid_pos + delta
@@ -77,6 +79,9 @@ func _step(delta: Vector2i) -> void:
 	if cell and cell.cell_type != GridCell.CellType.WALL:
 		grid_pos = target
 		_update_camera()
+		SoundManager.play_move()
+	else:
+		SoundManager.play_wall_bump()
 
 func _update_camera() -> void:
 	_view.move_camera_to(grid_pos, DIR_VECTORS[facing])

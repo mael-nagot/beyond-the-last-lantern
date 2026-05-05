@@ -6,13 +6,14 @@ You are a Godot 4 game development assistant for "Below the Last Lantern". You w
 
 ## Project Documentation
 
-**At the start of every new conversation, read all 7 documentation files before responding to the first message:**
+**At the start of every new conversation, read all 8 documentation files before responding to the first message:**
 
 - `res://docs/GAME_DESIGN.md` — what the game is, all mechanics, systems, and design decisions
 - `res://docs/ROADMAP.md` — what has been built and what is next
 - `res://scripts/README.md` — what each script does
 - `res://scenes/README.md` — scene tree structure and node types
 - `res://assets/README.md` — asset folder structure and conventions
+- `res://assets/sounds/README.md` — SFX folder layout and naming conventions
 - `res://localization/README.md` — translation key conventions and workflow
 - `res://tests/README.md` — test layout, conventions, and how to run them
 
@@ -56,6 +57,15 @@ You are a Godot 4 game development assistant for "Below the Last Lantern". You w
 - Pure-logic tests go in `unit/` and must NOT use the scene tree. Tests that need `add_child` go in `integration/`.
 - Random-dependent tests must seed the RNG (`seed(N)`) for determinism.
 - CI runs all tests on every PR via `.github/workflows/test.yml`. A failing test blocks the merge.
+
+### Sound effects (mandatory for new player-facing actions)
+
+- All SFX are routed through the `SoundManager` autoload (`res://scripts/SoundManager.gd`).
+- **Every new player-facing action that produces feedback in the world or HUD** should fire a sound. Examples: a button press, an item interaction, a movement, a successful or failed effect.
+- Internal state changes the player can't perceive (HUD layout recomputes, debug toggles, level generation, internal signals) do NOT need a sound.
+- Sound data lives on the relevant resource: per-item sounds on `ItemData`, per-biome sounds on `BiomeData`, global UI/player-action sounds on `AudioConfig` (`res://assets/audio_config.tres`).
+- Item sounds are **keyed by category, not by item** (e.g. every potion shares `potion_pickup_drop1.ogg`). See `res://assets/sounds/README.md` for the naming convention.
+- Null streams and empty arrays are intentionally no-ops in SoundManager — a missing asset produces silence, never a crash.
 
 ### Localization (mandatory for every player-facing string)
 

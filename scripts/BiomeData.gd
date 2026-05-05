@@ -57,3 +57,10 @@ extends Resource
 @export var floor_loot: Array[LootEntry] = []
 @export var floor_items_min: int = 3
 @export var floor_items_max: int = 8
+
+@export_group("Sound")
+# One sound is picked at random per step (forward/back/strafe). Empty
+# array = silent. Per-biome so forest leaves and dungeon stone differ.
+@export var move_sounds: Array[AudioStream] = []
+# Reserved for Phase 19 — biome ambient / music loops will land here.
+# @export var ambient_loop: AudioStream

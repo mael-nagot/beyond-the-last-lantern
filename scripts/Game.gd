@@ -20,6 +20,12 @@ func _ready() -> void:
 		push_error("Game: failed to load biome resource")
 		return
 
+	var audio_config: AudioConfig = load("res://assets/audio_config.tres")
+	if audio_config == null:
+		push_warning("Game: audio_config.tres not found — sounds will be silent")
+	SoundManager.audio_config = audio_config
+	SoundManager.current_biome = biome
+
 	var gen = LevelGenerator.new()
 	add_child(gen)
 	gen.configure(biome)
@@ -96,6 +102,7 @@ func _on_item_dropped_on_dungeon(slot_index: int, source_instance: ItemInstance)
 	_hud.item_bar.remove_one(slot_index)
 	if _dungeon_view != null:
 		_dungeon_view.rebuild_items()
+	SoundManager.play(source_instance.data.pickup_drop_sound)
 	_update_pickup_prompt()
 
 func _on_move(action: String) -> void:
@@ -135,11 +142,19 @@ func _on_pickup_pressed() -> void:
 	var cell := _current_cell()
 	if cell == null or cell.items.is_empty():
 		return
+	var pickup_sound: AudioStream = null
+	for item in cell.items:
+		if item != null and item.data != null and item.data.pickup_drop_sound != null:
+			pickup_sound = item.data.pickup_drop_sound
+			break
 	var transferred: int = _hud.item_bar.pickup_from(cell)
 	if _dungeon_view != null:
 		_dungeon_view.rebuild_items()
 	if transferred == 0:
 		_hud.pickup_prompt.flash_bar_full()
+		SoundManager.play_negative()
+	else:
+		SoundManager.play(pickup_sound)
 	_update_pickup_prompt()
 
 func _input(event: InputEvent) -> void:
