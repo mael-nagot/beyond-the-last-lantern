@@ -127,6 +127,11 @@ func _build_mesh() -> void:
 				if ncell and ncell.cell_type == GridCell.CellType.WALL:
 					_add_vertical_quad(n[1], n[2], _make_material(biome.wall_albedo, biome.wall_normal))
 
+func rebuild_items() -> void:
+	if _items_root == null:
+		return
+	_build_items()
+
 func _build_items() -> void:
 	for child in _items_root.get_children():
 		child.queue_free()

@@ -15,8 +15,9 @@ Tests for these scripts live in `res://tests/`. See `res://tests/README.md` for 
 
 ### DungeonView.gd
 **Type:** Node3D (attached to the DungeonView scene root)
-**Purpose:** Renders the dungeon in 3D. Builds flat quad meshes (walls, floors, ceilings) from the grid data, applies biome textures with optional triplanar mapping and normal maps, spawns Sprite3D billboards for items piled on floor cells (up to 3 visible per tile, billboard mode FIXED_Y, NEAREST filter, alpha-cut DISCARD), creates an `ItemsRoot` Node3D under the SubViewport at runtime to hold them, manages the camera position and rotation, handles the SubViewport sizing for portrait/landscape orientations, and applies biome environment settings (fog, ambient light).
+**Purpose:** Renders the dungeon in 3D. Builds flat quad meshes (walls, floors, ceilings) from the grid data, applies biome textures with optional triplanar mapping and normal maps, spawns Sprite3D billboards for items piled on floor cells (up to 3 visible per tile, billboard mode FIXED_Y, NEAREST filter, alpha-cut DISCARD), creates an `ItemsRoot` Node3D under the SubViewport at runtime to hold them, manages the camera position and rotation, handles the SubViewport sizing for portrait/landscape orientations, and applies biome environment settings (fog, ambient light). `rebuild_items()` re-syncs the Sprite3D set from the current grid (used after pickup).
 **Key exports:** show_ceiling, camera_eye_height, wall_height, biome, fov, viewport_ratio_portrait, viewport_ratio_landscape
+**Key methods:** setup(gen), rebuild_items(), move_camera_to(grid_pos, facing), rotate_camera_to(turn_right), set_initial_facing(facing)
 
 ### PlayerController.gd
 **Type:** Node (attached to the PlayerController node inside DungeonView)
@@ -50,7 +51,8 @@ Tests for these scripts live in `res://tests/`. See `res://tests/README.md` for 
 
 ### Game.gd
 **Type:** Node3D (attached to the Game scene root)
-**Purpose:** Main game orchestrator. Loads the biome resource, creates the LevelGenerator (configured from the biome), initializes DungeonView and PlayerController, wires HUD signals (movement pad, map), and routes keyboard input to the PlayerController. Handles map updates on every player movement.
+**Purpose:** Main game orchestrator. Loads the biome resource, creates the LevelGenerator (configured from the biome), initializes DungeonView and PlayerController, wires HUD signals (movement pad, map, pickup prompt), and routes keyboard input to the PlayerController. Handles map updates and pickup-prompt updates on every player movement. Handles pickup actions (drains items from the current cell into the item bar, rebuilds dungeon Sprite3Ds, flashes "bag full" if nothing fit).
+**Inputs:** WASD/arrows + Q/E for movement; F to pick up items on the current tile.
 **Debug keys:** F1 spawns a Health Potion into the item bar (loads `res://assets/items/health_potion.tres`).
 
 ---
@@ -59,14 +61,15 @@ Tests for these scripts live in `res://tests/`. See `res://tests/README.md` for 
 
 ### HUD.gd
 **Type:** CanvasLayer (attached to the HUD scene root)
-**Purpose:** Master layout controller for all UI elements. Detects portrait vs landscape orientation and positions all UI panels accordingly. Calculates safe viewport ratios for tablets (reduces DungeonView size if UI doesn't fit). Applies UI scaling when the viewport ratio hits minimum. Wires the map button. Provides setup_dungeon_view() and setup_map() for initialization.
+**Purpose:** Master layout controller for all UI elements. Detects portrait vs landscape orientation and positions all UI panels accordingly (top bar, party panel, item bar, movement pad, pickup prompt). Calculates safe viewport ratios for tablets (reduces DungeonView size if UI doesn't fit). Applies UI scaling when the viewport ratio hits minimum. Creates the `PickupPrompt` programmatically as a child of HUDRoot and positions it centered horizontally near the bottom of the dungeon view area. Wires the map button. Provides setup_dungeon_view() and setup_map() for initialization.
 **Key exports:** viewport_ratio_portrait, viewport_ratio_landscape, min_viewport_ratio
+**Public references:** item_bar, movement_pad, pickup_prompt, map_popup
 
 ### ItemBar.gd
 **Type:** Container (attached to the ItemBar node)
-**Purpose:** Manages 10 inventory slots displayed as a grid AND owns the player's item-bar inventory model (`Array[ItemInstance]` of size 10). Creates slot panels with styled borders + icon button + stack-count label programmatically. Relayouts as 5×2 grid depending on orientation. Slot sizes scale relative to screen dimensions. `add_item(instance)` auto-stacks onto compatible existing stacks then fills empty slots, returning any leftover that didn't fit.
+**Purpose:** Manages 10 inventory slots displayed as a grid AND owns the player's item-bar inventory model (`Array[ItemInstance]` of size 10). Creates slot panels with styled borders + icon button + stack-count label programmatically. Relayouts as 5×2 grid depending on orientation. Slot sizes scale relative to screen dimensions. `add_item(instance)` auto-stacks onto compatible existing stacks then fills empty slots, returning any leftover that didn't fit. `pickup_from(cell)` drains every stack from a `GridCell` into the bar, leaving any leftover stacks on the cell.
 **Key signals:** slot_clicked(index), inventory_changed
-**Key methods:** add_item(instance) → leftover ItemInstance, get_slot(index), set_slot(index, instance), clear_slot(index), remove_one(index), relayout(available_width) → Vector2
+**Key methods:** add_item(instance) → leftover ItemInstance, pickup_from(cell) → int (total individual items transferred — `0` distinguishes "nothing fit" from a partial pickup), get_slot(index), set_slot(index, instance), clear_slot(index), remove_one(index), relayout(available_width) → Vector2
 
 ### PartyPanel.gd
 **Type:** HBoxContainer (attached to the PartyPanel node)
@@ -80,6 +83,11 @@ Tests for these scripts live in `res://tests/`. See `res://tests/README.md` for 
 ### MovementPad.gd
 **Type:** GridContainer (attached to the MovementPad node, columns=3)
 **Purpose:** 6 directional buttons arranged in a 2×3 grid. Button sizes scale relative to screen short side. Emits signals: forward_pressed, backward_pressed, turn_left_pressed, turn_right_pressed, strafe_left_pressed, strafe_right_pressed.
+
+### PickupPrompt.gd
+**Type:** Button (created programmatically by `Hud.gd` as a child of HUDRoot)
+**Purpose:** Floating "Pick up (N)" button that appears when the player stands on a tile with items. `set_count(n)` updates the visible count and shows/hides the button. `flash_bar_full()` temporarily replaces the label with the localized "bag full" message for ~1.5 s when a pickup attempt fails because the inventory is full. Text is built from the `ui.pickup.prompt` and `ui.pickup.bar_full` translation keys.
+**Key methods:** set_count(count: int), flash_bar_full()
 
 ### MapPopup.gd
 **Type:** Control (attached to the MapPopup scene root)
