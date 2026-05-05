@@ -33,15 +33,59 @@ func setup(gen: LevelGenerator, data: MapData) -> void:
 	if debug_reveal_all:
 		map_data.reveal_all()
 
+const ANIM_DURATION   := 0.32
+const OPEN_TILT_DEG   := -1.5
+const COLLAPSED_SCALE := Vector2(0.05, 1.0)
+
+var _anim_tween: Tween = null
+
 func open() -> void:
+	if _anim_tween != null and _anim_tween.is_running():
+		_anim_tween.kill()
 	visible = true
 	_layout()
 	map_draw.queue_redraw()
 	SoundManager.play_map_open()
+	_play_open_animation()
 
 func close() -> void:
-	visible = false
+	if _anim_tween != null and _anim_tween.is_running():
+		_anim_tween.kill()
 	SoundManager.play_map_close()
+	_play_close_animation()
+
+func _play_open_animation() -> void:
+	# Anchor the page at the top-left so the unfurl reads as a left
+	# spine flipping the right-hand page open.
+	pivot_offset = Vector2.ZERO
+	scale = COLLAPSED_SCALE
+	rotation = deg_to_rad(OPEN_TILT_DEG)
+	modulate.a = 0.0
+	_anim_tween = create_tween().set_parallel(true)
+	_anim_tween.tween_property(self, "scale", Vector2.ONE, ANIM_DURATION) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_anim_tween.tween_property(self, "rotation", 0.0, ANIM_DURATION) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_anim_tween.tween_property(self, "modulate:a", 1.0, ANIM_DURATION * 0.5)
+
+func _play_close_animation() -> void:
+	pivot_offset = Vector2.ZERO
+	var d := ANIM_DURATION * 0.7
+	_anim_tween = create_tween().set_parallel(true)
+	_anim_tween.tween_property(self, "scale", COLLAPSED_SCALE, d) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	_anim_tween.tween_property(self, "rotation", deg_to_rad(OPEN_TILT_DEG), d) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	_anim_tween.tween_property(self, "modulate:a", 0.0, d)
+	_anim_tween.chain().tween_callback(_finish_close)
+
+func _finish_close() -> void:
+	visible = false
+	# Restore identity transform so the next open() starts cleanly even
+	# if the close animation was killed mid-flight.
+	scale = Vector2.ONE
+	rotation = 0.0
+	modulate.a = 1.0
 
 func update_player(pos: Vector2i, facing: Vector2i) -> void:
 	player_pos    = pos
