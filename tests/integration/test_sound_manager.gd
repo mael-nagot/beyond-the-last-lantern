@@ -51,7 +51,8 @@ func test_play_with_null_stream_is_noop() -> void:
 
 func test_play_random_with_empty_array_is_noop() -> void:
 	var m := _make_manager()
-	m.play_random([])
+	var empty: Array[AudioStream] = []
+	m.play_random(empty)
 	assert_eq(m._next_player_index, 0)
 
 func test_play_ambient_with_null_stops_ambient() -> void:
