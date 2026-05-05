@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ItemData" format=3 uid="uid://dltjjt1nys4br"]
+
+[ext_resource type="Texture2D" uid="uid://bi1jyd6olfh1w" path="res://assets/textures/items/sprites/health_potion.png" id="1_1vvir"]
+[ext_resource type="Script" uid="uid://c8e2tmtuuuypx" path="res://scripts/ItemData.gd" id="1_nm3t4"]
+[ext_resource type="Texture2D" uid="uid://bf05p37x838ru" path="res://assets/textures/items/icons/health_potion.png" id="2_fmcrx"]
+
+[resource]
+script = ExtResource("1_nm3t4")
+item_name = "Health Potion"
+description = "Restores 30 HP."
+effect_type = 1
+effect_value = 30
+icon = ExtResource("2_fmcrx")
+dungeon_sprite = ExtResource("1_1vvir")
+buy_price = 50
+sell_price = 25
+metadata/_custom_type_script = "uid://c8e2tmtuuuypx"
