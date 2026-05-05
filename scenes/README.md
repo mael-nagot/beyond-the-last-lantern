@@ -103,11 +103,11 @@ TopBar                        (HBoxContainer)
 
 ## CharacterSlot.tscn — Single Character Display
 
-**Root node:** `CharacterSlot` (HBoxContainer)
+**Root node:** `CharacterSlot` (BoxContainer)
 **Script:** `CharacterSlot.gd`
 
 ```
-CharacterSlot                 (HBoxContainer, CharacterSlot.gd)
+CharacterSlot                 (BoxContainer, CharacterSlot.gd)
 ├── LeftSide                  (VBoxContainer)
 │   ├── PortraitFrame         (Panel, 68×68)
 │   │   └── Portrait          (TextureButton, 64×64)

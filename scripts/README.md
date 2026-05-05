@@ -54,7 +54,7 @@
 **Purpose:** Holds references to the 3 CharacterSlot instances. Provides get_slot(index) to access individual character slots.
 
 ### CharacterSlot.gd
-**Type:** HBoxContainer (attached to each CharacterSlot scene root)
+**Type:** BoxContainer (attached to each CharacterSlot scene root)
 **Purpose:** Displays one party member's info: portrait (in a bordered frame), HP bar (green), MP bar (blue), name label, and 3 action buttons (Attack ⚔, Spell ✦, Defense 🛡). All sizes scale relative to screen dimensions with portrait/landscape adjustments. Emits signals for portrait_clicked, attack_pressed, spell_pressed, defense_pressed.
 **Key methods:** set_hp(current, max), set_mp(current, max), set_portrait(texture), set_character_name(name)
 
