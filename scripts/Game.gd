@@ -79,6 +79,107 @@ func _setup_party() -> void:
 func _wire_drop_targets() -> void:
 	if _dungeon_view != null and _dungeon_view.drop_target != null:
 		_dungeon_view.drop_target.item_dropped.connect(_on_item_dropped_on_dungeon)
+		_dungeon_view.drop_target.object_clicked.connect(_on_object_clicked)
+	if _hud != null and _hud.loot_popup != null:
+		_hud.loot_popup.item_taken.connect(_on_loot_item_taken)
+		_hud.loot_popup.take_all_requested.connect(_on_loot_take_all)
+		_hud.loot_popup.close_requested.connect(_on_loot_close)
+
+# -------------------------------------------------------
+# Chest interaction
+# -------------------------------------------------------
+
+func _on_object_clicked(instance: ObjectInstance, _grid_pos: Vector2i) -> void:
+	if instance == null or instance.data == null:
+		return
+	if instance.is_chest():
+		_open_chest(instance)
+
+func _open_chest(instance: ObjectInstance) -> void:
+	if not instance.opened:
+		_roll_chest_loot(instance)
+		instance.opened = true
+		SoundManager.play(instance.data.interact_sound)
+		if _dungeon_view != null:
+			_dungeon_view.rebuild_objects()
+	if instance.has_remaining_loot():
+		if _hud != null and _hud.loot_popup != null:
+			_hud.loot_popup.open(instance)
+
+func _roll_chest_loot(instance: ObjectInstance) -> void:
+	var table: LootTable = instance.loot_table
+	if table == null or table.entries.is_empty():
+		return
+	# Local pool — entries flagged allow_duplicates=false are removed
+	# from this pool after they're picked, so they can appear at most
+	# once per chest.
+	var pool: Array = []
+	for entry in table.entries:
+		if entry != null and entry.item != null and entry.weight > 0:
+			pool.append(entry)
+	var count := randi_range(max(0, table.min_rolls), max(table.min_rolls, table.max_rolls))
+	for _i in range(count):
+		if pool.is_empty():
+			break
+		var entry := _pick_weighted_loot_table_entry(pool)
+		if entry == null:
+			continue
+		instance.items.append(ItemInstance.create(entry.item, 1))
+		if not entry.allow_duplicates:
+			pool.erase(entry)
+
+func _pick_weighted_loot_table_entry(pool: Array) -> LootTableEntry:
+	var total := 0
+	for entry in pool:
+		total += max(0, entry.weight)
+	if total <= 0:
+		return null
+	var roll := randi() % total
+	for entry in pool:
+		var w: int = max(0, entry.weight)
+		if roll < w:
+			return entry
+		roll -= w
+	return null
+
+func _on_loot_item_taken(slot_index: int) -> void:
+	if _hud == null or _hud.loot_popup == null or _hud.item_bar == null:
+		return
+	var instance: ObjectInstance = _hud.loot_popup.get_current_instance()
+	if instance == null:
+		return
+	if slot_index < 0 or slot_index >= instance.items.size():
+		return
+	var item: ItemInstance = instance.items[slot_index]
+	var leftover: ItemInstance = _hud.item_bar.add_item(item)
+	if leftover == null:
+		instance.items.remove_at(slot_index)
+	# else: same instance with reduced stack stays in chest
+	if instance.items.is_empty():
+		_hud.loot_popup.close()
+	else:
+		_hud.loot_popup.refresh()
+
+func _on_loot_take_all() -> void:
+	if _hud == null or _hud.loot_popup == null or _hud.item_bar == null:
+		return
+	var instance: ObjectInstance = _hud.loot_popup.get_current_instance()
+	if instance == null:
+		return
+	# would_fit_all has already gated the button — but defend in case of races.
+	var copy: Array = instance.items.duplicate()
+	for item in copy:
+		var leftover: ItemInstance = _hud.item_bar.add_item(item)
+		if leftover == null:
+			instance.items.erase(item)
+	if instance.items.is_empty():
+		_hud.loot_popup.close()
+	else:
+		_hud.loot_popup.refresh()
+
+func _on_loot_close() -> void:
+	if _hud != null and _hud.loot_popup != null:
+		_hud.loot_popup.close()
 
 func _on_item_used_on_character(slot_index: int, _character_index: int) -> void:
 	if _hud == null or _hud.item_bar == null:
@@ -174,12 +275,20 @@ func _input(event: InputEvent) -> void:
 		KEY_F:           _on_pickup_pressed()
 		KEY_F1:          _debug_spawn_health_potion()
 		KEY_F2:          _debug_damage_party()
+		KEY_F3:          _debug_reveal_full_map()
 	_update_map()
 	_update_pickup_prompt()
 
 func _debug_damage_party() -> void:
 	for c in _party:
 		c.damage(10)
+
+func _debug_reveal_full_map() -> void:
+	if _hud == null or _hud.map_data == null:
+		return
+	_hud.map_data.reveal_all()
+	if _hud.map_popup != null:
+		_hud.map_popup.redraw()
 
 func _debug_spawn_health_potion() -> void:
 	if _hud == null or _hud.item_bar == null:

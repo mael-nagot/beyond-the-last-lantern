@@ -6,19 +6,19 @@ Tests for these scripts live in `res://tests/`. See `res://tests/README.md` for 
 
 ### GridCell.gd
 **Type:** Resource (data only, not attached to a node)
-**Purpose:** Represents a single tile in the dungeon grid. Stores the cell type (WALL, FLOOR, ENTRANCE, EXIT), wall flags for each side (north/south/east/west), an optional object id, and an `items` array (`Array[ItemInstance]`) for items piled on this tile. The `is_blocked` property returns true if the cell is a wall.
+**Purpose:** Represents a single tile in the dungeon grid. Stores the cell type (WALL, FLOOR, ENTRANCE, EXIT), wall flags for each side (north/south/east/west), an optional `object: ObjectInstance` (chest, door, etc. — null when empty), and an `items: Array[ItemInstance]` for items piled on this tile. The `is_blocked` property returns true if the cell is a wall OR if it holds an object whose `data.blocks_movement` is true.
 
 ### LevelGenerator.gd
 **Type:** Node
-**Purpose:** Procedurally generates dungeon levels using a Growing Tree maze algorithm. Creates a 2D grid of GridCell resources, carves corridors with configurable wiggle and width variation, optionally places rooms, connects all regions, places entrance/exit points, and (after BFS validation) drops items on floor cells. Items are placed by weighted-rolling each `LootEntry` in the biome's `floor_loot` list and dropping it on a random eligible cell, where eligibility is constrained by the entry's placement flags (corridor/room/dead-end) and excludes entrance/exit. All generation parameters are read from a BiomeData resource via `configure(biome)`.
+**Purpose:** Procedurally generates dungeon levels using a Growing Tree maze algorithm. Creates a 2D grid of GridCell resources, carves corridors with configurable wiggle and width variation, optionally places rooms, connects all regions, places entrance/exit points, places objects (chests etc.), and finally drops items on floor cells. Object placement runs after BFS validation and includes its own per-placement reachability check: each blocking object placed must keep every floor cell reachable from the entrance AND every blocked-but-walkable-adjacent object reachable too — if it doesn't, the object is rolled back and a different cell is tried. Item placement skips cells already occupied by a blocking object. All generation parameters are read from a `BiomeData` resource via `configure(biome)`.
 **Key methods:** configure(biome: BiomeData), generate()
 
 ### DungeonView.gd
 **Type:** Node3D (attached to the DungeonView scene root)
-**Purpose:** Renders the dungeon in 3D. Builds flat quad meshes (walls, floors, ceilings) from the grid data, applies biome textures with optional triplanar mapping and normal maps, spawns Sprite3D billboards for items piled on floor cells (up to 3 visible per tile, billboard mode FIXED_Y, NEAREST filter, alpha-cut DISCARD), creates an `ItemsRoot` Node3D under the SubViewport at runtime to hold them, also creates a transparent `DungeonDropTarget` overlay on top of the SubViewportContainer to accept item drags (with the container itself set to MOUSE_FILTER_IGNORE so it doesn't reject drops first), manages the camera position and rotation, handles the SubViewport sizing for portrait/landscape orientations, and applies biome environment settings (fog, ambient light). `rebuild_items()` re-syncs the Sprite3D set from the current grid (used after pickup or dungeon drop).
+**Purpose:** Renders the dungeon in 3D. Builds flat quad meshes (walls, floors, ceilings) from the grid data, applies biome textures with optional triplanar mapping and normal maps, spawns Sprite3D billboards for items (under `ItemsRoot`) and objects (under `ObjectsRoot`) — each object Sprite3D carries a child `Area3D` with a box collider and metadata pointing back at the `ObjectInstance` so the click-raycast in `DungeonDropTarget` can identify what was clicked. Also creates a transparent `DungeonDropTarget` overlay on top of the SubViewportContainer for drag-drop and click handling (with the container set to MOUSE_FILTER_IGNORE so it doesn't reject input first). Manages camera position/rotation, SubViewport sizing for portrait/landscape, biome environment (fog, ambient). `rebuild_items()` re-syncs item sprites; `rebuild_objects()` re-syncs object sprites (used when a chest opens to swap to its `opened_sprite`). `shake_camera()` is the brief jolt fired on wall bumps.
 **Key exports:** show_ceiling, camera_eye_height, wall_height, biome, fov, viewport_ratio_portrait, viewport_ratio_landscape
 **Public references:** drop_target (DungeonDropTarget)
-**Key methods:** setup(gen), rebuild_items(), move_camera_to(grid_pos, facing), rotate_camera_to(turn_right), set_initial_facing(facing), shake_camera() (brief jolt for wall bumps)
+**Key methods:** setup(gen), rebuild_items(), rebuild_objects(), move_camera_to(grid_pos, facing), rotate_camera_to(turn_right), set_initial_facing(facing), shake_camera()
 
 ### PlayerController.gd
 **Type:** Node (attached to the PlayerController node inside DungeonView)
@@ -61,6 +61,34 @@ Tests for these scripts live in `res://tests/`. See `res://tests/README.md` for 
 **Type:** RefCounted (runtime data, not attached to any node)
 **Purpose:** A live instance of an item — points at an `ItemData` and tracks per-instance state (`stack_count`, `durability`). Stackable items share an instance with `stack_count > 1`; equipment with durability gets one instance per piece. Use `ItemInstance.create(data, count)` to build one. `can_stack_with(other)` checks if two instances can merge.
 
+### ObjectData.gd
+**Type:** Resource (data only, loaded as .tres files in `res://assets/objects/`)
+**Purpose:** Template for an interactable dungeon object — chests, doors, levers, traps, campfires, decorations. Holds the category, blocks_movement flag, closed/opened sprite textures, world height + y-offset + lean-toward-player offset, and interact sound. One `.tres` per object type — multiple chests of the same type share data, only their `ObjectInstance` state differs. **Loot is no longer stored here**; it lives on the per-placement `ObjectSpawn.loot_table` so the same chest visual can hold different contents in different biomes.
+**Key exports:** name_key, description_key, category, blocks_movement, closed_sprite, opened_sprite, world_height, y_offset, lean_toward_player, interact_sound
+**Key methods:** get_display_name(), get_display_description()
+
+### ObjectInstance.gd
+**Type:** RefCounted (runtime data)
+**Purpose:** A placed object's runtime state. Holds the `ObjectData` reference, an `opened: bool` flag (chest been looted, door been opened, etc.), an `items: Array[ItemInstance]` for chest contents (rolled once on first open, persists if popup closes mid-take so the player can come back), and a `loot_table: LootTable` reference set by `LevelGenerator` at placement time (copied from the `ObjectSpawn` that placed this instance).
+**Key methods:** ObjectInstance.create(data), is_chest(), has_remaining_loot()
+
+### ObjectSpawn.gd
+**Type:** Resource (data only, used inside `BiomeData.objects`)
+**Purpose:** One entry in a biome's object pool. Each entry says "spawn this `object` between `count_min` and `count_max` times in cells matching `placement` flags, preferably keeping at least `min_distance_to_other_object` Manhattan tiles from any already-placed object, and (when chest) populate it from `loot_table`". The same `object` (e.g. `chest_wooden.tres`) can appear in multiple `ObjectSpawn` entries with different `loot_table` references — that's how the same chest visual ends up holding different contents per biome. `min_distance_to_other_object` is a *preference* — `LevelGenerator` walks every distance-valid candidate; if all break reachability it relaxes the distance by 1 and tries again down to 0. The reachability check snapshots the entrance-reachable set before placement and only fails if a candidate would shrink that set, so pre-existing isolated regions don't get blamed on the chest. `placement` flags are honoured strictly. Defaults: 1–1 of the object, placement = `Room | Dead End`, no minimum distance, no loot table.
+**Key exports:** object, count_min, count_max, placement, min_distance_to_other_object, loot_table
+**Key constants:** PLACEMENT_CORRIDOR / PLACEMENT_ROOM / PLACEMENT_DEAD_END / PLACEMENT_ANY / PLACEMENT_DEFAULT
+**Key methods:** allows(placement_type)
+
+### LootTable.gd
+**Type:** Resource (data only, loaded as .tres files in `res://assets/loot_tables/`)
+**Purpose:** A reusable bag of weighted items with min/max draw counts. Used for chest contents today; will fit enemy drops and quest rewards in later phases. Each entry is a `LootTableEntry` (item + weight + allow_duplicates flag).
+**Key exports:** min_rolls, max_rolls, entries (Array[LootTableEntry])
+
+### LootTableEntry.gd
+**Type:** Resource (data only, used inside `LootTable.entries`)
+**Purpose:** One row of a loot table — pairs an `ItemData` with a relative `weight` and an `allow_duplicates` flag. When `allow_duplicates` is false, this entry can be picked at most once per loot roll session (a unique sword that should never spawn twice in the same chest); when true (default), the entry stays in the pool after each pick and can stack (multiple health potions in the same chest).
+**Key exports:** item, weight, allow_duplicates
+
 ### Character.gd
 **Type:** RefCounted (runtime data)
 **Purpose:** Minimal party-member state used while we wait for Phase 9's full `CharacterData`. Holds a localized `name_key`, `current_hp/max_hp`, `current_mp/max_mp`, and an `apply_item(data) -> bool` that handles the `HEAL_HP` and `HEAL_MP` effect types and refuses everything else. Emits `changed` whenever HP/MP move so bound UI can refresh.
@@ -72,18 +100,25 @@ Tests for these scripts live in `res://tests/`. See `res://tests/README.md` for 
 
 ### DungeonDropTarget.gd
 **Type:** Control (transparent overlay sized to fill the SubViewportContainer)
-**Purpose:** Catches `ItemSlotButton` drags landing on the dungeon view. Validates the payload then emits `item_dropped(slot_index, instance)`. Game handles the actual cell mutation (drops one item at a time onto the player's current cell, decrements the source bar slot by one).
-**Key signals:** item_dropped(slot_index: int, instance: ItemInstance)
+**Purpose:** Two roles. (1) Catches `ItemSlotButton` drags landing on the dungeon view, validates the payload, then emits `item_dropped(slot_index, instance)` for Game to handle (drops one item onto the player's current cell). (2) On left-click in `_gui_input`, raycasts from the camera through the click position via `PhysicsRayQueryParameters3D` (areas only, not bodies) and, if the ray hits an `Area3D` with `object_instance` metadata, emits `object_clicked(instance, grid_pos)`. The camera reference is set by DungeonView at construction.
+**Public state:** camera (Camera3D — set by DungeonView)
+**Key signals:** item_dropped(slot_index: int, instance: ItemInstance), object_clicked(instance: ObjectInstance, grid_pos: Vector2i)
 
 ### Toast.gd
 **Type:** Label (auto-hiding feedback message)
 **Purpose:** Tiny self-hiding label used for transient HUD feedback (e.g. "No effect" when a drag-drop is rejected). `show_message(translation_key, duration)` sets the localized text, makes it visible, and queues a hide timer.
 
+### LootPopup.gd
+**Type:** Control (full-screen modal, created programmatically by `Hud.gd`)
+**Purpose:** Opens when the player clicks a chest. Shows the chest's remaining `ItemInstance`s as a grid of icon+count slots. Clicking a slot emits `item_taken(slot_index)` (Game transfers that one stack into the bar). The "Take All" button is enabled only when `ItemBar.would_fit_all` returns true, and emits `take_all_requested`. The "✕" button or clicking the dim backdrop emits `close_requested`. Items that don't fit stay in the chest's `instance.items` so the player can come back.
+**Key signals:** item_taken(slot_index: int), take_all_requested, close_requested
+**Key methods:** setup(item_bar), open(instance: ObjectInstance), close(), is_open()
+
 ### Game.gd
 **Type:** Node3D (attached to the Game scene root)
 **Purpose:** Main game orchestrator. Loads the biome resource, creates the LevelGenerator (configured from the biome), initializes DungeonView and PlayerController, builds a 3-character placeholder party and binds them to CharacterSlots, wires HUD signals (movement pad, map, pickup prompt, drag-drop targets), and routes keyboard input to the PlayerController. Handles map updates and pickup-prompt updates on every player movement. Handles pickup actions, character item-use (consumes one stack on success, shows a "No effect" toast on rejection), and dungeon drops (drops one item at a time onto the player's current cell, rebuilds Sprite3Ds, refreshes the pickup prompt).
 **Inputs:** WASD/arrows + Q/E for movement; F to pick up items on the current tile.
-**Debug keys:** F1 spawns a Health Potion into the item bar; F2 damages every party member by 10 HP for testing heal.
+**Debug keys:** F1 spawns a Health Potion into the item bar; F2 damages every party member by 10 HP for testing heal; F3 reveals the entire map.
 
 ---
 
@@ -93,14 +128,14 @@ Tests for these scripts live in `res://tests/`. See `res://tests/README.md` for 
 **Type:** CanvasLayer (attached to the HUD scene root)
 **Purpose:** Master layout controller for all UI elements. Detects portrait vs landscape orientation and positions all UI panels accordingly (top bar, party panel, item bar, movement pad, pickup prompt, toast). Calculates safe viewport ratios for tablets (reduces DungeonView size if UI doesn't fit). Applies UI scaling when the viewport ratio hits minimum. Sets `HUDRoot.mouse_filter = IGNORE` so the dungeon view's drop target overlay (one CanvasLayer below) can receive item drops cleanly. Creates `PickupPrompt` and `Toast` programmatically as children of HUDRoot. Wires the map button. Provides setup_dungeon_view(), setup_map(), and `show_toast(translation_key, duration)` for transient feedback.
 **Key exports:** viewport_ratio_portrait, viewport_ratio_landscape, min_viewport_ratio
-**Public references:** item_bar, movement_pad, pickup_prompt, toast, party_panel, map_popup
+**Public references:** item_bar, movement_pad, pickup_prompt, toast, loot_popup, party_panel, map_popup
 **Key methods:** show_toast(translation_key, duration)
 
 ### ItemBar.gd
 **Type:** Container (attached to the ItemBar node)
 **Purpose:** Manages 10 inventory slots displayed as a grid AND owns the player's item-bar inventory model (`Array[ItemInstance]` of size 10). Creates slot panels with styled borders + icon button + stack-count label programmatically. Relayouts as 5×2 grid depending on orientation. Slot sizes scale relative to screen dimensions. `add_item(instance)` auto-stacks onto compatible existing stacks then fills empty slots, returning any leftover that didn't fit. `pickup_from(cell)` drains every stack from a `GridCell` into the bar, leaving any leftover stacks on the cell.
 **Key signals:** slot_clicked(index), inventory_changed
-**Key methods:** add_item(instance) → leftover ItemInstance, pickup_from(cell) → int (total individual items transferred — `0` distinguishes "nothing fit" from a partial pickup), get_slot(index), set_slot(index, instance), clear_slot(index), remove_one(index), relayout(available_width) → Vector2
+**Key methods:** add_item(instance) → leftover ItemInstance, pickup_from(cell) → int (total individual items transferred — `0` distinguishes "nothing fit" from a partial pickup), would_fit_all(items) → bool (dry-run for "Take All"), get_slot(index), set_slot(index, instance), clear_slot(index), remove_one(index), relayout(available_width) → Vector2
 
 ### PartyPanel.gd
 **Type:** HBoxContainer (attached to the PartyPanel node)
@@ -123,6 +158,7 @@ Tests for these scripts live in `res://tests/`. See `res://tests/README.md` for 
 
 ### MapPopup.gd
 **Type:** Control (attached to the MapPopup scene root)
-**Purpose:** Full-screen map overlay. Draws the dungeon map using Godot's 2D draw functions on a Control node. Shows explored floor tiles as shaded rectangles, walls as lines, exit as a green diamond, and the player as a blinking red arrow. Handles open/close (with a page-flip-style scale + tilt + fade animation that pairs with the `map_open` / `map_close` SFX), blink timer, and layout for portrait/landscape. Spamming the map button is safe — an in-flight animation is killed and the transform reset before a new one starts.
+**Purpose:** Full-screen map overlay. Draws the dungeon map using Godot's 2D draw functions on a Control node. Shows explored floor tiles as shaded rectangles, walls as lines, the exit as a green diamond, the player as a blinking red arrow, and any explored objects as markers (chests = brown filled square; opened chests = outline-only so already-looted ones are visually distinct). Handles open/close (with a page-flip-style scale + tilt + fade animation that pairs with the `map_open` / `map_close` SFX), blink timer, and layout for portrait/landscape. Spamming the map button is safe — an in-flight animation is killed and the transform reset before a new one starts.
 **Key exports:** debug_reveal_all (reveals entire map for testing)
+**Key methods:** open(), close(), update_player(pos, facing), redraw() (force a redraw of the map after external state changes — used by F3 debug reveal)
 **Key methods:** setup(gen, map_data), open(), close(), update_player(pos, facing)

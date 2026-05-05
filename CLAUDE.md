@@ -58,6 +58,15 @@ You are a Godot 4 game development assistant for "Below the Last Lantern". You w
 - Random-dependent tests must seed the RNG (`seed(N)`) for determinism.
 - CI runs all tests on every PR via `.github/workflows/test.yml`. A failing test blocks the merge.
 
+### Sprite3D billboards (every new world-rendered visual)
+
+The dungeon is a billboarded-`Sprite3D` world (items, chests, future enemies, decorations, traps). A flat billboard reads as a distant pixel cluster from across a 4.6-unit cell — make every new visual class follow these rules so it looks like it has volume:
+
+- **Add a `lean_toward_player: float` field on the data resource** (default `0.0`). Decorations and small things stay at `0` (centred); anything that should feel like a solid object (chests, larger enemies, big traps, idols) gets a non-zero lean — typically `1.0`–`1.5` — so its sprite shifts off cell-centre toward whichever cardinal side the player is on. The player perceives this as the object having a "front" facing them.
+- **Refresh lean only when the player turns**, not on movement. Mid-step position snaps look glitchy. The canonical wiring lives in `DungeonView._object_position` / `_refresh_object_positions`, called from `rotate_camera_to` and `set_initial_facing` only — copy this pattern for new visual classes (enemies will likely want it for their own reasons too).
+- **Lean axis follows the player's facing direction.** Strafing one tile sideways doesn't switch the lean axis; only turning does. See `_object_position` for the rule.
+- **Pixel size is decoupled from texture size.** Use `pixel_size = world_height / texture_height` so designers control real-world sprite size via a `world_height: float` on the data resource (along with a `y_offset` for transparent-padding compensation). Match the pattern from `ItemData.dungeon_sprite_world_height` / `ObjectData.world_height`.
+
 ### Sound effects (mandatory for new player-facing actions)
 
 - All SFX are routed through the `SoundManager` autoload (`res://scripts/SoundManager.gd`).

@@ -58,6 +58,12 @@ extends Resource
 @export var floor_items_min: int = 3
 @export var floor_items_max: int = 8
 
+@export_group("Level Generation — Objects")
+# Each ObjectSpawn entry has its own count_min/count_max so a biome can
+# specify e.g. "1-3 wooden chests AND 0-1 iron chests". Placement (room
+# / corridor / dead-end) is per-entry too.
+@export var objects: Array[ObjectSpawn] = []
+
 @export_group("Sound")
 # One sound is picked at random per step (forward/back/strafe). Empty
 # array = silent. Per-biome so forest leaves and dungeon stone differ.

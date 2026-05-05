@@ -117,6 +117,53 @@ func remove_one(index: int) -> ItemInstance:
 	inventory_changed.emit()
 	return inst
 
+# Dry-run check: does the bar have enough capacity to swallow every
+# instance in `items` (counting auto-stacking onto existing matching
+# stacks, then empty slots)? Used by LootPopup to decide whether the
+# "Take All" button is enabled.
+func would_fit_all(items: Array[ItemInstance]) -> bool:
+	# Build a simulated inventory: each entry is null or {data, count}.
+	var sim: Array = []
+	for inst in _inventory:
+		if inst != null and inst.data != null:
+			sim.append({"data": inst.data, "count": inst.stack_count})
+		else:
+			sim.append(null)
+
+	for item in items:
+		if item == null or item.data == null:
+			continue
+		var remaining: int = item.stack_count
+		# First, try to merge onto matching stackable slots.
+		if item.data.stackable:
+			for i in range(sim.size()):
+				if remaining <= 0:
+					break
+				var s = sim[i]
+				if s == null or s["data"] != item.data:
+					continue
+				var room: int = item.data.stack_max - s["count"]
+				if room <= 0:
+					continue
+				var moved: int = min(room, remaining)
+				s["count"] += moved
+				remaining -= moved
+		# Then drop the rest into empty slots.
+		while remaining > 0:
+			var placed := false
+			for i in range(sim.size()):
+				if sim[i] == null:
+					var take: int = remaining
+					if item.data.stackable and item.data.stack_max > 0:
+						take = min(remaining, item.data.stack_max)
+					sim[i] = {"data": item.data, "count": take}
+					remaining -= take
+					placed = true
+					break
+			if not placed:
+				return false
+	return true
+
 # Drains every stack from the cell into the bar. Stacks (or partial
 # stacks) that don't fit remain on the cell. Returns the total number
 # of individual items moved (summing stack counts), so the caller can

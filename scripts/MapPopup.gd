@@ -170,6 +170,12 @@ func _on_map_draw() -> void:
 			if _has_wall(x + 1, y):
 				map_draw.draw_line(rect_pos + Vector2(cell_size, 0), rect_pos + Vector2(cell_size, cell_size), wall_color, line_width)
 
+			# Draw object marker (chest, etc.) — small filled square in
+			# the cell's centre. Opened chests render as an outline so
+			# the player can tell what's already been looted.
+			if cell.object != null and cell.object.data != null:
+				_draw_object_marker(rect_pos, rect_size, cell_size, cell.object)
+
 			# Draw exit — diamond shape
 			if cell.cell_type == GridCell.CellType.EXIT:
 				var center = rect_pos + rect_size * 0.5
@@ -208,6 +214,34 @@ func _draw_player_arrow(center: Vector2, facing: Vector2i, arrow_size: float, co
 
 	var arrow = PackedVector2Array([tip, left, right])
 	map_draw.draw_colored_polygon(arrow, color)
+
+func _draw_object_marker(rect_pos: Vector2, rect_size: Vector2, cell_size: float, instance: ObjectInstance) -> void:
+	var data: ObjectData = instance.data
+	var center := rect_pos + rect_size * 0.5
+	var marker_size: float = cell_size * 0.55
+	var marker_rect := Rect2(center - Vector2(marker_size, marker_size) * 0.5,
+		Vector2(marker_size, marker_size))
+	var color: Color
+	match data.category:
+		ObjectData.Category.CHEST:
+			color = Color(0.55, 0.30, 0.10)  # warm wood-brown
+		_:
+			color = Color(0.5, 0.5, 0.5)
+	if instance.opened:
+		# Outline only — visually marks "already looted".
+		var w: float = max(cell_size * 0.08, 1.0)
+		map_draw.draw_rect(marker_rect, color, false, w)
+	else:
+		map_draw.draw_rect(marker_rect, color)
+		# A thin darker outline so the marker reads against the
+		# parchment background even at small zoom.
+		var border := Color(color.r * 0.6, color.g * 0.6, color.b * 0.6)
+		var w: float = max(cell_size * 0.06, 1.0)
+		map_draw.draw_rect(marker_rect, border, false, w)
+
+func redraw() -> void:
+	if map_draw != null:
+		map_draw.queue_redraw()
 
 func _has_wall(x: int, y: int) -> bool:
 	var cell = generator.get_cell(x, y)

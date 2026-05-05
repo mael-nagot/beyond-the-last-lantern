@@ -225,3 +225,61 @@ func test_pickup_from_empty_cell_is_noop() -> void:
 func test_pickup_from_null_cell_returns_zero() -> void:
 	var bar := _make_bar()
 	assert_eq(bar.pickup_from(null), 0)
+
+# -------------------------------------------------------
+# would_fit_all (dry-run for LootPopup's "Take All" button)
+# -------------------------------------------------------
+
+func test_would_fit_all_true_for_empty_bar() -> void:
+	var bar := _make_bar()
+	var data := _make_data()
+	var items: Array[ItemInstance] = [
+		ItemInstance.create(data, 3),
+		ItemInstance.create(data, 5),
+	]
+	assert_true(bar.would_fit_all(items))
+
+func test_would_fit_all_false_when_no_room_at_all() -> void:
+	var bar := _make_bar()
+	var blocker := _make_data(false)
+	for i in range(ItemBar.SLOT_COUNT):
+		bar.set_slot(i, ItemInstance.create(blocker, 1))
+	var data := _make_data()
+	var items: Array[ItemInstance] = [ItemInstance.create(data, 1)]
+	assert_false(bar.would_fit_all(items))
+
+func test_would_fit_all_true_when_existing_stack_has_room() -> void:
+	var bar := _make_bar()
+	var data := _make_data(true, 9)
+	bar.set_slot(0, ItemInstance.create(data, 7))
+	var blocker := _make_data(false)
+	for i in range(1, ItemBar.SLOT_COUNT):
+		bar.set_slot(i, ItemInstance.create(blocker, 1))
+	# Bar's only capacity is the 2 remaining slots in slot 0.
+	var items: Array[ItemInstance] = [ItemInstance.create(data, 2)]
+	assert_true(bar.would_fit_all(items))
+
+func test_would_fit_all_false_when_partial_fits_only() -> void:
+	var bar := _make_bar()
+	var data := _make_data(true, 9)
+	bar.set_slot(0, ItemInstance.create(data, 7))
+	var blocker := _make_data(false)
+	for i in range(1, ItemBar.SLOT_COUNT):
+		bar.set_slot(i, ItemInstance.create(blocker, 1))
+	# Only 2 of stackable can merge; 5 has no empty slot to land in.
+	var items: Array[ItemInstance] = [ItemInstance.create(data, 5)]
+	assert_false(bar.would_fit_all(items))
+
+func test_would_fit_all_does_not_mutate_inventory() -> void:
+	var bar := _make_bar()
+	var data := _make_data()
+	bar.set_slot(0, ItemInstance.create(data, 4))
+	var items: Array[ItemInstance] = [ItemInstance.create(data, 3)]
+	bar.would_fit_all(items)
+	assert_eq(bar.get_slot(0).stack_count, 4)
+	assert_eq(items[0].stack_count, 3)
+
+func test_would_fit_all_true_for_empty_input() -> void:
+	var bar := _make_bar()
+	var items: Array[ItemInstance] = []
+	assert_true(bar.would_fit_all(items))
