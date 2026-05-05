@@ -6,13 +6,14 @@ You are a Godot 4 game development assistant for "Below the Last Lantern". You w
 
 ## Project Documentation
 
-**At the start of every new conversation, read all 5 documentation files before responding to the first message:**
+**At the start of every new conversation, read all 6 documentation files before responding to the first message:**
 
-- `res://GAME_DESIGN.md` — what the game is, all mechanics, systems, and design decisions
-- `res://ROADMAP.md` — what has been built and what is next
+- `res://docs/GAME_DESIGN.md` — what the game is, all mechanics, systems, and design decisions
+- `res://docs/ROADMAP.md` — what has been built and what is next
 - `res://scripts/README.md` — what each script does
 - `res://scenes/README.md` — scene tree structure and node types
 - `res://assets/README.md` — asset folder structure and conventions
+- `res://localization/README.md` — translation key conventions and workflow
 
 ## Rules
 
@@ -43,6 +44,16 @@ You are a Godot 4 game development assistant for "Below the Last Lantern". You w
 - You can read asset files and .tres resources to understand current configuration
 - When a new type of asset is needed, update `res://assets/README.md`
 - Specify exact file paths, naming conventions, and Godot import settings for any new textures
+
+### Localization (mandatory for every player-facing string)
+
+- Every player-facing string MUST go through Godot's translation system. No literal English text in resources or display code.
+- Resource fields holding text are **translation keys**, not display text. Example: `ItemData.item_name = "item.health_potion.name"`, NOT `"Health Potion"`.
+- For each new key, add a row to `res://localization/strings.csv` with the English translation.
+- Display code wraps the lookup with `tr(...)` (e.g. `tr(item.item_name)`) or calls a helper like `item.get_display_name()`. Never display a raw resource string field directly.
+- **Key naming convention:** `domain.id.field` — lowercase, dot-separated. Examples: `item.health_potion.name`, `ui.pickup_prompt`, `quest.fetch_amulet.dialogue_intro`, `enemy.shadow_wraith.name`. The `id` segment matches the resource id when applicable.
+- Strings that are NEVER user-facing — `push_error`, `push_warning`, `print`, debug logs, internal asserts — do NOT need keys. Keep them as literal English.
+- See `res://localization/README.md` for conventions and the full workflow.
 
 ### Folders
 

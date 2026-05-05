@@ -6,8 +6,8 @@
 
 [resource]
 script = ExtResource("1_nm3t4")
-item_name = "Health Potion"
-description = "Restores 30 HP."
+item_name = "item.health_potion.name"
+description = "item.health_potion.description"
 effect_type = 1
 effect_value = 30
 icon = ExtResource("2_fmcrx")

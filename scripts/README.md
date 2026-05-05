@@ -38,8 +38,9 @@
 
 ### ItemData.gd
 **Type:** Resource (data only, loaded as .tres files)
-**Purpose:** Template for an item type (e.g. "Health Potion"). Defines name, description, category enum (CONSUMABLE, EQUIPMENT, THROWABLE, QUEST), effect type/value/duration, stacking rules, art (icon for UI + dungeon sprite for Sprite3D + world height + y offset), and economy (buy/sell prices). `dungeon_sprite_world_height` controls the sprite's size in world units (independent of texture pixel dimensions); `dungeon_sprite_y_offset` nudges it vertically to compensate for transparent padding in the texture. One `.tres` file per item lives in `res://assets/items/`.
+**Purpose:** Template for an item type (e.g. "Health Potion"). Defines name, description, category enum (CONSUMABLE, EQUIPMENT, THROWABLE, QUEST), effect type/value/duration, stacking rules, art (icon for UI + dungeon sprite for Sprite3D + world height + y offset), and economy (buy/sell prices). `dungeon_sprite_world_height` controls the sprite's size in world units (independent of texture pixel dimensions); `dungeon_sprite_y_offset` nudges it vertically to compensate for transparent padding in the texture. **`item_name` and `description` are translation keys** (e.g. `item.health_potion.name`), not literal display text — see `res://localization/`. Use `get_display_name()` / `get_display_description()` to fetch the translated text. One `.tres` file per item lives in `res://assets/items/`.
 **Key exports:** item_name, description, category, effect_type, effect_value, effect_duration, stackable, stack_max, icon, dungeon_sprite, dungeon_sprite_world_height, dungeon_sprite_y_offset, buy_price, sell_price
+**Key methods:** get_display_name() → translated name, get_display_description() → translated description
 
 ### ItemInstance.gd
 **Type:** RefCounted (runtime data, not attached to any node)

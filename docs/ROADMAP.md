@@ -262,11 +262,20 @@ Split into 4 incremental tasks; some sub-points depend on later phases (drag-to-
 
 **Priority: MEDIUM — Required for international release**
 
-1. Set up Godot TranslationServer with CSV-based translation files
-2. Create translation keys for all UI text, item names, quest dialogue, NPC dialogue
+#### Scaffolding (done early, alongside Phase 7) ✅
+- ✅ `res://localization/strings.csv` — single-source CSV with `keys,en` columns
+- ✅ `res://localization/README.md` — conventions doc
+- ✅ Convention: resource text fields hold translation keys (e.g. `item.health_potion.name`), not literal English
+- ✅ `ItemData.get_display_name()` / `get_display_description()` helpers wrap `tr()`
+- ✅ Existing strings (health_potion name + description) migrated to keys
+- ✅ CLAUDE.md mandates localization for every new player-facing string
+
+#### Full Phase 17 (later)
+1. ~~Set up Godot TranslationServer with CSV-based translation files~~ (done in scaffolding)
+2. ~~Create translation keys for all UI text, item names, quest dialogue, NPC dialogue~~ (ongoing — every new string follows the convention)
 3. Implement language switching at runtime (options screen)
 4. **Supported languages:**
-   - English (base language)
+   - English (base language) ✅
    - French
    - Spanish
    - Chinese (Simplified)
