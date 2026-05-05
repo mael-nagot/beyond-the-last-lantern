@@ -14,6 +14,9 @@ var width_change_chance: float = 0.15
 var room_count: int = 6
 var room_min_size: int = 3
 var room_max_size: int = 5
+var floor_loot: Array[LootEntry] = []
+var floor_items_min: int = 3
+var floor_items_max: int = 8
 
 var grid: Array = []
 var entrance_pos: Vector2i = Vector2i.ZERO
@@ -38,6 +41,9 @@ func configure(biome: BiomeData) -> void:
 	room_count = biome.room_count
 	room_min_size = biome.room_min_size
 	room_max_size = biome.room_max_size
+	floor_loot = biome.floor_loot
+	floor_items_min = biome.floor_items_min
+	floor_items_max = biome.floor_items_max
 
 func generate() -> void:
 	_fill_with_walls()
@@ -49,6 +55,8 @@ func generate() -> void:
 	if not _validate_path():
 		push_warning("LevelGenerator: regenerating...")
 		generate()
+		return
+	_place_items()
 
 # -------------------------------------------------------
 # Fill
@@ -286,6 +294,88 @@ func _get_all_floor_cells() -> Array:
 		for y in range(grid_height):
 			if grid[x][y].cell_type != GridCell.CellType.WALL:
 				result.append(Vector2i(x, y))
+	return result
+
+# -------------------------------------------------------
+# Items
+# -------------------------------------------------------
+func _place_items() -> void:
+	if floor_loot.is_empty():
+		return
+
+	var cells_by_type := _classify_floor_cells()
+	var count := randi_range(max(0, floor_items_min), max(floor_items_min, floor_items_max))
+	for _i in range(count):
+		var entry := _pick_weighted_loot()
+		if entry == null or entry.item == null:
+			continue
+		var candidates := _candidates_for_entry(entry, cells_by_type)
+		if candidates.is_empty():
+			continue
+		var pos: Vector2i = candidates[randi() % candidates.size()]
+		grid[pos.x][pos.y].items.append(ItemInstance.create(entry.item, 1))
+
+func _classify_floor_cells() -> Dictionary:
+	var result := {
+		LootEntry.PLACEMENT_CORRIDOR: [],
+		LootEntry.PLACEMENT_ROOM:     [],
+		LootEntry.PLACEMENT_DEAD_END: [],
+	}
+	for x in range(1, grid_width - 1):
+		for y in range(1, grid_height - 1):
+			var cell: GridCell = grid[x][y]
+			if cell.cell_type != GridCell.CellType.FLOOR:
+				continue
+			var pos := Vector2i(x, y)
+			if _is_dead_end(pos):
+				result[LootEntry.PLACEMENT_DEAD_END].append(pos)
+			elif _is_in_room(pos):
+				result[LootEntry.PLACEMENT_ROOM].append(pos)
+			else:
+				result[LootEntry.PLACEMENT_CORRIDOR].append(pos)
+	return result
+
+func _is_dead_end(pos: Vector2i) -> bool:
+	var floor_neighbours := 0
+	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+		var nx: int = pos.x + d.x
+		var ny: int = pos.y + d.y
+		if _in_bounds(nx, ny) and grid[nx][ny].cell_type != GridCell.CellType.WALL:
+			floor_neighbours += 1
+	return floor_neighbours == 1
+
+func _is_in_room(pos: Vector2i) -> bool:
+	for room in _room_rects:
+		if (room as Rect2i).has_point(pos):
+			return true
+	return false
+
+func _pick_weighted_loot() -> LootEntry:
+	var total := 0
+	for entry in floor_loot:
+		if entry == null or entry.item == null:
+			continue
+		total += max(0, entry.weight)
+	if total <= 0:
+		return null
+	var roll := randi() % total
+	for entry in floor_loot:
+		if entry == null or entry.item == null:
+			continue
+		var w: int = max(0, entry.weight)
+		if roll < w:
+			return entry
+		roll -= w
+	return null
+
+func _candidates_for_entry(entry: LootEntry, cells_by_type: Dictionary) -> Array:
+	var result: Array = []
+	for placement_bit in [LootEntry.PLACEMENT_CORRIDOR, LootEntry.PLACEMENT_ROOM, LootEntry.PLACEMENT_DEAD_END]:
+		if entry.allows(placement_bit):
+			for pos in cells_by_type[placement_bit]:
+				if pos == entrance_pos or pos == exit_pos:
+					continue
+				result.append(pos)
 	return result
 
 # -------------------------------------------------------

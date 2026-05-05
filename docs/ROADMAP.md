@@ -81,12 +81,14 @@ Split into 4 incremental tasks; some sub-points depend on later phases (drag-to-
 4. ✅ F1 debug key in `Game.gd` spawns a Health Potion into the bar
 5. ✅ Asset folder scaffolding: `res://assets/items/`, `res://assets/textures/items/{icons,sprites}/`
 
-#### Task 2 — Items on the dungeon floor (next)
-1. Add per-biome item loot pool to `BiomeData`
-2. Implement item placement in `LevelGenerator` (items tracked in `GridCell`)
-3. Render floor items as `Sprite3D` billboards in `DungeonView`
-4. Implement visual stacking when multiple items share a tile
-5. Items persist on the floor until picked up or level exit
+#### Task 2 — Items on the dungeon floor ✅
+1. ✅ `LootEntry.gd` resource (item + weight + placement flags: Corridor / Room / Dead End)
+2. ✅ Per-biome loot pool on `BiomeData`: `floor_loot: Array[LootEntry]`, `floor_items_min`, `floor_items_max`
+3. ✅ `items: Array` field on `GridCell` for per-tile piles
+4. ✅ Item placement in `LevelGenerator` after BFS validation: weighted-roll a `LootEntry`, pick a random eligible cell (placement-flagged, not entrance/exit), drop an `ItemInstance`
+5. ✅ Floor items rendered as `Sprite3D` billboards in `DungeonView` (FIXED_Y billboard, NEAREST filter, alpha-cut DISCARD), placed inside a runtime `ItemsRoot` Node3D under the SubViewport
+6. ✅ Visual stacking: up to 3 sprites per tile with small XZ offsets so a pile is visible
+7. ✅ Items persist on the floor (stored on `GridCell`) — pickup comes in Task 3
 
 #### Task 3 — Tap-to-pickup
 1. Player walks on tile with item, taps it → moves into item bar

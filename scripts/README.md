@@ -4,16 +4,16 @@
 
 ### GridCell.gd
 **Type:** Resource (data only, not attached to a node)
-**Purpose:** Represents a single tile in the dungeon grid. Stores the cell type (WALL, FLOOR, ENTRANCE, EXIT), wall flags for each side (north/south/east/west), and an optional object reference. The `is_blocked` property returns true if the cell is a wall.
+**Purpose:** Represents a single tile in the dungeon grid. Stores the cell type (WALL, FLOOR, ENTRANCE, EXIT), wall flags for each side (north/south/east/west), an optional object id, and an `items` array (`Array[ItemInstance]`) for items piled on this tile. The `is_blocked` property returns true if the cell is a wall.
 
 ### LevelGenerator.gd
 **Type:** Node
-**Purpose:** Procedurally generates dungeon levels using a Growing Tree maze algorithm. Creates a 2D grid of GridCell resources, carves corridors with configurable wiggle and width variation, optionally places rooms, connects all regions, and places entrance/exit points. Validates paths with BFS to ensure the exit is always reachable from the entrance. All generation parameters are read from a BiomeData resource via `configure(biome)`.
+**Purpose:** Procedurally generates dungeon levels using a Growing Tree maze algorithm. Creates a 2D grid of GridCell resources, carves corridors with configurable wiggle and width variation, optionally places rooms, connects all regions, places entrance/exit points, and (after BFS validation) drops items on floor cells. Items are placed by weighted-rolling each `LootEntry` in the biome's `floor_loot` list and dropping it on a random eligible cell, where eligibility is constrained by the entry's placement flags (corridor/room/dead-end) and excludes entrance/exit. All generation parameters are read from a BiomeData resource via `configure(biome)`.
 **Key methods:** configure(biome: BiomeData), generate()
 
 ### DungeonView.gd
 **Type:** Node3D (attached to the DungeonView scene root)
-**Purpose:** Renders the dungeon in 3D. Builds flat quad meshes (walls, floors, ceilings) from the grid data, applies biome textures with optional triplanar mapping and normal maps, manages the camera position and rotation, handles the SubViewport sizing for portrait/landscape orientations, and applies biome environment settings (fog, ambient light).
+**Purpose:** Renders the dungeon in 3D. Builds flat quad meshes (walls, floors, ceilings) from the grid data, applies biome textures with optional triplanar mapping and normal maps, spawns Sprite3D billboards for items piled on floor cells (up to 3 visible per tile, billboard mode FIXED_Y, NEAREST filter, alpha-cut DISCARD), creates an `ItemsRoot` Node3D under the SubViewport at runtime to hold them, manages the camera position and rotation, handles the SubViewport sizing for portrait/landscape orientations, and applies biome environment settings (fog, ambient light).
 **Key exports:** show_ceiling, camera_eye_height, wall_height, biome, fov, viewport_ratio_portrait, viewport_ratio_landscape
 
 ### PlayerController.gd
@@ -24,8 +24,13 @@
 
 ### BiomeData.gd
 **Type:** Resource (data only, loaded as .tres files)
-**Purpose:** Defines all visual, environmental, and level generation properties of a biome. Holds arrays of wall/floor/ceiling textures (albedo and normal), fog settings, ambient light settings, triplanar mapping toggles, wall height, and all dungeon generation parameters (grid size, maze behavior, corridor width, room placement, entrance/exit rules). Loaded at runtime and passed to both DungeonView (appearance) and LevelGenerator (generation).
-**Key exports:** wall_albedo, wall_normal, floor_albedo, floor_normal, ceiling_albedo, ceiling_normal, fog_enabled, fog_color, fog_density, fog_aerial, ambient_color, ambient_energy, use_triplanar, triplanar_sharpness, triplanar_y_offset, grid_width, grid_height, maze_bias, wiggle, corridor_min_width, corridor_max_width, width_change_chance, room_count, room_min_size, room_max_size, entrance_at_dead_end, exit_at_dead_end, min_exit_distance
+**Purpose:** Defines all visual, environmental, level generation, and loot properties of a biome. Holds arrays of wall/floor/ceiling textures (albedo and normal), fog settings, ambient light settings, triplanar mapping toggles, wall height, all dungeon generation parameters (grid size, maze behavior, corridor width, room placement, entrance/exit rules), and the floor loot pool (Array of LootEntry + min/max items per level). Loaded at runtime and passed to both DungeonView (appearance) and LevelGenerator (generation + item placement).
+**Key exports:** wall_albedo, wall_normal, floor_albedo, floor_normal, ceiling_albedo, ceiling_normal, fog_enabled, fog_color, fog_density, fog_aerial, ambient_color, ambient_energy, use_triplanar, triplanar_sharpness, triplanar_y_offset, grid_width, grid_height, maze_bias, wiggle, corridor_min_width, corridor_max_width, width_change_chance, room_count, room_min_size, room_max_size, entrance_at_dead_end, exit_at_dead_end, min_exit_distance, floor_loot, floor_items_min, floor_items_max
+
+### LootEntry.gd
+**Type:** Resource (data only, used inside BiomeData.floor_loot)
+**Purpose:** One entry in a biome's loot pool. Pairs an `ItemData` with a `weight` (relative probability) and a `placement` flag-set (Corridor / Room / Dead End — any combination). Defaults to weight 1, placement = all three types. `allows(placement_type)` checks one of the constants `PLACEMENT_CORRIDOR / PLACEMENT_ROOM / PLACEMENT_DEAD_END`.
+**Key exports:** item, weight, placement
 
 ### MapData.gd
 **Type:** RefCounted (standalone script, not attached to any node)
@@ -33,8 +38,8 @@
 
 ### ItemData.gd
 **Type:** Resource (data only, loaded as .tres files)
-**Purpose:** Template for an item type (e.g. "Health Potion"). Defines name, description, category enum (CONSUMABLE, EQUIPMENT, THROWABLE, QUEST), effect type/value/duration, stacking rules, art (icon for UI + dungeon sprite for Sprite3D), and economy (buy/sell prices). One `.tres` file per item lives in `res://assets/items/`.
-**Key exports:** item_name, description, category, effect_type, effect_value, effect_duration, stackable, stack_max, icon, dungeon_sprite, buy_price, sell_price
+**Purpose:** Template for an item type (e.g. "Health Potion"). Defines name, description, category enum (CONSUMABLE, EQUIPMENT, THROWABLE, QUEST), effect type/value/duration, stacking rules, art (icon for UI + dungeon sprite for Sprite3D + world height + y offset), and economy (buy/sell prices). `dungeon_sprite_world_height` controls the sprite's size in world units (independent of texture pixel dimensions); `dungeon_sprite_y_offset` nudges it vertically to compensate for transparent padding in the texture. One `.tres` file per item lives in `res://assets/items/`.
+**Key exports:** item_name, description, category, effect_type, effect_value, effect_duration, stackable, stack_max, icon, dungeon_sprite, dungeon_sprite_world_height, dungeon_sprite_y_offset, buy_price, sell_price
 
 ### ItemInstance.gd
 **Type:** RefCounted (runtime data, not attached to any node)
