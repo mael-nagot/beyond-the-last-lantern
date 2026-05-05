@@ -212,6 +212,14 @@ Split into 5 incremental tasks. Task 1 builds the foundation that the rest reuse
 11. Implement elemental resistances and weaknesses
 12. Implement screen shake on heavy hits
 13. Implement loot drops on enemy death (items, Void Ink, Grimoire Pages)
+    - **Different shape from chest loot.** A chest's `LootTable` rolls
+      between `min_rolls` and `max_rolls` items; an enemy drops AT
+      MOST one item, with an explicit "nothing" outcome baked into
+      the probabilities. Recommend a new `DropTable` resource (or an
+      added flag on LootTable) where each entry is a probability
+      slice of the 0..1 range — e.g. 60% nothing, 20% health potion,
+      20% 100 gold — and rolling produces 0 or 1 `ItemInstance`.
+      Should NOT reuse the chest weighted-bag-with-min/max logic.
 14. Implement status effects (poison, burn, paralyze, blind, curse)
 
 ### Phase 11 — Enemy AI & Special Enemies

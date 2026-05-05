@@ -19,6 +19,7 @@
 [sub_resource type="Resource" id="Resource_ve4a7"]
 script = ExtResource("4_458bs")
 item = ExtResource("5_plw3j")
+min_distance_to_other_item = 5
 metadata/_custom_type_script = "uid://dwvpkpfjm8dyn"
 
 [sub_resource type="Resource" id="Resource_bq1p8"]

@@ -449,11 +449,37 @@ func _place_items() -> void:
 		var entry := _pick_weighted_loot()
 		if entry == null or entry.item == null:
 			continue
-		var candidates := _candidates_for_entry(entry, cells_by_type)
-		if candidates.is_empty():
+		var base_candidates := _candidates_for_entry(entry, cells_by_type)
+		if base_candidates.is_empty():
 			continue
-		var pos: Vector2i = candidates[randi() % candidates.size()]
-		grid[pos.x][pos.y].items.append(ItemInstance.create(entry.item, 1))
+		# Graceful degrade on min_distance: try with the configured
+		# distance first; if no candidate qualifies, relax by 1 and try
+		# again, all the way down to 0. The constraint is per-roll so
+		# we don't carry partial progress between rolls.
+		var distance: int = max(0, entry.min_distance_to_other_item)
+		while distance >= 0:
+			var candidates: Array = base_candidates
+			if distance > 0:
+				candidates = base_candidates.filter(
+					func(p): return not _too_close_to_existing_item(p, distance)
+				)
+			if not candidates.is_empty():
+				var pos: Vector2i = candidates[randi() % candidates.size()]
+				grid[pos.x][pos.y].items.append(ItemInstance.create(entry.item, 1))
+				break
+			distance -= 1
+
+func _too_close_to_existing_item(pos: Vector2i, min_distance: int) -> bool:
+	if min_distance <= 0:
+		return false
+	for x in range(grid_width):
+		for y in range(grid_height):
+			if grid[x][y].items.is_empty():
+				continue
+			var dist: int = abs(pos.x - x) + abs(pos.y - y)
+			if dist < min_distance:
+				return true
+	return false
 
 func _classify_floor_cells() -> Dictionary:
 	var result := {
