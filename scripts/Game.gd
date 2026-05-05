@@ -4,6 +4,7 @@ var _player_controller = null
 var _hud = null
 var _dungeon_view = null
 var _generator: LevelGenerator = null
+var _party: Array[Character] = []
 
 func _ready() -> void:
 	var dungeon_view      = $DungeonView
@@ -47,7 +48,54 @@ func _ready() -> void:
 	if hud.pickup_prompt != null:
 		hud.pickup_prompt.pressed.connect(_on_pickup_pressed)
 
+	_setup_party()
+	_wire_drop_targets()
+
 	_update_map()
+	_update_pickup_prompt()
+
+func _setup_party() -> void:
+	_party = [
+		Character.create("character.placeholder.warrior", 30, 5),
+		Character.create("character.placeholder.wizard", 15, 25),
+		Character.create("character.placeholder.rogue", 22, 10),
+	]
+	var party_panel = _hud.party_panel
+	for i in range(_party.size()):
+		var slot = party_panel.get_slot(i)
+		if slot == null:
+			continue
+		slot.bind(_party[i])
+		var idx := i
+		slot.item_consumed.connect(_on_item_used_on_character.bind(idx))
+		slot.item_rejected.connect(_on_item_rejected.bind(idx))
+
+func _wire_drop_targets() -> void:
+	if _dungeon_view != null and _dungeon_view.drop_target != null:
+		_dungeon_view.drop_target.item_dropped.connect(_on_item_dropped_on_dungeon)
+
+func _on_item_used_on_character(slot_index: int, _character_index: int) -> void:
+	if _hud == null or _hud.item_bar == null:
+		return
+	_hud.item_bar.remove_one(slot_index)
+
+func _on_item_rejected(_slot_index: int, _character_index: int) -> void:
+	if _hud != null:
+		_hud.show_toast("ui.feedback.no_effect")
+
+func _on_item_dropped_on_dungeon(slot_index: int, source_instance: ItemInstance) -> void:
+	if _hud == null or _hud.item_bar == null:
+		return
+	if source_instance == null or source_instance.data == null:
+		return
+	var cell := _current_cell()
+	if cell == null:
+		return
+	var single := ItemInstance.create(source_instance.data, 1)
+	cell.items.append(single)
+	_hud.item_bar.remove_one(slot_index)
+	if _dungeon_view != null:
+		_dungeon_view.rebuild_items()
 	_update_pickup_prompt()
 
 func _on_move(action: String) -> void:
@@ -110,8 +158,13 @@ func _input(event: InputEvent) -> void:
 		KEY_D:           _player_controller.strafe_right()
 		KEY_F:           _on_pickup_pressed()
 		KEY_F1:          _debug_spawn_health_potion()
+		KEY_F2:          _debug_damage_party()
 	_update_map()
 	_update_pickup_prompt()
+
+func _debug_damage_party() -> void:
+	for c in _party:
+		c.damage(10)
 
 func _debug_spawn_health_potion() -> void:
 	if _hud == null or _hud.item_bar == null:

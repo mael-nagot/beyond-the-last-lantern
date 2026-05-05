@@ -5,6 +5,10 @@ signal portrait_clicked
 signal attack_pressed
 signal spell_pressed
 signal defense_pressed
+signal item_consumed(slot_index: int)
+signal item_rejected(slot_index: int)
+
+var character: Character = null
 
 @onready var portrait_frame : Panel         = $LeftSide/PortraitFrame
 @onready var portrait       : TextureButton = $LeftSide/PortraitFrame/Portrait
@@ -49,7 +53,7 @@ func _ready() -> void:
 	hp_bar.add_theme_stylebox_override("background", hp_bg)
 
 	var hp_fill = StyleBoxFlat.new()
-	hp_fill.bg_color = Color(0.2, 0.8, 0.2)
+	hp_fill.bg_color = Color(0.85, 0.15, 0.15)
 	hp_fill.set_corner_radius_all(2)
 	hp_bar.add_theme_stylebox_override("fill", hp_fill)
 
@@ -73,6 +77,17 @@ func _ready() -> void:
 	name_label.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9, 0.8))
 	name_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
 
+	# Drag-and-drop: the slot's portrait, bars, name, and gaps should accept
+	# item drops; the action buttons should NOT (they remain MOUSE_FILTER_STOP
+	# so drops there fail with the can't-drop cursor and don't bubble to the
+	# slot's _can_drop_data).
+	mouse_filter = Control.MOUSE_FILTER_STOP
+	portrait.mouse_filter    = Control.MOUSE_FILTER_PASS
+	hp_bar.mouse_filter      = Control.MOUSE_FILTER_PASS
+	mp_bar.mouse_filter      = Control.MOUSE_FILTER_PASS
+	name_label.mouse_filter  = Control.MOUSE_FILTER_PASS
+	portrait_frame.mouse_filter = Control.MOUSE_FILTER_PASS
+
 	# Signals
 	portrait.pressed.connect(func():    portrait_clicked.emit())
 	btn_attack.pressed.connect(func():  attack_pressed.emit())
@@ -92,3 +107,60 @@ func set_portrait(texture: Texture2D) -> void:
 
 func set_character_name(char_name: String) -> void:
 	name_label.text = char_name
+
+func bind(c: Character) -> void:
+	if character != null and character.changed.is_connected(_refresh_from_character):
+		character.changed.disconnect(_refresh_from_character)
+	character = c
+	if character != null:
+		character.changed.connect(_refresh_from_character)
+	_refresh_from_character()
+
+func _refresh_from_character() -> void:
+	if character == null:
+		return
+	set_hp(character.current_hp, character.max_hp)
+	set_mp(character.current_mp, character.max_mp)
+	set_character_name(character.get_display_name())
+
+# -------------------------------------------------------
+# Drag & drop target
+# -------------------------------------------------------
+
+func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
+	if character == null:
+		return false
+	if typeof(data) != TYPE_DICTIONARY:
+		return false
+	if data.get("type") != ItemSlotButton.DRAG_TYPE:
+		return false
+	var instance = data.get("instance")
+	if not (instance is ItemInstance) or instance.data == null:
+		return false
+	# Ask the character if the effect would do anything; if not, reject
+	# the drop so the bar stack isn't consumed.
+	return _would_apply(instance.data)
+
+func _drop_data(_at_position: Vector2, data: Variant) -> void:
+	var instance: ItemInstance = data.get("instance")
+	var slot_index: int = data.get("slot_index", -1)
+	if instance == null or instance.data == null or character == null:
+		item_rejected.emit(slot_index)
+		return
+	if character.apply_item(instance.data):
+		item_consumed.emit(slot_index)
+	else:
+		item_rejected.emit(slot_index)
+
+# Dry-run check matching Character.apply_item's accept-conditions, used
+# from _can_drop_data so a wasteful drop is refused before the drag ends.
+func _would_apply(data: ItemData) -> bool:
+	if character == null or data == null:
+		return false
+	match data.effect_type:
+		ItemData.EffectType.HEAL_HP:
+			return not character.is_full_hp() and data.effect_value > 0
+		ItemData.EffectType.HEAL_MP:
+			return not character.is_full_mp() and data.effect_value > 0
+		_:
+			return false

@@ -22,7 +22,9 @@ func _ready() -> void:
 		style.set_corner_radius_all(4)
 		slot.add_theme_stylebox_override("panel", style)
 
-		var btn = TextureButton.new()
+		var btn := ItemSlotButton.new()
+		btn.bar_ref = self
+		btn.slot_index = i
 		btn.mouse_filter      = Control.MOUSE_FILTER_STOP
 		btn.ignore_texture_size = true
 		btn.stretch_mode      = TextureButton.STRETCH_KEEP_ASPECT_CENTERED

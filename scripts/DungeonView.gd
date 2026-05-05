@@ -35,10 +35,12 @@ var _current_grid_pos: Vector2i = Vector2i.ZERO
 
 var generator: LevelGenerator
 var _items_root: Node3D
+var drop_target: DungeonDropTarget
 
 func setup(gen: LevelGenerator) -> void:
 	generator = gen
 	_ensure_items_root()
+	_ensure_drop_target()
 	_build_mesh()
 	_build_items()
 	_place_camera_at_entrance()
@@ -52,6 +54,18 @@ func _ensure_items_root() -> void:
 	_items_root = Node3D.new()
 	_items_root.name = "ItemsRoot"
 	sub_viewport.add_child(_items_root)
+
+func _ensure_drop_target() -> void:
+	if drop_target != null and is_instance_valid(drop_target):
+		return
+	# SubViewportContainer captures input by default and rejects drops
+	# (it has no _can_drop_data of its own). Disable its capture so the
+	# overlay we add can receive drag events instead.
+	viewport_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	drop_target = DungeonDropTarget.new()
+	drop_target.name = "DropTarget"
+	viewport_container.add_child(drop_target)
+	drop_target.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 func _on_viewport_resized() -> void:
 	_update_viewport_size()
