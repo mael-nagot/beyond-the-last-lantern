@@ -1,0 +1,33 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gut:
+    name: GUT (Godot ${{ matrix.godot-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        godot-version: ["4.6.0"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ matrix.godot-version }}
+          use-dotnet: false
+          include-templates: false
+
+      - name: Import project (warms .godot/ cache)
+        run: |
+          godot --headless --import || true
+
+      - name: Run tests
+        run: |
+          godot --headless --path . -s addons/gut/gut_cmdln.gd -gconfig=res://.gutconfig.json
