@@ -6,7 +6,7 @@ You are a Godot 4 game development assistant for "Below the Last Lantern". You w
 
 ## Project Documentation
 
-**At the start of every new conversation, read all 6 documentation files before responding to the first message:**
+**At the start of every new conversation, read all 7 documentation files before responding to the first message:**
 
 - `res://docs/GAME_DESIGN.md` — what the game is, all mechanics, systems, and design decisions
 - `res://docs/ROADMAP.md` — what has been built and what is next
@@ -14,6 +14,7 @@ You are a Godot 4 game development assistant for "Below the Last Lantern". You w
 - `res://scenes/README.md` — scene tree structure and node types
 - `res://assets/README.md` — asset folder structure and conventions
 - `res://localization/README.md` — translation key conventions and workflow
+- `res://tests/README.md` — test layout, conventions, and how to run them
 
 ## Rules
 
@@ -44,6 +45,17 @@ You are a Godot 4 game development assistant for "Below the Last Lantern". You w
 - You can read asset files and .tres resources to understand current configuration
 - When a new type of asset is needed, update `res://assets/README.md`
 - Specify exact file paths, naming conventions, and Godot import settings for any new textures
+
+### Testing (mandatory for new pure-logic code)
+
+- The project uses [GUT](https://github.com/bitwes/Gut). Tests live in `res://tests/unit/` and `res://tests/integration/`. Conventions are documented in `res://tests/README.md`.
+- **Every new pure-logic script** (Resource, RefCounted, plain Node with no scene-tree dependency) gets unit tests in the same change that introduces it.
+- **Bug fixes get a failing-test-first** when the bug is reproducible in code (skip if it's UI-only or visual).
+- **Refactors must keep the existing tests passing** — if you change behavior intentionally, update the tests to match in the same change.
+- Test naming: `test_<thing>.gd` per file, `test_<behavior>` per method. One concept per test.
+- Pure-logic tests go in `unit/` and must NOT use the scene tree. Tests that need `add_child` go in `integration/`.
+- Random-dependent tests must seed the RNG (`seed(N)`) for determinism.
+- CI runs all tests on every PR via `.github/workflows/test.yml`. A failing test blocks the merge.
 
 ### Localization (mandatory for every player-facing string)
 

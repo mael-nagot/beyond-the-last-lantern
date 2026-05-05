@@ -1,5 +1,7 @@
 # Below the Last Lantern — Scripts Reference
 
+Tests for these scripts live in `res://tests/`. See `res://tests/README.md` for conventions.
+
 ## Core Scripts (`res://scripts/`)
 
 ### GridCell.gd

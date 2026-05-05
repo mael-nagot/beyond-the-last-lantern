@@ -1,5 +1,18 @@
 # Below the Last Lantern — Development Roadmap
 
+## Cross-Cutting Infrastructure
+
+### Testing ✅
+- GUT (Godot Unit Test) installed under `res://addons/gut/`
+- `res://tests/{unit,integration}/` directories with conventions in `tests/README.md`
+- `.gutconfig.json` configures discovery and exit-on-completion
+- CI workflow (`.github/workflows/test.yml`) runs all tests on every PR using chickensoft-games/setup-godot
+- Initial coverage: ItemInstance, LootEntry, GridCell, ItemData, MapData (unit); ItemBar, LevelGenerator (integration)
+- CLAUDE.md mandates tests for every new pure-logic script and a failing-test-first for code-reproducible bugs
+
+### Localization scaffolding ✅
+- See Phase 17 entry below
+
 ## Completed Phases
 
 ### Phase 1 — Level Generator ✅
