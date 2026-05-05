@@ -65,30 +65,43 @@
 
 **Priority: HIGH — Foundation for inventory, combat rewards, and economy**
 
-1. Create `ItemData.gd` resource:
+Split into 4 incremental tasks; some sub-points depend on later phases (drag-to-equip needs Phase 9, throwables/enemy drops need Phase 10, chest loot needs Phase 8) and are deferred.
+
+#### Task 1 — Item data foundation + first health potion ✅
+1. ✅ Create `ItemData.gd` resource:
    - Item name, description, category (consumable, equipment, throwable, quest)
    - Effect type (heal HP, heal MP, stat boost, cure status, damage, inflict status)
-   - Effect value (amount healed, stat boost value, damage dealt)
-   - Duration (for temporary effects, in turns)
-   - Stackable (boolean)
-   - Stack max
-   - Icon texture (for item bar, equipment, shop UI)
-   - Dungeon sprite texture (for Sprite3D when item is on the floor)
+   - Effect value, effect duration
+   - Stackable / stack_max
+   - Icon texture, dungeon sprite texture
    - Buy price / sell price
-   - Equipment slot (if equipment type)
-   - Stat modifiers (if equipment type)
-2. Create `ItemInstance.gd` (runtime instance: which ItemData, stack count, durability)
-3. Implement item placement in LevelGenerator (items on floor tiles)
-4. Render floor items as `Sprite3D` billboards in DungeonView
-5. Implement item stacking on same tile (visual stack in dungeon view)
-6. Implement tap-to-pickup (player walks on tile with item, taps to collect into item bar)
-7. Implement item bar drag interactions:
-   - Drag to party panel → use item on character (heal, boost, cure)
-   - Drag to dungeon view → throw item (bombs, poison flasks)
-   - Drag to character inventory → equip item
-8. Implement item persistence (items stay on dungeon floor until picked up or level exit)
-9. Implement item drops from enemy deaths
-10. Implement chest loot tables (configurable per biome)
+   - *(Equipment slot + stat modifiers deferred to Phase 9)*
+2. ✅ Create `ItemInstance.gd` (runtime: data ref, stack count, durability)
+3. ✅ Upgrade `ItemBar.gd` from visual-only slots to a real inventory model with auto-stacking and a stack-count badge
+4. ✅ F1 debug key in `Game.gd` spawns a Health Potion into the bar
+5. ✅ Asset folder scaffolding: `res://assets/items/`, `res://assets/textures/items/{icons,sprites}/`
+
+#### Task 2 — Items on the dungeon floor (next)
+1. Add per-biome item loot pool to `BiomeData`
+2. Implement item placement in `LevelGenerator` (items tracked in `GridCell`)
+3. Render floor items as `Sprite3D` billboards in `DungeonView`
+4. Implement visual stacking when multiple items share a tile
+5. Items persist on the floor until picked up or level exit
+
+#### Task 3 — Tap-to-pickup
+1. Player walks on tile with item, taps it → moves into item bar
+2. Handle full-bar case (leave item on floor)
+
+#### Task 4 — Use items on party
+1. Drag from item bar to a CharacterSlot → apply effect (heal HP/MP/cure)
+2. Wire health potion to actually restore HP
+3. Needs minimal `current_hp` state on characters (interim, until Phase 9 lands `CharacterData`)
+
+#### Deferred (blocked by other phases)
+- Drag-to-equip (Phase 9 — character inventory)
+- Drag-to-throw / throwables (Phase 10 — combat targeting)
+- Item drops from enemy deaths (Phase 10)
+- Chest loot tables (Phase 8 — objects/chests)
 
 ### Phase 8 — Objects & Interactables
 

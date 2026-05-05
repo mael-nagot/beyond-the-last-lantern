@@ -31,9 +31,19 @@
 **Type:** RefCounted (standalone script, not attached to any node)
 **Purpose:** Tracks which tiles have been explored by the player. Provides reveal_around() to mark a tile and its 8 neighbors as explored. Used by MapPopup to determine which parts of the map to draw. Has a reveal_all() debug function.
 
+### ItemData.gd
+**Type:** Resource (data only, loaded as .tres files)
+**Purpose:** Template for an item type (e.g. "Health Potion"). Defines name, description, category enum (CONSUMABLE, EQUIPMENT, THROWABLE, QUEST), effect type/value/duration, stacking rules, art (icon for UI + dungeon sprite for Sprite3D), and economy (buy/sell prices). One `.tres` file per item lives in `res://assets/items/`.
+**Key exports:** item_name, description, category, effect_type, effect_value, effect_duration, stackable, stack_max, icon, dungeon_sprite, buy_price, sell_price
+
+### ItemInstance.gd
+**Type:** RefCounted (runtime data, not attached to any node)
+**Purpose:** A live instance of an item — points at an `ItemData` and tracks per-instance state (`stack_count`, `durability`). Stackable items share an instance with `stack_count > 1`; equipment with durability gets one instance per piece. Use `ItemInstance.create(data, count)` to build one. `can_stack_with(other)` checks if two instances can merge.
+
 ### Game.gd
 **Type:** Node3D (attached to the Game scene root)
 **Purpose:** Main game orchestrator. Loads the biome resource, creates the LevelGenerator (configured from the biome), initializes DungeonView and PlayerController, wires HUD signals (movement pad, map), and routes keyboard input to the PlayerController. Handles map updates on every player movement.
+**Debug keys:** F1 spawns a Health Potion into the item bar (loads `res://assets/items/health_potion.tres`).
 
 ---
 
@@ -46,8 +56,9 @@
 
 ### ItemBar.gd
 **Type:** Container (attached to the ItemBar node)
-**Purpose:** Manages 10 inventory slots displayed as a grid. Creates slot panels with styled borders programmatically. Relayouts as 10×1 (landscape) or 5×2 (portrait) grid depending on orientation. Slot sizes scale relative to screen dimensions. Emits slot_clicked signal when a slot is tapped.
-**Key methods:** relayout(available_width) → returns Vector2 size, set_slot_icon(index, texture)
+**Purpose:** Manages 10 inventory slots displayed as a grid AND owns the player's item-bar inventory model (`Array[ItemInstance]` of size 10). Creates slot panels with styled borders + icon button + stack-count label programmatically. Relayouts as 5×2 grid depending on orientation. Slot sizes scale relative to screen dimensions. `add_item(instance)` auto-stacks onto compatible existing stacks then fills empty slots, returning any leftover that didn't fit.
+**Key signals:** slot_clicked(index), inventory_changed
+**Key methods:** add_item(instance) → leftover ItemInstance, get_slot(index), set_slot(index, instance), clear_slot(index), remove_one(index), relayout(available_width) → Vector2
 
 ### PartyPanel.gd
 **Type:** HBoxContainer (attached to the PartyPanel node)

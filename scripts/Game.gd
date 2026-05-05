@@ -73,4 +73,18 @@ func _input(event: InputEvent) -> void:
 		KEY_E:           _player_controller.turn_right()
 		KEY_A:           _player_controller.strafe_left()
 		KEY_D:           _player_controller.strafe_right()
+		KEY_F1:          _debug_spawn_health_potion()
 	_update_map()
+
+func _debug_spawn_health_potion() -> void:
+	if _hud == null or _hud.item_bar == null:
+		push_error("Game._debug_spawn_health_potion: HUD or item_bar missing")
+		return
+	var path := "res://assets/items/health_potion.tres"
+	var data: ItemData = load(path)
+	if data == null:
+		push_error("Game._debug_spawn_health_potion: failed to load %s — create the resource first" % path)
+		return
+	var leftover = _hud.item_bar.add_item(ItemInstance.create(data, 1))
+	if leftover != null:
+		push_warning("Item bar full — health potion not added")
