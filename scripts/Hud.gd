@@ -16,13 +16,25 @@ const SCREEN_MARGIN = 4.0
 @onready var map_popup    : MapPopup      = $HUDRoot/MapPopup
 
 var pickup_prompt: PickupPrompt
+var toast: Toast
 var map_data: MapData
 var _dungeon_view: DungeonView = null
 
 func _ready() -> void:
+	# HUDRoot covers the full screen with mouse_filter=PASS. Without this
+	# override, every drag over the dungeon area is captured by HUDRoot
+	# (since PASS Controls are valid hit targets) and rejected because
+	# HUDRoot has no _can_drop_data. IGNORE keeps HUDRoot transparent to
+	# hit-testing while leaving its children's mouse handling intact.
+	hud_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
 	pickup_prompt = PickupPrompt.new()
 	pickup_prompt.name = "PickupPrompt"
 	hud_root.add_child(pickup_prompt)
+
+	toast = Toast.new()
+	toast.name = "Toast"
+	hud_root.add_child(toast)
 
 	get_viewport().size_changed.connect(_on_viewport_resized)
 	_apply_layout()
@@ -30,6 +42,10 @@ func _ready() -> void:
 	var btn_map = top_bar.get_node("BtnMap")
 	if btn_map:
 		btn_map.pressed.connect(func(): map_popup.open())
+
+func show_toast(translation_key: String, duration: float = Toast.DEFAULT_DURATION) -> void:
+	if toast != null:
+		toast.show_message(translation_key, duration)
 
 func setup_dungeon_view(dv: DungeonView) -> void:
 	_dungeon_view = dv
@@ -158,6 +174,7 @@ func _layout_landscape(size: Vector2, ratio: float, ui_scale: float = 1.0) -> vo
 	movement_pad.size     = pad_size
 
 	_position_pickup_prompt(Vector2.ZERO, Vector2(dungeon_width, size.y), ui_scale)
+	_position_toast(Vector2.ZERO, Vector2(dungeon_width, size.y), ui_scale)
 
 func _layout_portrait(size: Vector2, ratio: float, ui_scale: float = 1.0) -> void:
 	var top_height   = max(top_bar.get_minimum_size().y, 60)
@@ -195,6 +212,7 @@ func _layout_portrait(size: Vector2, ratio: float, ui_scale: float = 1.0) -> voi
 	movement_pad.size     = pad_size
 
 	_position_pickup_prompt(Vector2.ZERO, Vector2(size.x, dungeon_height), ui_scale)
+	_position_toast(Vector2.ZERO, Vector2(size.x, dungeon_height), ui_scale)
 
 func _position_pickup_prompt(area_pos: Vector2, area_size: Vector2, ui_scale: float) -> void:
 	if pickup_prompt == null:
@@ -207,4 +225,17 @@ func _position_pickup_prompt(area_pos: Vector2, area_size: Vector2, ui_scale: fl
 	pickup_prompt.position = Vector2(
 		area_pos.x + (area_size.x - min_w) * 0.5,
 		area_pos.y + area_size.y - min_h - SCREEN_MARGIN * 2
+	)
+
+func _position_toast(area_pos: Vector2, area_size: Vector2, ui_scale: float) -> void:
+	if toast == null:
+		return
+	var short_side = min(area_size.x, area_size.y)
+	var width = short_side * 0.45 * ui_scale
+	var height = short_side * 0.07 * ui_scale
+	toast.add_theme_font_size_override("font_size", int(max(14.0, short_side * 0.035 * ui_scale)))
+	toast.size = Vector2(width, height)
+	toast.position = Vector2(
+		area_pos.x + (area_size.x - width) * 0.5,
+		area_pos.y + area_size.y * 0.18
 	)

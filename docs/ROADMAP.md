@@ -109,10 +109,25 @@ Split into 4 incremental tasks; some sub-points depend on later phases (drag-to-
 3. ✅ Sprite3Ds rebuilt after pickup so the dungeon visually reflects the empty/remaining tile.
 4. ✅ Bar-full case: stacks that don't fit stay on the cell; if nothing was transferred, prompt flashes a localized "Bag full" message (`ui.pickup.bar_full`) for ~1.5 s.
 
-#### Task 4 — Use items on party
-1. Drag from item bar to a CharacterSlot → apply effect (heal HP/MP/cure)
-2. Wire health potion to actually restore HP
-3. Needs minimal `current_hp` state on characters (interim, until Phase 9 lands `CharacterData`)
+#### Task 4 — Use items on party ✅
+1. ✅ `Character` RefCounted holds `name_key`, `current_hp/max_hp`, `current_mp/max_mp` and `apply_item(data) → bool` (HEAL_HP / HEAL_MP for now; refuses everything else)
+2. ✅ `CharacterSlot.bind(character)` connects to a Character; bars and name auto-refresh on the character's `changed` signal. HP bar is red, MP bar is blue.
+3. ✅ `ItemSlotButton` (TextureButton subclass) is the drag source for every ItemBar slot; produces a translucent icon-textured drag preview centered on the cursor. `build_drag_payload()` is exposed for tests.
+4. ✅ Drop on `CharacterSlot` runs `Character.apply_item`; emits `item_consumed` on success → bar stack -1, `item_rejected` on failure → HUD shows "No effect" toast. Drop area covers the whole slot rect EXCEPT the action buttons.
+5. ✅ Drop on `DungeonDropTarget` (overlay over the SubViewport) drops **one** item from the source stack onto the player's current cell, decrements the bar slot by one, rebuilds Sprite3Ds and the pickup prompt
+6. ✅ `Toast` component for transient HUD feedback (auto-hides after 1.2 s)
+7. ✅ Game seeds 3 placeholder party members (Warrior 30 HP / 5 MP, Wizard 15 / 25, Rogue 22 / 10) so the heal flow is testable end-to-end
+8. ✅ Localization: `character.placeholder.{warrior,wizard,rogue}` + `ui.feedback.no_effect`
+9. ✅ Debug key F2 damages every party member by 10 HP
+
+Mouse-filter setup (drag-drop hit areas):
+- `HUDRoot` is set to `MOUSE_FILTER_IGNORE` at runtime so HUDRoot's full-screen rect doesn't reject drops landing on the dungeon area; child UI controls remain unaffected.
+- `SubViewportContainer` is set to `IGNORE` so the `DungeonDropTarget` overlay child receives drops directly.
+- `CharacterSlot` itself is `STOP`; portrait/bars/name/frame are `PASS` (so drops bubble to the slot's `_can_drop_data`); action buttons stay `STOP` (drops there are rejected).
+
+Future-friendly behaviours:
+- Drop on dungeon currently drops onto the current cell. The roadmap notes a future split: lower 1/3 of the dungeon view = drop on current cell; upper 2/3 = throw at enemies up to N tiles away (Phase 10 combat targeting).
+- `Character` is intentionally minimal — Phase 9 will replace it with a full `CharacterData` resource (stats, equipment, spells).
 
 #### Deferred (blocked by other phases)
 - Drag-to-equip (Phase 9 — character inventory)
