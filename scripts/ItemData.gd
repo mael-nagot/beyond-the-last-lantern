@@ -39,6 +39,13 @@ enum EffectType {
 @export var dungeon_sprite_world_height: float = 0.5
 @export var dungeon_sprite_y_offset: float = 0.0
 
+@export_group("Sound")
+# Same sound used for both pickup and drop on dungeon (one short clip).
+# Sounds are reusable across items — e.g. every potion can share
+# res://assets/sounds/items/potion_pickup_drop1.ogg.
+@export var pickup_drop_sound: AudioStream
+@export var use_sound: AudioStream
+
 @export_group("Economy")
 @export var buy_price: int = 0
 @export var sell_price: int = 0

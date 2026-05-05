@@ -31,5 +31,7 @@ func test_default_field_values() -> void:
 	assert_eq(data.stack_max, 9)
 	assert_eq(data.dungeon_sprite_world_height, 0.5)
 	assert_eq(data.dungeon_sprite_y_offset, 0.0)
+	assert_null(data.pickup_drop_sound)
+	assert_null(data.use_sound)
 	assert_eq(data.buy_price, 0)
 	assert_eq(data.sell_price, 0)

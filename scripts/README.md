@@ -29,7 +29,7 @@ Tests for these scripts live in `res://tests/`. See `res://tests/README.md` for 
 ### BiomeData.gd
 **Type:** Resource (data only, loaded as .tres files)
 **Purpose:** Defines all visual, environmental, level generation, and loot properties of a biome. Holds arrays of wall/floor/ceiling textures (albedo and normal), fog settings, ambient light settings, triplanar mapping toggles, wall height, all dungeon generation parameters (grid size, maze behavior, corridor width, room placement, entrance/exit rules), and the floor loot pool (Array of LootEntry + min/max items per level). Loaded at runtime and passed to both DungeonView (appearance) and LevelGenerator (generation + item placement).
-**Key exports:** wall_albedo, wall_normal, floor_albedo, floor_normal, ceiling_albedo, ceiling_normal, fog_enabled, fog_color, fog_density, fog_aerial, ambient_color, ambient_energy, use_triplanar, triplanar_sharpness, triplanar_y_offset, grid_width, grid_height, maze_bias, wiggle, corridor_min_width, corridor_max_width, width_change_chance, room_count, room_min_size, room_max_size, entrance_at_dead_end, exit_at_dead_end, min_exit_distance, floor_loot, floor_items_min, floor_items_max
+**Key exports:** wall_albedo, wall_normal, floor_albedo, floor_normal, ceiling_albedo, ceiling_normal, fog_enabled, fog_color, fog_density, fog_aerial, ambient_color, ambient_energy, use_triplanar, triplanar_sharpness, triplanar_y_offset, grid_width, grid_height, maze_bias, wiggle, corridor_min_width, corridor_max_width, width_change_chance, room_count, room_min_size, room_max_size, entrance_at_dead_end, exit_at_dead_end, min_exit_distance, floor_loot, floor_items_min, floor_items_max, move_sounds
 
 ### LootEntry.gd
 **Type:** Resource (data only, used inside BiomeData.floor_loot)
@@ -43,8 +43,19 @@ Tests for these scripts live in `res://tests/`. See `res://tests/README.md` for 
 ### ItemData.gd
 **Type:** Resource (data only, loaded as .tres files)
 **Purpose:** Template for an item type (e.g. "Health Potion"). Defines name, description, category enum (CONSUMABLE, EQUIPMENT, THROWABLE, QUEST), effect type/value/duration, stacking rules, art (icon for UI + dungeon sprite for Sprite3D + world height + y offset), and economy (buy/sell prices). `dungeon_sprite_world_height` controls the sprite's size in world units (independent of texture pixel dimensions); `dungeon_sprite_y_offset` nudges it vertically to compensate for transparent padding in the texture. **`item_name` and `description` are translation keys** (e.g. `item.health_potion.name`), not literal display text — see `res://localization/`. Use `get_display_name()` / `get_display_description()` to fetch the translated text. One `.tres` file per item lives in `res://assets/items/`.
-**Key exports:** item_name, description, category, effect_type, effect_value, effect_duration, stackable, stack_max, icon, dungeon_sprite, dungeon_sprite_world_height, dungeon_sprite_y_offset, buy_price, sell_price
+**Key exports:** item_name, description, category, effect_type, effect_value, effect_duration, stackable, stack_max, icon, dungeon_sprite, dungeon_sprite_world_height, dungeon_sprite_y_offset, pickup_drop_sound, use_sound, buy_price, sell_price
 **Key methods:** get_display_name() → translated name, get_display_description() → translated description
+
+### SoundManager.gd
+**Type:** Autoload singleton (`Node`, registered in `project.godot` as `SoundManager`)
+**Purpose:** Owns a pool of 8 `AudioStreamPlayer` nodes for short SFX (overlap allowed) plus a dedicated player for biome ambient loops (Phase 19, hooked but unused). Game.gd assigns `audio_config` and `current_biome` so convenience methods can resolve their streams without each callsite knowing where the data lives. Null streams and empty arrays are no-ops — a missing asset produces silence.
+**Public state:** audio_config (AudioConfig), current_biome (BiomeData)
+**Key methods:** play(stream), play_random(streams), play_ambient(stream), stop_ambient(), play_move(), play_turn(), play_wall_bump(), play_negative(), play_map_open(), play_map_close()
+
+### AudioConfig.gd
+**Type:** Resource (data only, loaded from `res://assets/audio_config.tres`)
+**Purpose:** Holds global, non-biome-specific SFX references — UI sounds (map open / close, generic "negative" feedback) and player-action sounds (wall bump, turn rustle variants). Loaded by Game.gd at startup and assigned to `SoundManager.audio_config`.
+**Key exports:** map_open_sound, map_close_sound, negative_sound, wall_bump_sound, turn_sounds (Array[AudioStream])
 
 ### ItemInstance.gd
 **Type:** RefCounted (runtime data, not attached to any node)

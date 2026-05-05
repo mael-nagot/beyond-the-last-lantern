@@ -146,11 +146,14 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 	var slot_index: int = data.get("slot_index", -1)
 	if instance == null or instance.data == null or character == null:
 		item_rejected.emit(slot_index)
+		SoundManager.play_negative()
 		return
 	if character.apply_item(instance.data):
 		item_consumed.emit(slot_index)
+		SoundManager.play(instance.data.use_sound)
 	else:
 		item_rejected.emit(slot_index)
+		SoundManager.play_negative()
 
 # Dry-run check matching Character.apply_item's accept-conditions, used
 # from _can_drop_data so a wasteful drop is refused before the drag ends.
