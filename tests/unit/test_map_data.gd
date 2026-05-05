@@ -6,6 +6,7 @@ extends GutTest
 
 func _make_generator(w: int = 5, h: int = 5) -> LevelGenerator:
 	var gen := LevelGenerator.new()
+	autofree(gen)
 	gen.grid_width = w
 	gen.grid_height = h
 	gen.grid = []
