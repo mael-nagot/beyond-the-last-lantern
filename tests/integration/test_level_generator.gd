@@ -306,6 +306,33 @@ func test_min_distance_keeps_objects_apart() -> void:
 			assert_gte(dist, 5,
 				"objects at %s and %s are %d apart (need >= 5)" % [positions[i], positions[j], dist])
 
+func test_items_respect_min_distance_when_possible() -> void:
+	# When min_distance_to_other_item is set, placed items shouldn't
+	# cluster on adjacent tiles. Graceful degrade: if not all rolls can
+	# honour the distance, the algorithm relaxes — so we assert the
+	# constraint as a "best effort": the EARLIEST placements (when the
+	# grid is least constrained) must respect it. We pick a small
+	# count and a moderate distance so all rolls easily fit.
+	var item := _make_item()
+	var entry := _make_loot_entry(item)
+	entry.min_distance_to_other_item = 4
+	var loot: Array[LootEntry] = [entry]
+	var biome := _make_biome(loot, 3, 3)
+	var gen := _make_generator(biome)
+	# Collect every cell that received an item.
+	var item_positions: Array = []
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			if not gen.grid[x][y].items.is_empty():
+				item_positions.append(Vector2i(x, y))
+	# 3 items requested; with min_distance 4 on a 21x21 grid + multiple
+	# rooms, all should fit. Verify pairwise spacing.
+	for i in range(item_positions.size()):
+		for j in range(i + 1, item_positions.size()):
+			var dist: int = abs(item_positions[i].x - item_positions[j].x) + abs(item_positions[i].y - item_positions[j].y)
+			assert_gte(dist, 4,
+				"items at %s and %s are %d apart (need >= 4)" % [item_positions[i], item_positions[j], dist])
+
 func test_items_avoid_chest_cells() -> void:
 	# When chests and items both spawn, items should never land on a
 	# blocking-object cell (the player can't reach piled items there).

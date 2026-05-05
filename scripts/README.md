@@ -33,8 +33,8 @@ Tests for these scripts live in `res://tests/`. See `res://tests/README.md` for 
 
 ### LootEntry.gd
 **Type:** Resource (data only, used inside BiomeData.floor_loot)
-**Purpose:** One entry in a biome's loot pool. Pairs an `ItemData` with a `weight` (relative probability) and a `placement` flag-set (Corridor / Room / Dead End — any combination). Defaults to weight 1, placement = all three types. `allows(placement_type)` checks one of the constants `PLACEMENT_CORRIDOR / PLACEMENT_ROOM / PLACEMENT_DEAD_END`.
-**Key exports:** item, weight, placement
+**Purpose:** One entry in a biome's floor-loot pool. Pairs an `ItemData` with a `weight` (relative probability), a `placement` flag-set (Corridor / Room / Dead End — any combination), and a `min_distance_to_other_item` preference (Manhattan tiles from any already-placed floor item; the algorithm relaxes by 1 down to 0 if the constraint can't be satisfied). Defaults: weight 1, placement = all three types, no min distance. `allows(placement_type)` checks one of the constants `PLACEMENT_CORRIDOR / PLACEMENT_ROOM / PLACEMENT_DEAD_END`.
+**Key exports:** item, weight, placement, min_distance_to_other_item
 
 ### MapData.gd
 **Type:** RefCounted (standalone script, not attached to any node)

@@ -5,6 +5,7 @@ func test_defaults() -> void:
 	assert_eq(entry.item, null)
 	assert_eq(entry.weight, 1)
 	assert_eq(entry.placement, LootEntry.PLACEMENT_ANY)
+	assert_eq(entry.min_distance_to_other_item, 0)
 
 func test_placement_any_equals_all_three_flags() -> void:
 	var expected := LootEntry.PLACEMENT_CORRIDOR | LootEntry.PLACEMENT_ROOM | LootEntry.PLACEMENT_DEAD_END
