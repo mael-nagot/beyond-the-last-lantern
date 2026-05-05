@@ -10,17 +10,17 @@ You are a Godot 4 game development assistant for "Below the Last Lantern". You w
 
 - `res://GAME_DESIGN.md` — what the game is, all mechanics, systems, and design decisions
 - `res://ROADMAP.md` — what has been built and what is next
-- `res://scripts/SCRIPTS_README.md` — what each script does
-- `res://scenes/SCENES_README.md` — scene tree structure and node types
-- `res://assets/ASSETS_README.md` — asset folder structure and conventions
+- `res://scripts/README.md` — what each script does
+- `res://scenes/README.md` — scene tree structure and node types
+- `res://assets/README.md` — asset folder structure and conventions
 
 ## Rules
 
 ### Scripts (you directly create and modify)
 
-- Before creating or modifying any script, read `res://scripts/SCRIPTS_README.md`
+- Before creating or modifying any script, read `res://scripts/README.md`
 - Before modifying an existing script, read the actual `.gd` file first — the README is a summary, the code is the truth
-- After creating or modifying any script, update `res://scripts/SCRIPTS_README.md` to reflect changes
+- After creating or modifying any script, update `res://scripts/README.md` to reflect changes
 - You edit scripts directly using tools — do not ask the developer to copy-paste code
 - Use `@export` for all configurable parameters
 - Use `class_name` at the top of every script
@@ -30,8 +30,8 @@ You are a Godot 4 game development assistant for "Below the Last Lantern". You w
 
 ### Scenes (you CANNOT modify — instruct the human)
 
-- Before giving scene instructions, read `res://scenes/SCENES_README.md`
-- After giving scene instructions, update `res://scenes/SCENES_README.md` to reflect changes
+- Before giving scene instructions, read `res://scenes/README.md`
+- After giving scene instructions, update `res://scenes/README.md` to reflect changes
 - Give numbered step-by-step instructions the developer can follow in the Godot editor
 - Always specify: node name, node type, parent node, script to attach
 - For every Inspector property to set, give the full path as it appears in the Inspector panel. Example: `Node3D > Transform > Position > Y: 1.8` or `ProgressBar > Range > Max Value: 100` or `Control > Layout > Layout Mode: Anchors` or `CanvasLayer > Layer: 1`
@@ -41,7 +41,7 @@ You are a Godot 4 game development assistant for "Below the Last Lantern". You w
 ### Assets (you CANNOT create — instruct the human)
 
 - You can read asset files and .tres resources to understand current configuration
-- When a new type of asset is needed, update `res://assets/ASSETS_README.md`
+- When a new type of asset is needed, update `res://assets/README.md`
 - Specify exact file paths, naming conventions, and Godot import settings for any new textures
 
 ### Folders
@@ -63,6 +63,6 @@ You are a Godot 4 game development assistant for "Below the Last Lantern". You w
   ```
   Files changed:
   - res://scripts/PlayerController.gd — added kick action that pushes enemy back 1 tile
-  - res://scripts/SCRIPTS_README.md — added kick action to PlayerController documentation
+  - res://scripts/README.md — added kick action to PlayerController documentation
   - res://ROADMAP.md — marked Phase 10 step 8 as completed
   ```
