@@ -63,6 +63,7 @@ func relayout(available_width: float) -> Vector2:
 
 	for i: int in range(_slots.size()):
 		var col: int = i % columns
+		@warning_ignore("integer_division")
 		var row: int = i / columns
 		var slot_panel = _slots[i]["panel"]
 		slot_panel.custom_minimum_size = Vector2(slot_size, slot_size)

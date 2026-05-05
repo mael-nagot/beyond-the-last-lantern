@@ -264,7 +264,7 @@ func rotate_camera_to(turn_right: bool) -> void:
 	var tween = create_tween()
 	tween.tween_property(camera, "rotation_degrees:y", _current_angle, 0.12)
 
-func _grid_to_world(x: int, y: int, facing: Vector2i = Vector2i.ZERO) -> Vector3:
+func _grid_to_world(x: int, y: int) -> Vector3:
 	return Vector3(
 		x * CELL_SIZE + CELL_SIZE * 0.5,
 		camera_eye_height,
