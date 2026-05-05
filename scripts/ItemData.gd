@@ -34,6 +34,8 @@ enum EffectType {
 @export_group("Art")
 @export var icon: Texture2D
 @export var dungeon_sprite: Texture2D
+@export var dungeon_sprite_world_height: float = 0.5
+@export var dungeon_sprite_y_offset: float = 0.0
 
 @export_group("Economy")
 @export var buy_price: int = 0

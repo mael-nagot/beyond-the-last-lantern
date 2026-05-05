@@ -14,6 +14,9 @@ enum CellType { WALL, FLOOR, ENTRANCE, EXIT }
 # What object sits on this cell (null = empty)
 @export var object_id: String = ""
 
+# Items dropped on this cell (Array[ItemInstance]). Multiple items pile up.
+var items: Array = []
+
 # Is anything blocking movement through this cell?
 var is_blocked: bool:
 	get:

@@ -12,6 +12,7 @@ effect_type = 1
 effect_value = 30
 icon = ExtResource("2_fmcrx")
 dungeon_sprite = ExtResource("1_1vvir")
+dungeon_sprite_world_height = 0.8
 buy_price = 50
 sell_price = 25
 metadata/_custom_type_script = "uid://c8e2tmtuuuypx"

@@ -10,6 +10,12 @@ extends Node3D
 @export var viewport_ratio_landscape: float = 1.15
 
 const CELL_SIZE = 4.6
+const ITEM_MAX_VISIBLE_PER_TILE = 3
+const ITEM_STACK_OFFSETS: Array[Vector3] = [
+	Vector3( 0.0, 0.0,  0.0),
+	Vector3( 0.5, 0.0, -0.4),
+	Vector3(-0.5, 0.0,  0.3),
+]
 const FACING_ANGLES = {
 	Vector2i( 0, -1):    0.0,   # North
 	Vector2i( 1,  0):  -90.0,   # East
@@ -28,14 +34,24 @@ var _current_grid_pos: Vector2i = Vector2i.ZERO
 @onready var world_env          : WorldEnvironment      = $SubViewportContainer/SubViewport/WorldEnvironment
 
 var generator: LevelGenerator
+var _items_root: Node3D
 
 func setup(gen: LevelGenerator) -> void:
 	generator = gen
+	_ensure_items_root()
 	_build_mesh()
+	_build_items()
 	_place_camera_at_entrance()
 	_apply_biome_environment()
 	_update_viewport_size()
 	get_viewport().size_changed.connect(_on_viewport_resized)
+
+func _ensure_items_root() -> void:
+	if _items_root != null and is_instance_valid(_items_root):
+		return
+	_items_root = Node3D.new()
+	_items_root.name = "ItemsRoot"
+	sub_viewport.add_child(_items_root)
 
 func _on_viewport_resized() -> void:
 	_update_viewport_size()
@@ -110,6 +126,38 @@ func _build_mesh() -> void:
 				var ncell = generator.get_cell(npos.x, npos.y)
 				if ncell and ncell.cell_type == GridCell.CellType.WALL:
 					_add_vertical_quad(n[1], n[2], _make_material(biome.wall_albedo, biome.wall_normal))
+
+func _build_items() -> void:
+	for child in _items_root.get_children():
+		child.queue_free()
+
+	for x in range(generator.grid_width):
+		for y in range(generator.grid_height):
+			var cell: GridCell = generator.get_cell(x, y)
+			if cell == null or cell.items.is_empty():
+				continue
+			var cx := x * CELL_SIZE + CELL_SIZE * 0.5
+			var cz := y * CELL_SIZE + CELL_SIZE * 0.5
+			var visible_count: int = min(cell.items.size(), ITEM_MAX_VISIBLE_PER_TILE)
+			for i in range(visible_count):
+				var inst: ItemInstance = cell.items[i]
+				if inst == null or inst.data == null or inst.data.dungeon_sprite == null:
+					continue
+				var sprite := _make_item_sprite(inst.data)
+				var offset: Vector3 = ITEM_STACK_OFFSETS[i]
+				var sprite_y: float = inst.data.dungeon_sprite_world_height * 0.5 + inst.data.dungeon_sprite_y_offset
+				sprite.position = Vector3(cx + offset.x, sprite_y, cz + offset.z)
+				_items_root.add_child(sprite)
+
+func _make_item_sprite(data: ItemData) -> Sprite3D:
+	var sprite := Sprite3D.new()
+	sprite.texture = data.dungeon_sprite
+	var tex_h: int = max(1, data.dungeon_sprite.get_height())
+	sprite.pixel_size = data.dungeon_sprite_world_height / float(tex_h)
+	sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+	return sprite
 
 func _make_material(albedo_set: Array, normal_set: Array = []) -> StandardMaterial3D:
 	var mat = StandardMaterial3D.new()

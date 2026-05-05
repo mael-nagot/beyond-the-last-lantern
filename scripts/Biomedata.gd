@@ -52,3 +52,8 @@ extends Resource
 @export var room_count: int = 6
 @export var room_min_size: int = 3
 @export var room_max_size: int = 5
+
+@export_group("Level Generation — Items")
+@export var floor_loot: Array[LootEntry] = []
+@export var floor_items_min: int = 3
+@export var floor_items_max: int = 8
