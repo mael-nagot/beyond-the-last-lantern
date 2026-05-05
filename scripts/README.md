@@ -8,8 +8,8 @@
 
 ### LevelGenerator.gd
 **Type:** Node
-**Purpose:** Procedurally generates dungeon levels using a Growing Tree maze algorithm. Creates a 2D grid of GridCell resources, carves corridors with configurable wiggle and width variation, optionally places rooms, connects all regions, and places entrance/exit points. Validates paths with BFS to ensure the exit is always reachable from the entrance.
-**Key exports:** grid_width, grid_height, maze_bias, wiggle, corridor_min_width, corridor_max_width, width_change_chance, room_count, room_min_size, room_max_size, entrance_at_dead_end, exit_at_dead_end, min_exit_distance
+**Purpose:** Procedurally generates dungeon levels using a Growing Tree maze algorithm. Creates a 2D grid of GridCell resources, carves corridors with configurable wiggle and width variation, optionally places rooms, connects all regions, and places entrance/exit points. Validates paths with BFS to ensure the exit is always reachable from the entrance. All generation parameters are read from a BiomeData resource via `configure(biome)`.
+**Key methods:** configure(biome: BiomeData), generate()
 
 ### DungeonView.gd
 **Type:** Node3D (attached to the DungeonView scene root)
@@ -24,8 +24,8 @@
 
 ### BiomeData.gd
 **Type:** Resource (data only, loaded as .tres files)
-**Purpose:** Defines all visual and environmental properties of a biome. Holds arrays of wall/floor/ceiling textures (albedo and normal), fog settings, ambient light settings, triplanar mapping toggles, and wall height. Loaded at runtime and passed to DungeonView to configure the dungeon's appearance.
-**Key exports:** wall_albedo, wall_normal, floor_albedo, floor_normal, ceiling_albedo, ceiling_normal, fog_enabled, fog_color, fog_density, fog_aerial, ambient_color, ambient_energy, use_triplanar, triplanar_sharpness, triplanar_y_offset
+**Purpose:** Defines all visual, environmental, and level generation properties of a biome. Holds arrays of wall/floor/ceiling textures (albedo and normal), fog settings, ambient light settings, triplanar mapping toggles, wall height, and all dungeon generation parameters (grid size, maze behavior, corridor width, room placement, entrance/exit rules). Loaded at runtime and passed to both DungeonView (appearance) and LevelGenerator (generation).
+**Key exports:** wall_albedo, wall_normal, floor_albedo, floor_normal, ceiling_albedo, ceiling_normal, fog_enabled, fog_color, fog_density, fog_aerial, ambient_color, ambient_energy, use_triplanar, triplanar_sharpness, triplanar_y_offset, grid_width, grid_height, maze_bias, wiggle, corridor_min_width, corridor_max_width, width_change_chance, room_count, room_min_size, room_max_size, entrance_at_dead_end, exit_at_dead_end, min_exit_distance
 
 ### MapData.gd
 **Type:** RefCounted (standalone script, not attached to any node)
@@ -33,7 +33,7 @@
 
 ### Game.gd
 **Type:** Node3D (attached to the Game scene root)
-**Purpose:** Main game orchestrator. Creates the LevelGenerator, loads the biome, initializes DungeonView and PlayerController, wires HUD signals (movement pad, map), and routes keyboard input to the PlayerController. Handles map updates on every player movement.
+**Purpose:** Main game orchestrator. Loads the biome resource, creates the LevelGenerator (configured from the biome), initializes DungeonView and PlayerController, wires HUD signals (movement pad, map), and routes keyboard input to the PlayerController. Handles map updates on every player movement.
 
 ---
 

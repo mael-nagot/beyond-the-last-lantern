@@ -29,3 +29,26 @@ extends Resource
 @export var use_triplanar: bool = false
 @export var triplanar_sharpness: float = 0.5
 @export var triplanar_y_offset: float = 0.5
+
+@export_group("Level Generation — Grid")
+@export var grid_width: int = 31
+@export var grid_height: int = 31
+
+@export_group("Level Generation — Entrance / Exit")
+@export var min_exit_distance: int = 10
+@export var entrance_at_dead_end: bool = true
+@export var exit_at_dead_end: bool = true
+
+@export_group("Level Generation — Maze")
+@export_range(0.0, 1.0) var maze_bias: float = 0.4
+@export_range(0.0, 1.0) var wiggle: float = 1.0
+
+@export_group("Level Generation — Corridor Width")
+@export var corridor_min_width: int = 1
+@export var corridor_max_width: int = 1
+@export_range(0.0, 1.0) var width_change_chance: float = 0.15
+
+@export_group("Level Generation — Rooms")
+@export var room_count: int = 6
+@export var room_min_size: int = 3
+@export var room_max_size: int = 5
