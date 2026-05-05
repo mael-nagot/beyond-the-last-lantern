@@ -1,35 +1,43 @@
 class_name LevelGenerator
 extends Node
 
-# --- Grid ---
-@export var grid_width: int = 31
-@export var grid_height: int = 31
+var grid_width: int = 31
+var grid_height: int = 31
+var min_exit_distance: int = 10
+var entrance_at_dead_end: bool = true
+var exit_at_dead_end: bool = true
+var maze_bias: float = 0.4
+var wiggle: float = 1.0
+var corridor_min_width: int = 1
+var corridor_max_width: int = 1
+var width_change_chance: float = 0.15
+var room_count: int = 6
+var room_min_size: int = 3
+var room_max_size: int = 5
 
-@export_group("Entrance / Exit")
-@export var min_exit_distance: int = 10
-@export var entrance_at_dead_end: bool = true
-@export var exit_at_dead_end: bool = true
-
-@export_group("Maze")
-@export_range(0.0, 1.0) var maze_bias: float = 0.4
-@export_range(0.0, 1.0) var wiggle: float = 1.0  # 0.0 = straight, 1.0 = very wiggly
-
-@export_group("Corridor Width")
-@export var corridor_min_width: int = 1
-@export var corridor_max_width: int = 1
-@export_range(0.0, 1.0) var width_change_chance: float = 0.15
-
-@export_group("Rooms")
-@export var room_count: int = 6
-@export var room_min_size: int = 3
-@export var room_max_size: int = 5
-
-# --- Internal ---
 var grid: Array = []
 var entrance_pos: Vector2i = Vector2i.ZERO
 var exit_pos: Vector2i = Vector2i.ZERO
 var _current_corridor_width: int = 1
 var _room_rects: Array = []
+
+func configure(biome: BiomeData) -> void:
+	if biome == null:
+		push_error("LevelGenerator: biome is null, using defaults")
+		return
+	grid_width = biome.grid_width
+	grid_height = biome.grid_height
+	min_exit_distance = biome.min_exit_distance
+	entrance_at_dead_end = biome.entrance_at_dead_end
+	exit_at_dead_end = biome.exit_at_dead_end
+	maze_bias = biome.maze_bias
+	wiggle = biome.wiggle
+	corridor_min_width = biome.corridor_min_width
+	corridor_max_width = biome.corridor_max_width
+	width_change_chance = biome.width_change_chance
+	room_count = biome.room_count
+	room_min_size = biome.room_min_size
+	room_max_size = biome.room_max_size
 
 func generate() -> void:
 	_fill_with_walls()

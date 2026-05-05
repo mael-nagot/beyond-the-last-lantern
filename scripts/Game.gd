@@ -12,11 +12,17 @@ func _ready() -> void:
 		push_error("Required node missing")
 		return
 
+	var biome = load("res://assets/biomes/forest.tres")
+	if biome == null:
+		push_error("Game: failed to load biome resource")
+		return
+
 	var gen = LevelGenerator.new()
 	add_child(gen)
+	gen.configure(biome)
 	gen.generate()
 
-	dungeon_view.biome = load("res://assets/biomes/forest.tres")
+	dungeon_view.biome = biome
 	dungeon_view.setup(gen)
 	player_controller.setup(dungeon_view, gen)
 
