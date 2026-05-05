@@ -264,6 +264,34 @@ func rotate_camera_to(turn_right: bool) -> void:
 	var tween = create_tween()
 	tween.tween_property(camera, "rotation_degrees:y", _current_angle, 0.12)
 
+const SHAKE_INTENSITY := 0.12
+const SHAKE_DURATION  := 0.18
+const SHAKE_STEPS     := 5
+
+var _shake_tween: Tween = null
+var _shake_origin: Vector3 = Vector3.ZERO
+
+# Brief omni-directional jolt of the camera position. Used for wall
+# bumps; safe to call rapid-fire — an active shake is killed and the
+# camera reset before a fresh shake starts so successive bumps don't
+# drift.
+func shake_camera() -> void:
+	if _shake_tween != null and _shake_tween.is_running():
+		_shake_tween.kill()
+		camera.position = _shake_origin
+	_shake_origin = camera.position
+	_shake_tween = create_tween()
+	var step_dur := SHAKE_DURATION / float(SHAKE_STEPS)
+	for i in range(SHAKE_STEPS):
+		var decay := 1.0 - float(i) / float(SHAKE_STEPS)
+		var offset := Vector3(
+			randf_range(-SHAKE_INTENSITY, SHAKE_INTENSITY),
+			randf_range(-SHAKE_INTENSITY, SHAKE_INTENSITY) * 0.4,
+			randf_range(-SHAKE_INTENSITY, SHAKE_INTENSITY),
+		) * decay
+		_shake_tween.tween_property(camera, "position", _shake_origin + offset, step_dur)
+	_shake_tween.tween_property(camera, "position", _shake_origin, step_dur)
+
 func _grid_to_world(x: int, y: int) -> Vector3:
 	return Vector3(
 		x * CELL_SIZE + CELL_SIZE * 0.5,

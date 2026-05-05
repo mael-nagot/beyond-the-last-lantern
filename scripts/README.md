@@ -18,7 +18,7 @@ Tests for these scripts live in `res://tests/`. See `res://tests/README.md` for 
 **Purpose:** Renders the dungeon in 3D. Builds flat quad meshes (walls, floors, ceilings) from the grid data, applies biome textures with optional triplanar mapping and normal maps, spawns Sprite3D billboards for items piled on floor cells (up to 3 visible per tile, billboard mode FIXED_Y, NEAREST filter, alpha-cut DISCARD), creates an `ItemsRoot` Node3D under the SubViewport at runtime to hold them, also creates a transparent `DungeonDropTarget` overlay on top of the SubViewportContainer to accept item drags (with the container itself set to MOUSE_FILTER_IGNORE so it doesn't reject drops first), manages the camera position and rotation, handles the SubViewport sizing for portrait/landscape orientations, and applies biome environment settings (fog, ambient light). `rebuild_items()` re-syncs the Sprite3D set from the current grid (used after pickup or dungeon drop).
 **Key exports:** show_ceiling, camera_eye_height, wall_height, biome, fov, viewport_ratio_portrait, viewport_ratio_landscape
 **Public references:** drop_target (DungeonDropTarget)
-**Key methods:** setup(gen), rebuild_items(), move_camera_to(grid_pos, facing), rotate_camera_to(turn_right), set_initial_facing(facing)
+**Key methods:** setup(gen), rebuild_items(), move_camera_to(grid_pos, facing), rotate_camera_to(turn_right), set_initial_facing(facing), shake_camera() (brief jolt for wall bumps)
 
 ### PlayerController.gd
 **Type:** Node (attached to the PlayerController node inside DungeonView)

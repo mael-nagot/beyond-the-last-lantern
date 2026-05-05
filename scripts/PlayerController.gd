@@ -82,6 +82,7 @@ func _step(delta: Vector2i) -> void:
 		SoundManager.play_move()
 	else:
 		SoundManager.play_wall_bump()
+		_view.shake_camera()
 
 func _update_camera() -> void:
 	_view.move_camera_to(grid_pos, DIR_VECTORS[facing])
