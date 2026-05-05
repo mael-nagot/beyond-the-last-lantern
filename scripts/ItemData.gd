@@ -18,7 +18,9 @@ enum EffectType {
 	INFLICT_STATUS,
 }
 
+# Translation key (e.g. "item.health_potion.name"). See res://localization/.
 @export var item_name: String = ""
+# Translation key (e.g. "item.health_potion.description"). See res://localization/.
 @export_multiline var description: String = ""
 @export var category: Category = Category.CONSUMABLE
 
@@ -40,3 +42,9 @@ enum EffectType {
 @export_group("Economy")
 @export var buy_price: int = 0
 @export var sell_price: int = 0
+
+func get_display_name() -> String:
+	return tr(item_name)
+
+func get_display_description() -> String:
+	return tr(description)

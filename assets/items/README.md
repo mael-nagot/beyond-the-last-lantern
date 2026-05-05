@@ -21,8 +21,8 @@ See `ItemData.gd` for the full schema. Common fields:
 
 | Field | Purpose |
 |---|---|
-| `item_name` | Display name |
-| `description` | Tooltip text |
+| `item_name` | Translation key for the display name (e.g. `item.health_potion.name`) — see `res://localization/` |
+| `description` | Translation key for the tooltip text (e.g. `item.health_potion.description`) |
 | `category` | CONSUMABLE, EQUIPMENT, THROWABLE, QUEST |
 | `effect_type` | NONE, HEAL_HP, HEAL_MP, STAT_BOOST, CURE_STATUS, DAMAGE, INFLICT_STATUS |
 | `effect_value` | Amount healed / damage dealt / boost size |
