@@ -1,4 +1,4 @@
-# Below the Last Lantern — Game Design & Development Agent File
+# Below the Last Lantern — Game Design Document
 
 ## Game Overview
 
@@ -116,11 +116,42 @@ Turn-based combat triggered when stepping into an enemy's detection range. The c
 
 ---
 
+## Items
+
+### Item Types
+
+Items can be found on the dungeon floor, inside chests, dropped by enemies on death, or bought at shops in towns.
+
+| Category | Examples |
+|---|---|
+| Health restoration | Health potion (small, medium, large) |
+| Mana restoration | Mana potion (small, medium, large) |
+| Stat boost (temporary) | Strength elixir, speed potion, shield draught |
+| Status cure | Antidote (poison), salve (burn), clarity (curse) |
+| Offensive throwable | Bomb (AoE damage), poison flask (poison status on enemy) |
+| Status inflict | Paralyze dust, blind powder |
+| Equipment | Weapons, armor, rings, necklaces (see Equipment Slots) |
+
+### Item Interactions
+
+- **In the dungeon:** items sit on the floor as 2D sprites (Sprite3D billboards). Multiple items on the same tile stack visually. Click/tap to pick up and add to the item bar. Items persist on the floor until picked up or the player leaves the level.
+- **Item bar:** 10 slots. Drag an item to the party panel to use it on a character (healing, stat boost, cure). Drag an item to the dungeon view to throw it (bombs, poison flasks). Items in the item bar carry over between tiles but not between levels unless explicitly kept.
+- **Inventory/Equipment:** drag an item from the item bar into a character's inventory to equip it. Equipment goes into the appropriate slot.
+- **Shops:** items displayed with their icon and price. Tap to buy and add to item bar.
+
+### Item Art Requirements
+
+Each item needs two images:
+- **Icon** (small, square): used in the item bar, equipment slots, and shop UI
+- **Dungeon sprite** (larger, transparent background): used as the Sprite3D billboard when the item sits on the dungeon floor
+
+---
+
 ## Enemies
 
 ### Enemy Base Stats
 
-Each enemy has: HP, Movement Speed, Flying (yes/no), Intelligence, Strength, and a set of attacks (spell, distance, melee).
+Each enemy has: HP, Movement Speed, Flying (yes/no), Intelligence, Strength, and a set of attacks (spell, distance, melee). Each enemy also has elemental resistances and weaknesses.
 
 ### Enemy Types
 
@@ -191,6 +222,33 @@ Objects attached to walls, rendered as sprites on the wall face.
 
 ---
 
+## Quest System
+
+Each biome has a pool of quests that are randomly chosen and placed during level generation. Quests add variety and narrative to the procedural levels.
+
+### Quest Types
+
+| Quest | Description |
+|---|---|
+| **Fetch quest** | An NPC asks the player to find a specific object somewhere in the level and bring it back |
+| **Locked door** | A door requires a specific key (e.g., copper key) to open. The key is always placed in an accessible area before the door |
+| **Rescue NPC** | An NPC is fleeing from an elite monster. The player can choose to fight the monster to save them |
+| **Riddle statue** | A talking statue asks a riddle. Correct answer reveals a secret or grants a reward |
+| **Thug encounter** | A thug NPC with multiple dialogue choices. Correct answers befriend them (potential party member or reward). Wrong answers trigger a fight |
+| **Torch puzzle** | Light 3 (or more) torches with a fireball spell to make a hidden wall disappear, revealing a secret area |
+| **Escort quest** | Protect a weak NPC as they walk to the exit |
+| **Hunt quest** | Kill a specific elite enemy that roams the level |
+
+### Quest Placement Rules
+
+- Quests are placed after the base level is generated but before the player enters.
+- Quest objects (keys, NPCs, puzzle elements) must be placed in reachable locations.
+- Keys must always be accessible before their corresponding locked door (enforced by BFS).
+- Each level has 0–3 quests depending on the biome configuration.
+- Some quests are biome-specific (e.g., underwater quests only in underwater biome).
+
+---
+
 ## Biome System
 
 Each biome defines:
@@ -204,6 +262,7 @@ Each biome defines:
 - Which enemies can spawn
 - Which objects can appear on floors and walls
 - Which traps are present
+- Which quests can appear
 - Special mechanics (underwater bubbles, damage floors, etc.)
 - Background/skybox
 
@@ -235,12 +294,74 @@ Currency dropped by enemies and found in chests. Spent at the Grimoire screen (a
 
 ---
 
-## Title Screen
+## Title Screen & Main Menu
 
-- **New Game** — character creation (class, gender, portrait) then start
-- **Continue** — resume an unfinished run (only if a run is in progress)
-- **Grimoire Pages** — view collected pages, spend Void Ink to unlock rewards
-- **Options** — language selection (English / French)
+### Main Menu
+
+The title screen is the entry point of the game. It displays the game logo/title art and four buttons:
+
+- **New Game** — opens the character creation screen
+- **Continue** — resumes the current unfinished run (button only visible if a saved run exists)
+- **Grimoire Pages** — opens the Grimoire screen to view collected pages, spend Void Ink, and unlock rewards
+- **Options** — opens the options screen
+
+### Character Creation (New Game Flow)
+
+When the player selects "New Game", they go through the following steps:
+
+1. **Class selection** — choose between Warrior, Wizard, Battle Mage, or Rogue. Each class card shows the base stats and starting equipment/spell so the player can make an informed choice.
+2. **Gender selection** — Male or Female. Affects the portrait options available.
+3. **Portrait selection** — choose a character portrait from a set of available portraits for the selected class and gender. Portraits are displayed as a scrollable gallery.
+4. **Name entry** — type a name for the character (optional, default name provided per class).
+5. **Confirmation** — summary screen showing the chosen class, gender, portrait, and name. Player confirms to start the run.
+
+Each class starts with:
+- Base stats determined by class
+- A basic (bad) weapon appropriate to the class
+- A basic (bad) armor
+- Wizard and Battle Mage start with Minor Lightning spell
+- Warrior and Rogue start with no spell
+
+### Save & Load System
+
+The game uses an **auto-save** system — the game state is saved automatically at key moments:
+
+**When the game saves:**
+- When entering a new level
+- When exiting a level (reaching an exit)
+- When the player opens the pause/settings menu
+- When the app goes to background (mobile)
+
+**What is saved (run state):**
+- Current level number and biome
+- Full grid state of the current level (explored tiles, object states, enemy positions)
+- Player party data (all characters: stats, HP, MP, equipment, inventory, spells)
+- Item bar contents
+- Map exploration state (which tiles have been revealed)
+- Grimoire pages carried (not yet inscribed)
+- Void Ink collected this run
+- Player position and facing direction on the grid
+
+**What is saved (persistent/meta state):**
+- Grimoire progress (which pages have been inscribed, which rewards unlocked)
+- Total Void Ink available for spending
+- Unlocked biome paths
+- Unlocked characters, weapons, perks
+- Options/settings (language, etc.)
+- Best run statistics
+
+**Save file location:** uses Godot's `user://` directory (`user://save_run.json` for the current run, `user://save_meta.json` for persistent data).
+
+**Continue button logic:** the title screen checks if `user://save_run.json` exists and is valid. If yes, the Continue button is visible and loads the run. If the player dies or completes the game, the run save is deleted (but meta progress is kept).
+
+### Options Screen
+
+Accessible from the title screen and from the in-game settings button (⚙):
+
+- **Language** — English, French, Spanish, Chinese, Japanese, Korean, German, Italian
+- **Sound/Music volume** (future)
+- **Screen orientation lock** (future)
+- **Touch sensitivity** (future)
 
 ---
 
@@ -249,7 +370,7 @@ Currency dropped by enemies and found in chests. Spent at the Grimoire screen (a
 Towns appear between boss fights. They serve as safe zones where the player can:
 
 - Rest and heal
-- Buy/sell equipment
+- Buy/sell equipment and items at shops
 - Manage inventory
 - Interact with NPCs for lore and quests
 - Access the Grimoire
@@ -310,296 +431,6 @@ Responsive HUD that adapts to portrait and landscape orientations, and scales do
 - Exit shown as a green diamond.
 - Player shown as a red blinking arrow pointing in the facing direction.
 - Debug mode: `debug_reveal_all` export toggle reveals the entire map.
-
----
-
-## Technical Architecture
-
-### Engine & Platform
-
-- **Engine:** Godot 4
-- **Primary platform:** Mobile (iOS/Android)
-- **Secondary platform:** Desktop
-- **Rendering:** 3D with flat quad geometry, hand-drawn 2D textures
-- **Resolution:** SubViewport for the dungeon view, CanvasLayer for HUD
-
-### Project Structure
-
-```
-res://
-├── assets/
-│   ├── biomes/
-│   │   └── forest.tres
-│   └── textures/
-│       └── biomes/
-│           └── forest/
-│               ├── walls/
-│               ├── floors/
-│               └── ceilings/
-├── scenes/
-│   ├── Game.tscn
-│   ├── DungeonView.tscn
-│   └── hud/
-│       ├── HUD.tscn
-│       ├── TopBar.tscn
-│       ├── ItemBar.tscn
-│       ├── PartyPanel.tscn
-│       ├── CharacterSlot.tscn
-│       ├── MovementPad.tscn
-│       └── MapPopup.tscn
-├── scripts/
-│   ├── Game.gd
-│   ├── GridCell.gd
-│   ├── LevelGenerator.gd
-│   ├── DungeonView.gd
-│   ├── PlayerController.gd
-│   ├── BiomeData.gd
-│   ├── MapData.gd
-│   └── hud/
-│       ├── HUD.gd
-│       ├── ItemBar.gd
-│       ├── PartyPanel.gd
-│       ├── CharacterSlot.gd
-│       ├── MovementPad.gd
-│       └── MapPopup.gd
-└── shaders/
-    └── vignette.gdshader (unused currently)
-```
-
-### Scene Tree (Runtime)
-
-```
-Game (Node3D, Game.gd)
-└── DungeonView (Node3D, DungeonView.gd)
-│   ├── SubViewportContainer
-│   │   └── SubViewport
-│   │       ├── Camera (Camera3D)
-│   │       ├── DungeonRoot (Node3D) — holds all wall/floor/ceiling quads
-│   │       └── WorldEnvironment
-│   └── PlayerController (Node, PlayerController.gd)
-└── HUD (CanvasLayer, HUD.gd)
-    └── HUDRoot (Control, full rect)
-        ├── TopBar (HBoxContainer)
-        │   ├── BtnSettings (Button, "⚙")
-        │   └── BtnMap (Button, "🗺")
-        ├── PartyPanel (HBoxContainer, PartyPanel.gd)
-        │   ├── Slot0 (CharacterSlot instance)
-        │   ├── Slot1 (CharacterSlot instance)
-        │   └── Slot2 (CharacterSlot instance)
-        ├── ItemBar (Container, ItemBar.gd)
-        ├── MovementPad (GridContainer, MovementPad.gd)
-        │   ├── BtnTurnLeft, BtnForward, BtnTurnRight
-        │   └── BtnStrafeLeft, BtnBackward, BtnStrafeRight
-        └── MapPopup (Control, MapPopup.gd)
-            ├── Background (ColorRect)
-            ├── CloseButton (Button)
-            └── MapDrawArea (Control)
-```
-
----
-
-## What Has Been Developed (Completed)
-
-### Phase 1 — Level Generator ✅
-
-- `GridCell.gd` resource with cell types (WALL, FLOOR, ENTRANCE, EXIT)
-- `LevelGenerator.gd` with Growing Tree maze algorithm
-- Configurable parameters: maze_bias, wiggle, corridor width range, room count/size
-- Entrance/exit placement with configurable dead-end preference and minimum distance
-- BFS path validation (entrance to exit always reachable)
-- Room placement with overlap prevention
-- Room-to-maze connection system
-
-### Phase 2 — 3D Dungeon View ✅
-
-- Flat quad rendering (walls, floors, ceilings) instead of box meshes
-- Triplanar texture mapping with configurable sharpness and Y offset
-- Normal map support (subtle, with ambient-only lighting)
-- Biome-driven textures, fog, and ambient light via BiomeData resource
-- SubViewport rendering with configurable aspect ratio per orientation
-- FOV configuration
-- Camera eye height configuration
-
-### Phase 3 — Player Movement ✅
-
-- Step-by-step grid movement with 6 actions
-- Smooth camera tweening (position and rotation)
-- Correct coordinate system alignment (Godot -Z = North)
-- Accumulated angle tracking for rotation (no drift, no 270° snap)
-- Echo filtering for keyboard input (no multi-step on key hold)
-
-### Phase 4 — Biome System (Partial) ✅
-
-- `BiomeData.gd` resource with texture arrays, fog, ambient light, triplanar settings
-- Forest biome created with hand-drawn textures
-- Biome loaded and applied at level generation time
-
-### Phase 5 — UI / HUD ✅
-
-- Full responsive HUD adapting to portrait and landscape
-- TopBar with settings and map buttons
-- PartyPanel with 3 CharacterSlot instances (portrait, HP/MP bars, action buttons)
-- ItemBar with 10 slots in 5×2 grid layout
-- MovementPad with 6 directional buttons
-- All button sizes scale relative to screen short side
-- Adaptive viewport ratio reduction for tablets
-- UI scale reduction as fallback when viewport ratio hits minimum
-
-### Phase 6 — Map System ✅
-
-- Full-screen map popup with parchment background
-- Fog of war exploration (current tile + 8 adjacent revealed)
-- Wall-line rendering (not filled blocks)
-- Exit shown as green diamond
-- Player shown as blinking red directional arrow
-- Debug full reveal toggle
-- Map updates on every player movement
-
----
-
-## Development Roadmap — What's Next
-
-### Phase 7 — Objects & Interactables (Next)
-
-**Priority: HIGH — Foundation for gameplay variety**
-
-1. Create `ObjectData.gd` resource (type, size in tiles, blocks movement, wall-attached, sprite texture)
-2. Create object placement system in LevelGenerator (respecting path validation)
-3. Implement `Sprite3D` billboards for floor objects (chests, campfires)
-4. Implement wall-mounted sprites for wall objects (levers, paintings, torches)
-5. Create interaction system (player steps on or faces object, presses interact)
-6. Implement specific objects:
-   - Chest (lootable, opens inventory popup)
-   - Door (blocks until key/switch/spell)
-   - Switch/Lever (toggles doors, reveals secrets)
-   - Spike trap (periodic up/down, damage when up)
-   - Fireball trap (pressure plate or continuous)
-   - Immobilize trap (player can't move, can turn and attack)
-   - Alert trap (aggros enemies in 10-tile radius)
-   - Campfire (rest point, must clear zone first)
-
-### Phase 8 — Character Data System
-
-**Priority: HIGH — Required for combat and inventory**
-
-1. Create `CharacterData.gd` resource (stats, class, gender, portrait, equipment, spells)
-2. Create `WeaponData.gd`, `ArmorData.gd`, `SpellData.gd` resources
-3. Implement equipment slot system (8 slots per character)
-4. Implement stat calculation: base stats + equipment modifiers → final stats
-5. Create character creation screen (class, gender, portrait selection)
-6. Wire CharacterSlot UI to actual character data (HP/MP bars, portrait, name)
-7. Create inventory popup (opened by clicking character portrait)
-8. Implement drag-and-drop or tap-to-equip for items
-
-### Phase 9 — Combat System
-
-**Priority: HIGH — Core gameplay loop**
-
-1. Create `CombatManager.gd` (turn queue, damage resolution, status effects)
-2. Create `EnemyData.gd` resource (HP, speed, flying, INT, STR, attack set, element resistances)
-3. Implement enemy placement in LevelGenerator (configurable per biome)
-4. Implement enemy detection range and combat trigger
-5. Implement basic attack resolution (weapon damage vs defense)
-6. Implement spell casting (MP cost, INT scaling, elemental damage)
-7. Implement defense/parry action
-8. Implement kick action (push enemy back 1 tile)
-9. Implement back-attack bonus damage
-10. Implement elemental resistances and weaknesses
-11. Implement screen shake on heavy hits
-12. Implement loot drops on enemy death (items, Void Ink, Grimoire Pages)
-
-### Phase 10 — Enemy AI & Special Enemies
-
-**Priority: MEDIUM — Adds depth to combat**
-
-1. Basic AI: melee approach, ranged keep distance, spell casters
-2. Implement specific enemy behaviors:
-   - Heavy hitter (big attack every 3 turns, must parry)
-   - Charging enemy (charges, must parry every N attacks)
-   - Tile Corruptor (places fire/poison on tile)
-   - Magnet enemy (pulls player toward it)
-   - Splitting Slime (splits into 2 smaller slimes on death)
-   - Summoner (spawns additional enemies)
-   - Fusion enemy (merges with nearby enemies, becomes stronger)
-   - Shielded enemy (only hittable from sides)
-   - Mana Leacher (drains player MP per attack)
-   - Shadow enemy (ultra strong in dark, normal in light)
-   - Ghost (moves through walls)
-   - Trapper (immobilizes player)
-   - Armor Melter (destroys metal armor, leather armor immune)
-
-### Phase 11 — Mana & Resource Systems
-
-**Priority: MEDIUM — Enriches exploration and combat**
-
-1. Mana regeneration on new tile exploration (scales with INT/magic level)
-2. Mana regen equipment modifier (×1.25 multiplier item)
-3. Mana regen on kill (equipment perk)
-4. Curse mechanic (double damage dealt and taken)
-5. Levitation spell (bypass traps, swamp mud)
-
-### Phase 12 — Premade Blocks
-
-**Priority: MEDIUM — Content variety**
-
-1. Create premade block format (small grid sections with fixed layout)
-2. Create block library per biome (boss rooms, lore sections, puzzle rooms)
-3. Integrate premade blocks into LevelGenerator (placed at specific locations)
-4. Boss room blocks (fixed layout for each boss fight)
-5. Lore room blocks (story/NPC encounters)
-
-### Phase 13 — Biome Manager & Content
-
-**Priority: MEDIUM — Required for full game progression**
-
-1. Create remaining biome textures and BiomeData resources
-2. Implement biome-specific mechanics:
-   - Underwater biome (air bubbles for breathing, drowning timer)
-   - Damage floor biome (50% of tiles deal damage if stopped >10 seconds)
-   - Swamp biome (mud slows movement, levitation bypasses)
-3. Implement biome progression system (biome sequence with boss/town checkpoints)
-4. Implement biome path selection (choosing between up to 3 alternative biomes)
-5. Create town levels (safe zones, shops, NPCs)
-6. Create boss encounters
-
-### Phase 14 — Title Screen & Save System
-
-**Priority: MEDIUM — Required for complete game loop**
-
-1. Create title screen scene (New Game, Continue, Grimoire, Options)
-2. Implement save/load system (current run state persisted to disk)
-3. Implement Continue detection (show button only when a run exists)
-4. Implement options screen (language EN/FR)
-5. Implement Godot TranslationServer for EN/FR localization
-
-### Phase 15 — Grimoire & Meta Progression
-
-**Priority: LOW — Polish phase**
-
-1. Create Grimoire screen UI (list of pages, Void Ink balance, unlock buttons)
-2. Implement Grimoire Page drops in levels
-3. Implement "carry page to level exit" mechanic
-4. Implement Void Ink spending to inscribe pages
-5. Implement unlockable rewards:
-   - New biome paths
-   - New weapons
-   - New characters
-   - New perks
-   - Quests
-   - Additional level exits
-
-### Phase 16 — Polish & Final
-
-**Priority: LOW — Pre-release**
-
-1. Sound effects and music per biome
-2. Particle effects (dust, leaves, fire, magic)
-3. Screen transitions between levels
-4. Tutorial / first-time player guidance
-5. Achievement system
-6. Performance optimization for mobile
-7. Touch gesture refinements
-8. Final balancing pass (enemy stats, item drops, progression curve)
 
 ---
 
