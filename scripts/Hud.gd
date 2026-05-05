@@ -15,10 +15,15 @@ const SCREEN_MARGIN = 4.0
 @onready var movement_pad : Control       = $HUDRoot/MovementPad
 @onready var map_popup    : MapPopup      = $HUDRoot/MapPopup
 
+var pickup_prompt: PickupPrompt
 var map_data: MapData
 var _dungeon_view: DungeonView = null
 
 func _ready() -> void:
+	pickup_prompt = PickupPrompt.new()
+	pickup_prompt.name = "PickupPrompt"
+	hud_root.add_child(pickup_prompt)
+
 	get_viewport().size_changed.connect(_on_viewport_resized)
 	_apply_layout()
 
@@ -152,6 +157,8 @@ func _layout_landscape(size: Vector2, ratio: float, ui_scale: float = 1.0) -> vo
 	movement_pad.position = Vector2(pad_x, y)
 	movement_pad.size     = pad_size
 
+	_position_pickup_prompt(Vector2.ZERO, Vector2(dungeon_width, size.y), ui_scale)
+
 func _layout_portrait(size: Vector2, ratio: float, ui_scale: float = 1.0) -> void:
 	var top_height   = max(top_bar.get_minimum_size().y, 60)
 	var PARTY_MARGIN = UI_MARGIN * 4 * ui_scale
@@ -186,3 +193,18 @@ func _layout_portrait(size: Vector2, ratio: float, ui_scale: float = 1.0) -> voi
 
 	movement_pad.position = Vector2(size.x - pad_size.x - SCREEN_MARGIN, bottom_y + (bottom_row_height - pad_size.y) * 0.5)
 	movement_pad.size     = pad_size
+
+	_position_pickup_prompt(Vector2.ZERO, Vector2(size.x, dungeon_height), ui_scale)
+
+func _position_pickup_prompt(area_pos: Vector2, area_size: Vector2, ui_scale: float) -> void:
+	if pickup_prompt == null:
+		return
+	var short_side = min(area_size.x, area_size.y)
+	var min_w = short_side * 0.30 * ui_scale
+	var min_h = short_side * 0.08 * ui_scale
+	pickup_prompt.custom_minimum_size = Vector2(min_w, min_h)
+	pickup_prompt.size = Vector2(min_w, min_h)
+	pickup_prompt.position = Vector2(
+		area_pos.x + (area_size.x - min_w) * 0.5,
+		area_pos.y + area_size.y - min_h - SCREEN_MARGIN * 2
+	)

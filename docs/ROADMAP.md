@@ -103,9 +103,11 @@ Split into 4 incremental tasks; some sub-points depend on later phases (drag-to-
 6. ✅ Visual stacking: up to 3 sprites per tile with small XZ offsets so a pile is visible
 7. ✅ Items persist on the floor (stored on `GridCell`) — pickup comes in Task 3
 
-#### Task 3 — Tap-to-pickup
-1. Player walks on tile with item, taps it → moves into item bar
-2. Handle full-bar case (leave item on floor)
+#### Task 3 — Tap-to-pickup ✅
+1. ✅ `PickupPrompt` Button shown in HUD when the player stands on a tile with items, hidden otherwise. Label is `Pick up (N)` localized via `ui.pickup.prompt`.
+2. ✅ Tap the prompt (or press `F` on desktop) drains every stack from the current cell into `ItemBar.pickup_from()`, with auto-stacking.
+3. ✅ Sprite3Ds rebuilt after pickup so the dungeon visually reflects the empty/remaining tile.
+4. ✅ Bar-full case: stacks that don't fit stay on the cell; if nothing was transferred, prompt flashes a localized "Bag full" message (`ui.pickup.bar_full`) for ~1.5 s.
 
 #### Task 4 — Use items on party
 1. Drag from item bar to a CharacterSlot → apply effect (heal HP/MP/cure)

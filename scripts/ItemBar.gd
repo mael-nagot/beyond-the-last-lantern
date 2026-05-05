@@ -49,8 +49,8 @@ func relayout(available_width: float) -> Vector2:
 	var screen      = get_viewport().get_visible_rect().size
 	var short_side  = min(screen.x, screen.y)
 
-	var columns = 5
-	var rows    = 2
+	var columns: int = 5
+	var rows: int    = 2
 
 	var slot_size = floor((available_width - SLOT_SPACING * (columns - 1)) / columns)
 	var min_size  = short_side * 0.06
@@ -59,9 +59,9 @@ func relayout(available_width: float) -> Vector2:
 
 	var label_font_size = int(max(10.0, slot_size * 0.30))
 
-	for i in range(_slots.size()):
-		var col = i % columns
-		var row = i / columns
+	for i: int in range(_slots.size()):
+		var col: int = i % columns
+		var row: int = i / columns
 		var slot_panel = _slots[i]["panel"]
 		slot_panel.custom_minimum_size = Vector2(slot_size, slot_size)
 		slot_panel.position = Vector2(
@@ -113,6 +113,28 @@ func remove_one(index: int) -> ItemInstance:
 	_refresh_slot(index)
 	inventory_changed.emit()
 	return inst
+
+# Drains every stack from the cell into the bar. Stacks (or partial
+# stacks) that don't fit remain on the cell. Returns the total number
+# of individual items moved (summing stack counts), so the caller can
+# distinguish "nothing fit" from "some fit, the rest stayed".
+func pickup_from(cell: GridCell) -> int:
+	if cell == null:
+		return 0
+	var total_transferred := 0
+	var remaining: Array = []
+	for item in cell.items:
+		if item == null:
+			continue
+		var before_count: int = item.stack_count
+		var leftover := add_item(item)
+		if leftover == null:
+			total_transferred += before_count
+		else:
+			total_transferred += before_count - leftover.stack_count
+			remaining.append(leftover)
+	cell.items = remaining
+	return total_transferred
 
 # Returns the leftover instance if the bar is full, otherwise null.
 # Auto-stacks onto existing matching stacks first, then fills empty slots.
