@@ -7,3 +7,9 @@ ui.feedback.no_effect,No effect
 character.placeholder.warrior,Warrior
 character.placeholder.wizard,Wizard
 character.placeholder.rogue,Rogue
+object.chest_wooden.name,Wooden Chest
+object.chest_wooden.description,A sturdy wooden chest.
+object.chest_iron.name,Iron Chest
+object.chest_iron.description,A reinforced iron chest.
+ui.loot.title_chest,Chest
+ui.loot.take_all,Take All

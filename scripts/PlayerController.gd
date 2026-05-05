@@ -51,7 +51,7 @@ func setup(view: DungeonView, gen: LevelGenerator) -> void:
 # Helper function to keep code clean
 func _is_walkable(pos: Vector2i) -> bool:
 	var cell = _generator.get_cell(pos.x, pos.y)
-	return cell != null and cell.cell_type != GridCell.CellType.WALL
+	return cell != null and not cell.is_blocked
 	
 
 func move_forward()  -> void: _step(DIR_VECTORS[facing])
@@ -65,18 +65,18 @@ func strafe_right() -> void:
 
 func turn_left() -> void:
 	facing = _turn_left(facing)
-	_view.rotate_camera_to(false)
+	_view.rotate_camera_to(false, DIR_VECTORS[facing])
 	SoundManager.play_turn()
 
 func turn_right() -> void:
 	facing = _turn_right(facing)
-	_view.rotate_camera_to(true)
+	_view.rotate_camera_to(true, DIR_VECTORS[facing])
 	SoundManager.play_turn()
 
 func _step(delta: Vector2i) -> void:
 	var target = grid_pos + delta
 	var cell   = _generator.get_cell(target.x, target.y)
-	if cell and cell.cell_type != GridCell.CellType.WALL:
+	if cell and not cell.is_blocked:
 		grid_pos = target
 		_update_camera()
 		SoundManager.play_move()

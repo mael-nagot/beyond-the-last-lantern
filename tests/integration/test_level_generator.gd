@@ -197,3 +197,126 @@ func test_multiple_rolls_can_pile_on_one_tile() -> void:
 		if seen_pile:
 			break
 	assert_true(seen_pile, "across 5 seeds with 50 rolls each, at least one tile should have a pile of 2+")
+
+# -------------------------------------------------------
+# Object placement (Phase 8 Task 1: chests)
+# -------------------------------------------------------
+
+func _make_chest(blocks: bool = true) -> ObjectData:
+	var data := ObjectData.new()
+	data.category = ObjectData.Category.CHEST
+	data.blocks_movement = blocks
+	data.name_key = "test.chest"
+	return data
+
+func _make_object_spawn(object: ObjectData, count_min: int, count_max: int, placement: int = ObjectSpawn.PLACEMENT_DEFAULT) -> ObjectSpawn:
+	var spawn := ObjectSpawn.new()
+	spawn.object = object
+	spawn.count_min = count_min
+	spawn.count_max = count_max
+	spawn.placement = placement
+	return spawn
+
+func _all_object_cells(gen: LevelGenerator) -> Array:
+	var result: Array = []
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			if gen.grid[x][y].object != null:
+				result.append(Vector2i(x, y))
+	return result
+
+func test_no_objects_placed_when_pool_is_empty() -> void:
+	var gen := _make_generator(_make_biome())
+	assert_eq(_all_object_cells(gen).size(), 0)
+
+func test_object_count_falls_within_min_max() -> void:
+	var biome := _make_biome()
+	biome.objects = [_make_object_spawn(_make_chest(), 2, 4)]
+	var gen := _make_generator(biome)
+	var count := _all_object_cells(gen).size()
+	assert_between(count, 2, 4)
+
+func test_multiple_object_types_each_respect_their_own_min_max() -> void:
+	# Two chest types: 1-1 of A, 2-2 of B → exactly 3 placements total
+	var biome := _make_biome()
+	biome.objects = [
+		_make_object_spawn(_make_chest(), 1, 1),
+		_make_object_spawn(_make_chest(), 2, 2),
+	]
+	var gen := _make_generator(biome)
+	assert_eq(_all_object_cells(gen).size(), 3)
+
+func test_objects_never_on_entrance_or_exit() -> void:
+	var biome := _make_biome()
+	biome.objects = [_make_object_spawn(_make_chest(), 5, 5, ObjectSpawn.PLACEMENT_ANY)]
+	var gen := _make_generator(biome)
+	assert_null(gen.grid[gen.entrance_pos.x][gen.entrance_pos.y].object)
+	assert_null(gen.grid[gen.exit_pos.x][gen.exit_pos.y].object)
+
+func test_objects_keep_exit_reachable_and_chests_interactable() -> void:
+	# After placement, BFS from entrance must still reach the exit, and
+	# every placed object must have at least one walkable neighbour so
+	# the player can stand next to it and click it. We deliberately do
+	# NOT require every floor cell to be reachable — connectorless
+	# isolated rooms may pre-exist in some dungeons (those cells were
+	# never reachable, so a chest placement isn't blamed for them).
+	var biome := _make_biome()
+	biome.objects = [_make_object_spawn(_make_chest(), 8, 8, ObjectSpawn.PLACEMENT_ANY)]
+	var gen := _make_generator(biome)
+
+	var visited: Dictionary = {gen.entrance_pos: true}
+	var queue: Array = [gen.entrance_pos]
+	while not queue.is_empty():
+		var current: Vector2i = queue.pop_front()
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			var n := current + d
+			if n.x < 0 or n.x >= gen.grid_width or n.y < 0 or n.y >= gen.grid_height:
+				continue
+			if visited.has(n):
+				continue
+			var ncell: GridCell = gen.grid[n.x][n.y]
+			if ncell.is_blocked:
+				continue
+			visited[n] = true
+			queue.append(n)
+
+	# Exit reachable
+	assert_true(visited.has(gen.exit_pos), "exit unreachable after object placement")
+
+	# Every chest has a walkable neighbour
+	for cell_pos in _all_object_cells(gen):
+		var has_neighbour := false
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			if visited.has(cell_pos + d):
+				has_neighbour = true
+				break
+		assert_true(has_neighbour,
+			"chest at %s is unreachable from any walkable neighbour" % cell_pos)
+
+func test_min_distance_keeps_objects_apart() -> void:
+	var biome := _make_biome()
+	var spawn := _make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)
+	spawn.min_distance_to_other_object = 5
+	biome.objects = [spawn]
+	var gen := _make_generator(biome)
+	var positions := _all_object_cells(gen)
+	for i in range(positions.size()):
+		for j in range(i + 1, positions.size()):
+			var dist: int = abs(positions[i].x - positions[j].x) + abs(positions[i].y - positions[j].y)
+			assert_gte(dist, 5,
+				"objects at %s and %s are %d apart (need >= 5)" % [positions[i], positions[j], dist])
+
+func test_items_avoid_chest_cells() -> void:
+	# When chests and items both spawn, items should never land on a
+	# blocking-object cell (the player can't reach piled items there).
+	var item := _make_item()
+	var loot: Array[LootEntry] = [_make_loot_entry(item)]
+	var biome := _make_biome(loot, 8, 8)
+	biome.objects = [_make_object_spawn(_make_chest(), 5, 5)]
+	var gen := _make_generator(biome)
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			var cell: GridCell = gen.grid[x][y]
+			if cell.is_blocked and cell.cell_type != GridCell.CellType.WALL:
+				assert_eq(cell.items.size(), 0,
+					"items should not pile on blocking-object cell (%d,%d)" % [x, y])

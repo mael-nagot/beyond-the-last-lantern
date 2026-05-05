@@ -148,20 +148,39 @@ Future-friendly behaviours:
 
 **Priority: HIGH — Foundation for gameplay variety**
 
-1. Create `ObjectData.gd` resource (type, size in tiles, blocks movement, wall-attached, sprite texture)
-2. Create object placement system in LevelGenerator (respecting path validation)
-3. Implement `Sprite3D` billboards for floor objects (chests, campfires)
-4. Implement wall-mounted sprites for wall objects (levers, paintings, torches)
-5. Create interaction system (player steps on or faces object, presses interact)
-6. Implement specific objects:
-   - Chest (lootable, opens loot popup with items from loot table)
-   - Door (blocks until key/switch/spell)
-   - Switch/Lever (toggles doors, reveals secrets)
-   - Spike trap (periodic up/down, damage when up)
-   - Fireball trap (pressure plate or continuous)
-   - Immobilize trap (player can't move, can turn and attack)
-   - Alert trap (aggros enemies in 10-tile radius)
-   - Campfire (rest point, must clear zone first)
+Split into 5 incremental tasks. Task 1 builds the foundation that the rest reuse.
+
+#### Task 1 — Chests + interaction foundation ✅
+1. ✅ `ObjectData.gd` Resource (category enum, blocks_movement, closed/opened sprites, world_height/y_offset, interact_sound, chest loot pool + min/max)
+2. ✅ `ObjectInstance.gd` RefCounted (data + opened bool + items array — chest contents persist across popup close)
+3. ✅ `ObjectSpawn.gd` Resource (per-biome entry: object + count_min + count_max + placement flags)
+4. ✅ `BiomeData.objects: Array[ObjectSpawn]` for per-biome configurable spawning
+5. ✅ `GridCell.object: ObjectInstance` (replaces unused `object_id`); `is_blocked` checks both walls AND blocking objects
+6. ✅ `LevelGenerator._place_objects()` runs after BFS validation: for each spawn, roll count, place tentatively, re-validate full reachability (entrance can reach every floor cell AND every blocked-object's adjacent neighbour). Roll back and retry on failure.
+7. ✅ `DungeonView` gains `ObjectsRoot` Node3D + `_build_objects()` + `rebuild_objects()`. Each object Sprite3D has a child Area3D + box collider tagged with the ObjectInstance for click pickability.
+8. ✅ Chest interaction: click → `DungeonDropTarget` raycasts from camera, finds Area3D, emits `object_clicked(instance, grid_pos)`. Game.gd opens the chest: roll loot once, sprite swap, play `interact_sound`, open `LootPopup`.
+9. ✅ `LootPopup` UI: full-screen modal showing chest contents as a grid; click slot → take that stack; "Take All" enabled via `ItemBar.would_fit_all` dry-run; click backdrop or X → close. Remaining items stay in chest for later.
+10. ✅ Localization: `object.chest_wooden.name/description`, `object.chest_iron.name/description`, `ui.loot.title_chest`, `ui.loot.take_all`
+
+#### Task 2 — Doors + switches/levers (next)
+1. Door object with `closed` / `opened` states; closed blocks movement, opened doesn't
+2. Switch/lever object that toggles a target door's state
+3. BFS still passes after every state change (doors close to walls but always have a switch path)
+
+#### Task 3 — Traps
+- Spike trap (periodic up/down)
+- Fireball trap (pressure plate or continuous)
+- Immobilize trap (player can't move, can turn and attack)
+- Alert trap (aggros enemies in 10-tile radius — needs Phase 10 enemies first)
+
+#### Task 4 — Wall-mounted decorations
+- Paintings, torches, lanterns
+- Sprite3D pinned to a wall face rather than floor
+- No interaction; pure ambiance
+
+#### Task 5 — Campfires
+- Rest point (heal HP/MP, save?)
+- Must clear nearby enemies before resting (needs Phase 10)
 
 ### Phase 9 — Character Data System
 

@@ -35,13 +35,17 @@ var _current_grid_pos: Vector2i = Vector2i.ZERO
 
 var generator: LevelGenerator
 var _items_root: Node3D
+var _objects_root: Node3D
+var _object_sprites: Dictionary = {}  # Vector2i -> Sprite3D (for cheap per-move repositioning)
 var drop_target: DungeonDropTarget
 
 func setup(gen: LevelGenerator) -> void:
 	generator = gen
 	_ensure_items_root()
+	_ensure_objects_root()
 	_ensure_drop_target()
 	_build_mesh()
+	_build_objects()
 	_build_items()
 	_place_camera_at_entrance()
 	_apply_biome_environment()
@@ -55,6 +59,13 @@ func _ensure_items_root() -> void:
 	_items_root.name = "ItemsRoot"
 	sub_viewport.add_child(_items_root)
 
+func _ensure_objects_root() -> void:
+	if _objects_root != null and is_instance_valid(_objects_root):
+		return
+	_objects_root = Node3D.new()
+	_objects_root.name = "ObjectsRoot"
+	sub_viewport.add_child(_objects_root)
+
 func _ensure_drop_target() -> void:
 	if drop_target != null and is_instance_valid(drop_target):
 		return
@@ -64,6 +75,7 @@ func _ensure_drop_target() -> void:
 	viewport_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	drop_target = DungeonDropTarget.new()
 	drop_target.name = "DropTarget"
+	drop_target.camera = camera
 	viewport_container.add_child(drop_target)
 	drop_target.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
@@ -145,6 +157,88 @@ func rebuild_items() -> void:
 	if _items_root == null:
 		return
 	_build_items()
+
+func rebuild_objects() -> void:
+	if _objects_root == null:
+		return
+	_build_objects()
+
+func _build_objects() -> void:
+	for child in _objects_root.get_children():
+		child.queue_free()
+	_object_sprites.clear()
+	for x in range(generator.grid_width):
+		for y in range(generator.grid_height):
+			var cell: GridCell = generator.get_cell(x, y)
+			if cell == null or cell.object == null or cell.object.data == null:
+				continue
+			var data: ObjectData = cell.object.data
+			var tex: Texture2D = data.opened_sprite if (cell.object.opened and data.opened_sprite != null) else data.closed_sprite
+			if tex == null:
+				continue
+			var grid_pos := Vector2i(x, y)
+
+			var sprite := Sprite3D.new()
+			sprite.texture = tex
+			var tex_h: int = max(1, tex.get_height())
+			sprite.pixel_size = data.world_height / float(tex_h)
+			sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+			sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+			sprite.position = _object_position(grid_pos, data)
+
+			# Click pickability — Area3D + matching box collider. The
+			# DungeonDropTarget raycasts on left-click to find these.
+			var area := Area3D.new()
+			area.input_ray_pickable = true
+			area.set_meta("object_instance", cell.object)
+			area.set_meta("grid_pos", grid_pos)
+			var col := CollisionShape3D.new()
+			var box := BoxShape3D.new()
+			box.size = Vector3(data.world_height, data.world_height, data.world_height)
+			col.shape = box
+			area.add_child(col)
+			sprite.add_child(area)
+
+			_objects_root.add_child(sprite)
+			_object_sprites[grid_pos] = sprite
+
+func _object_position(grid_pos: Vector2i, data: ObjectData) -> Vector3:
+	var cx: float = grid_pos.x * CELL_SIZE + CELL_SIZE * 0.5
+	var cz: float = grid_pos.y * CELL_SIZE + CELL_SIZE * 0.5
+	var ox: float = 0.0
+	var oz: float = 0.0
+	if data.lean_toward_player > 0.0:
+		var diff := _current_grid_pos - grid_pos
+		# Lean along the axis the PLAYER is currently facing (turning is
+		# what switches the lean axis; strafing one tile sideways keeps
+		# you on the same axis so the chest stays on the same side).
+		# If the player has zero displacement along the facing axis but
+		# is offset on the other, fall back to that other axis so the
+		# chest still picks a side.
+		var prefer_x: bool = abs(_current_facing.x) > abs(_current_facing.y)
+		if prefer_x and diff.x != 0:
+			ox = float(signi(diff.x)) * data.lean_toward_player
+		elif (not prefer_x) and diff.y != 0:
+			oz = float(signi(diff.y)) * data.lean_toward_player
+		elif diff.x != 0:
+			ox = float(signi(diff.x)) * data.lean_toward_player
+		elif diff.y != 0:
+			oz = float(signi(diff.y)) * data.lean_toward_player
+	return Vector3(cx + ox, data.world_height * 0.5 + data.y_offset, cz + oz)
+
+func _refresh_object_positions() -> void:
+	# Cheap per-move update — only sprites whose cell.object.data has a
+	# non-zero lean actually need new positions, but the per-call work
+	# is trivial (O(n) over ~10 chests) so we just iterate them all.
+	for grid_pos in _object_sprites.keys():
+		var sprite: Sprite3D = _object_sprites[grid_pos]
+		if not is_instance_valid(sprite):
+			continue
+		var cell: GridCell = generator.get_cell(grid_pos.x, grid_pos.y)
+		if cell == null or cell.object == null or cell.object.data == null:
+			continue
+		sprite.position = _object_position(grid_pos, cell.object.data)
 
 func _build_items() -> void:
 	for child in _items_root.get_children():
@@ -249,6 +343,7 @@ func set_initial_facing(facing: Vector2i) -> void:
 	_current_angle            = FACING_ANGLES.get(facing, 0.0)
 	camera.rotation_degrees.y = _current_angle
 	camera.position           = _grid_to_world(_current_grid_pos.x, _current_grid_pos.y)
+	_refresh_object_positions()
 
 func move_camera_to(grid_pos: Vector2i, facing: Vector2i) -> void:
 	_current_grid_pos = grid_pos
@@ -258,11 +353,17 @@ func move_camera_to(grid_pos: Vector2i, facing: Vector2i) -> void:
 	tween.set_parallel(true)
 	tween.tween_property(camera, "position", target_pos, 0.12)
 	tween.tween_property(camera, "rotation_degrees:y", _current_angle, 0.12)
+	# Object positions are intentionally NOT refreshed here — the lean
+	# axis is tied to facing, so the chest only re-leans when the player
+	# turns. Refreshing on move would visibly snap the chest mid-step.
 
-func rotate_camera_to(turn_right: bool) -> void:
+func rotate_camera_to(turn_right: bool, facing: Vector2i = Vector2i.ZERO) -> void:
 	_current_angle += -90.0 if turn_right else 90.0
+	if facing != Vector2i.ZERO:
+		_current_facing = facing
 	var tween = create_tween()
 	tween.tween_property(camera, "rotation_degrees:y", _current_angle, 0.12)
+	_refresh_object_positions()
 
 const SHAKE_INTENSITY := 0.12
 const SHAKE_DURATION  := 0.18

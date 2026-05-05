@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ObjectData" format=3 uid="uid://d01cmd6cq5v2o"]
+
+[ext_resource type="Script" uid="uid://br4c1mxr8q1a" path="res://scripts/ObjectData.gd" id="2_d6cbc"]
+[ext_resource type="Texture2D" uid="uid://dhqjspmdx7uog" path="res://assets/textures/objects/chest/chest_wooden_closed.png" id="2_oq0si"]
+[ext_resource type="AudioStream" uid="uid://grr71w5574s8" path="res://assets/sounds/objects/chest_wooden_open.ogg" id="3_cc1gw"]
+[ext_resource type="Texture2D" uid="uid://d3jt5ugow74ke" path="res://assets/textures/objects/chest/chest_wooden_opened.png" id="4_pvq6l"]
+
+[resource]
+script = ExtResource("2_d6cbc")
+name_key = "object.chest_wooden.name"
+description_key = "object.chest_wooden.description"
+closed_sprite = ExtResource("2_oq0si")
+opened_sprite = ExtResource("4_pvq6l")
+world_height = 3.0
+lean_toward_player = 2.0
+interact_sound = ExtResource("3_cc1gw")
+metadata/_custom_type_script = "uid://br4c1mxr8q1a"

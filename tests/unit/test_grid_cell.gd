@@ -41,3 +41,23 @@ func test_default_walls_present_on_all_sides() -> void:
 	assert_true(cell.wall_south)
 	assert_true(cell.wall_east)
 	assert_true(cell.wall_west)
+
+func test_default_object_is_null() -> void:
+	var cell := GridCell.new()
+	assert_null(cell.object)
+
+func test_floor_with_blocking_object_is_blocked() -> void:
+	var cell := GridCell.new()
+	cell.cell_type = GridCell.CellType.FLOOR
+	var data := ObjectData.new()
+	data.blocks_movement = true
+	cell.object = ObjectInstance.create(data)
+	assert_true(cell.is_blocked)
+
+func test_floor_with_non_blocking_object_is_not_blocked() -> void:
+	var cell := GridCell.new()
+	cell.cell_type = GridCell.CellType.FLOOR
+	var data := ObjectData.new()
+	data.blocks_movement = false
+	cell.object = ObjectInstance.create(data)
+	assert_false(cell.is_blocked)

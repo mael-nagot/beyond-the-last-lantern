@@ -11,13 +11,21 @@ enum CellType { WALL, FLOOR, ENTRANCE, EXIT }
 @export var wall_east: bool  = true
 @export var wall_west: bool  = true
 
-# What object sits on this cell (null = empty)
-@export var object_id: String = ""
+# Object placed on this cell (null = none). One ObjectInstance per cell
+# for now; multi-tile objects deferred.
+var object: ObjectInstance = null
 
 # Items dropped on this cell (Array[ItemInstance]). Multiple items pile up.
 var items: Array = []
 
-# Is anything blocking movement through this cell?
+# Is anything blocking movement through this cell? Walls always block.
+# A cell with an object that has `blocks_movement = true` (chests, doors)
+# also blocks the player. The object's blocked state takes precedence
+# even if it sits on a FLOOR cell.
 var is_blocked: bool:
 	get:
-		return cell_type == CellType.WALL
+		if cell_type == CellType.WALL:
+			return true
+		if object != null and object.data != null and object.data.blocks_movement:
+			return true
+		return false

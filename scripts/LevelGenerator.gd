@@ -17,6 +17,7 @@ var room_max_size: int = 5
 var floor_loot: Array[LootEntry] = []
 var floor_items_min: int = 3
 var floor_items_max: int = 8
+var objects_pool: Array[ObjectSpawn] = []
 
 var grid: Array = []
 var entrance_pos: Vector2i = Vector2i.ZERO
@@ -44,6 +45,7 @@ func configure(biome: BiomeData) -> void:
 	floor_loot = biome.floor_loot
 	floor_items_min = biome.floor_items_min
 	floor_items_max = biome.floor_items_max
+	objects_pool = biome.objects
 
 func generate() -> void:
 	_fill_with_walls()
@@ -56,6 +58,7 @@ func generate() -> void:
 		push_warning("LevelGenerator: regenerating...")
 		generate()
 		return
+	_place_objects()
 	_place_items()
 
 # -------------------------------------------------------
@@ -297,6 +300,143 @@ func _get_all_floor_cells() -> Array:
 	return result
 
 # -------------------------------------------------------
+# Objects (chests, doors, levers, traps, …) — placed before items so
+# items can land on / next to them as the level intends.
+#
+# A blocking object on a FLOOR cell turns that cell into a wall for
+# pathing purposes. We therefore validate after each placement that:
+#   1. exit is still reachable from entrance, AND
+#   2. every other floor cell is reachable too (no part of the level
+#      becomes inaccessible because of the new obstacle).
+# If either check fails, we undo and try a different cell.
+# -------------------------------------------------------
+func _place_objects() -> void:
+	if objects_pool.is_empty():
+		return
+	var cells_by_type := _classify_floor_cells()
+	for spawn in objects_pool:
+		if spawn == null or spawn.object == null:
+			continue
+		var count := randi_range(max(0, spawn.count_min), max(spawn.count_min, spawn.count_max))
+		for _i in range(count):
+			_try_place_object(spawn, cells_by_type)
+
+func _try_place_object(spawn: ObjectSpawn, cells_by_type: Dictionary) -> void:
+	# Snapshot what's reachable from entrance RIGHT NOW (with any
+	# previously-placed chests treated as blockers). A new placement is
+	# OK iff every cell currently reachable stays reachable after
+	# placement (the chest's own cell is excluded), AND the chest cell
+	# has at least one walkable neighbour so the player can interact.
+	# This tolerates pre-existing isolated regions of the dungeon
+	# (a connectorless room) — those cells were never reachable, so a
+	# chest placement isn't blamed for them.
+	var before_reachable := _bfs_walkable_from(entrance_pos)
+	var candidates := _candidate_cells_for_spawn(spawn, cells_by_type)
+	var distance: int = max(0, spawn.min_distance_to_other_object)
+	while distance >= 0:
+		if _attempt_place(spawn, candidates, cells_by_type, distance, before_reachable):
+			return
+		distance -= 1
+	push_warning("LevelGenerator: could not place '%s' anywhere — no eligible cell preserves level reachability" % _spawn_label(spawn))
+
+func _attempt_place(spawn: ObjectSpawn, candidates: Array, cells_by_type: Dictionary, min_distance: int, before_reachable: Dictionary) -> bool:
+	var pool := candidates.duplicate()
+	if min_distance > 0:
+		var filtered: Array = []
+		for pos in pool:
+			if not _too_close_to_existing_object(pos, min_distance):
+				filtered.append(pos)
+		pool = filtered
+	if pool.is_empty():
+		return false
+	pool.shuffle()
+	for pos in pool:
+		var cell: GridCell = grid[pos.x][pos.y]
+		if cell.object != null:
+			continue
+		# Pre-check: candidate must itself be reachable from entrance
+		# right now. Skips chests inside connectorless room islands.
+		if not before_reachable.has(pos):
+			continue
+		var instance := ObjectInstance.create(spawn.object)
+		instance.loot_table = spawn.loot_table
+		cell.object = instance
+		if _placement_preserves_reachability(pos, before_reachable):
+			cells_by_type[_classify_single(pos)].erase(pos)
+			return true
+		cell.object = null
+	return false
+
+func _placement_preserves_reachability(placed_pos: Vector2i, before: Dictionary) -> bool:
+	var after := _bfs_walkable_from(entrance_pos)
+	for cell_pos in before:
+		if cell_pos == placed_pos:
+			continue
+		if not after.has(cell_pos):
+			return false
+	# The chest itself must have at least one walkable neighbour so
+	# the player can stand next to it and interact.
+	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+		if after.has(placed_pos + d):
+			return true
+	return false
+
+func _bfs_walkable_from(origin: Vector2i) -> Dictionary:
+	var visited: Dictionary = {origin: true}
+	var queue: Array = [origin]
+	while not queue.is_empty():
+		var current: Vector2i = queue.pop_front()
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			var nx: int = current.x + d.x
+			var ny: int = current.y + d.y
+			if not _in_bounds(nx, ny):
+				continue
+			var npos := Vector2i(nx, ny)
+			if visited.has(npos):
+				continue
+			var ncell: GridCell = grid[nx][ny]
+			if ncell.is_blocked:
+				continue
+			visited[npos] = true
+			queue.append(npos)
+	return visited
+
+func _spawn_label(spawn: ObjectSpawn) -> String:
+	if spawn != null and spawn.object != null and spawn.object.name_key != "":
+		return spawn.object.name_key
+	return "<unnamed>"
+
+func _too_close_to_existing_object(pos: Vector2i, min_distance: int) -> bool:
+	if min_distance <= 0:
+		return false
+	for x in range(grid_width):
+		for y in range(grid_height):
+			if grid[x][y].object == null:
+				continue
+			var dist: int = abs(pos.x - x) + abs(pos.y - y)
+			if dist < min_distance:
+				return true
+	return false
+
+func _candidate_cells_for_spawn(spawn: ObjectSpawn, cells_by_type: Dictionary) -> Array:
+	var result: Array = []
+	for placement_bit in [ObjectSpawn.PLACEMENT_CORRIDOR, ObjectSpawn.PLACEMENT_ROOM, ObjectSpawn.PLACEMENT_DEAD_END]:
+		if not spawn.allows(placement_bit):
+			continue
+		for pos in cells_by_type[placement_bit]:
+			if pos == entrance_pos or pos == exit_pos:
+				continue
+			result.append(pos)
+	return result
+
+func _classify_single(pos: Vector2i) -> int:
+	if _is_dead_end(pos):
+		return ObjectSpawn.PLACEMENT_DEAD_END
+	if _is_in_room(pos):
+		return ObjectSpawn.PLACEMENT_ROOM
+	return ObjectSpawn.PLACEMENT_CORRIDOR
+
+# -------------------------------------------------------
 # Items
 # -------------------------------------------------------
 func _place_items() -> void:
@@ -325,6 +465,11 @@ func _classify_floor_cells() -> Dictionary:
 		for y in range(1, grid_height - 1):
 			var cell: GridCell = grid[x][y]
 			if cell.cell_type != GridCell.CellType.FLOOR:
+				continue
+			if cell.is_blocked:
+				# A blocking object already sits here (chest, door, …)
+				# — the player can't stand on it, so items shouldn't pile
+				# on it either.
 				continue
 			var pos := Vector2i(x, y)
 			if _is_dead_end(pos):

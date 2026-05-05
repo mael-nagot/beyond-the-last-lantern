@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="LootTable" format=3 uid="uid://mtigjawa2y3e"]
+
+[ext_resource type="Script" uid="uid://savevh67bf7j" path="res://scripts/LootTableEntry.gd" id="1_3qdgd"]
+[ext_resource type="Resource" uid="uid://dltjjt1nys4br" path="res://assets/items/health_potion.tres" id="2_y62ra"]
+[ext_resource type="Script" uid="uid://bvqii0stlhicr" path="res://scripts/LootTable.gd" id="3_t0h6g"]
+
+[sub_resource type="Resource" id="Resource_liij4"]
+script = ExtResource("1_3qdgd")
+item = ExtResource("2_y62ra")
+metadata/_custom_type_script = "uid://savevh67bf7j"
+
+[resource]
+script = ExtResource("3_t0h6g")
+min_rolls = 2
+entries = Array[ExtResource("1_3qdgd")]([SubResource("Resource_liij4")])
+metadata/_custom_type_script = "uid://bvqii0stlhicr"
