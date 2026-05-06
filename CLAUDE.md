@@ -108,3 +108,19 @@ The dungeon is a billboarded-`Sprite3D` world (items, chests, future enemies, de
   - res://scripts/README.md — added kick action to PlayerController documentation
   - res://ROADMAP.md — marked Phase 10 step 8 as completed
   ```
+
+### PR creation gate (test-then-PR, never PR-then-test)
+
+The developer is the final arbiter of "does it work". Code that compiles, type-checks, and passes unit tests can still be wrong in-game (visuals off, gameplay weird, edge cases unhandled). PRs that get merged broken pollute `main` and are painful to back out, so **PRs are gated on the developer confirming the change works in the editor.**
+
+Before opening a PR — whether by running `gh pr create` OR by surfacing the GitHub "Create PR" URL (which is tantamount to "this is ready to ship") — you MUST first:
+
+1. **Commit + push the branch** so the developer can pull / inspect / run it locally
+2. **Provide a concrete TEST PLAN**: numbered steps the developer can execute in the Godot editor and any GUT tests they should run. Include the seed(s) / configuration to use when relevant. Test plans must verify the actual user-visible change, not just "the code compiles".
+3. **WAIT for explicit confirmation** ("works", "ok", "go ahead", "create PR", etc.) before producing the PR URL or running `gh pr create`
+
+If the developer reports the test failed: iterate on the same branch (more commits, push again, updated test plan). Don't open the PR until confirmed working.
+
+This rule does NOT block intermediate pushes — those are part of the iteration loop. It also does NOT apply to roadmap-only or documentation-only changes (no runtime behaviour to verify; still describe what you changed).
+
+Failure mode this prevents: the developer merges a PR that didn't actually fix the bug, the broken behaviour now lives in `main`, and the next conversation starts from a worse baseline than the previous one.

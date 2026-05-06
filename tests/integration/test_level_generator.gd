@@ -547,26 +547,6 @@ func _all_lever_cells(gen: LevelGenerator) -> Array:
 				result.append(Vector2i(x, y))
 	return result
 
-func _bfs_with_closed_edge(gen: LevelGenerator, origin: Vector2i, closed_a: Vector2i, closed_b: Vector2i) -> Dictionary:
-	var key := DoorInstance.edge_key(closed_a, closed_b)
-	var visited: Dictionary = {origin: true}
-	var queue: Array = [origin]
-	while not queue.is_empty():
-		var current: Vector2i = queue.pop_front()
-		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
-			var n: Vector2i = current + d
-			if n.x < 0 or n.x >= gen.grid_width or n.y < 0 or n.y >= gen.grid_height:
-				continue
-			if visited.has(n):
-				continue
-			if gen.grid[n.x][n.y].is_blocked:
-				continue
-			if DoorInstance.edge_key(current, n) == key:
-				continue
-			visited[n] = true
-			queue.append(n)
-	return visited
-
 func test_linked_pair_emits_one_door_and_one_lever_each() -> void:
 	var biome := _make_biome()
 	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)]
@@ -596,25 +576,33 @@ func test_each_lever_links_back_to_exactly_one_door() -> void:
 		assert_true(door.linked_levers.has(lever),
 			"door at %s—%s missing back-link to its lever" % [door.cell_a, door.cell_b])
 
-func test_lever_is_reachable_with_linked_door_closed() -> void:
-	# The placement contract: even if the player NEVER opens the
-	# linked door, they can still walk to the lever.
+func test_every_lever_chain_reachable_with_two_pairs() -> void:
+	# Originally `test_lever_is_reachable_with_linked_door_closed`,
+	# which asserted the per-pair contract: lever reachable from
+	# entrance with its linked door treated as closed AND every
+	# other door treated as walkable. That contract is too strict
+	# under the new chain-reachability placement (Phase 8 Task 2b
+	# critical fix) — a perfectly solvable level can place a lever
+	# past its own door if the chain still converges via another
+	# lever's progressive opening. The new contract — and what the
+	# placement code actually enforces — is chain reachability:
+	# starting at entrance, every reachable lever progressively
+	# opens its linked doors, and at fixed point every placed lever
+	# is reachable from somewhere in that set.
 	var biome := _make_biome()
 	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)]
 	var gen := _make_generator(biome)
+	if gen.doors.is_empty():
+		return  # seed couldn't place either pair — fine, nothing to assert
+	var chain: Dictionary = _simulate_chain_reachable_from_entrance(gen)
 	for cell_pos in _all_lever_cells(gen):
-		var lever: LeverInstance = gen.grid[cell_pos.x][cell_pos.y].object
-		var door: DoorInstance = lever.linked_doors[0]
-		var reachable: Dictionary = _bfs_with_closed_edge(gen, gen.entrance_pos, door.cell_a, door.cell_b)
-		# Lever cell itself is blocked (the lever blocks movement),
-		# but the player must be able to STAND NEXT TO it.
 		var has_neighbour := false
 		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
-			if reachable.has(cell_pos + d):
+			if chain.has(cell_pos + d):
 				has_neighbour = true
 				break
 		assert_true(has_neighbour,
-			"lever at %s unreachable from entrance with linked door closed" % cell_pos)
+			"lever at %s is not chain-reachable from entrance" % cell_pos)
 
 func test_lever_does_not_share_cell_with_chest_or_door_endpoint() -> void:
 	var biome := _make_biome()
@@ -696,3 +684,110 @@ func test_linked_door_is_not_decorative() -> void:
 	# At least the linked one should appear; decorative is best-effort.
 	assert_true(has_linked or has_decorative,
 		"no doors placed at all — seed may need adjusting")
+
+# -------------------------------------------------------
+# Multi-pair lever reachability (regression test for the stuck-state
+# bug where two pairs could land with both levers behind both doors)
+# -------------------------------------------------------
+
+func _simulate_chain_reachable_from_entrance(gen: LevelGenerator) -> Dictionary:
+	# Independent reimplementation of the chain reachability the
+	# generator uses internally. Iterates: BFS with currently-open
+	# doors → mark new doors openable via reachable levers → repeat.
+	var open_keys: Dictionary = {}
+	for door in gen.doors:
+		# Decorative (interactable) doors are openable from the start
+		# because the player can click them directly.
+		if door.data != null and door.data.interactable:
+			open_keys[DoorInstance.edge_key(door.cell_a, door.cell_b)] = true
+	var reachable: Dictionary = {}
+	while true:
+		reachable = _bfs_with_open_keys(gen, open_keys)
+		var progressed := false
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				var cell: GridCell = gen.grid[x][y]
+				if not (cell.object is LeverInstance):
+					continue
+				var pos := Vector2i(x, y)
+				var has_neighbour := false
+				for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+					if reachable.has(pos + d):
+						has_neighbour = true
+						break
+				if not has_neighbour:
+					continue
+				for door in (cell.object as LeverInstance).linked_doors:
+					if door == null:
+						continue
+					var key := DoorInstance.edge_key(door.cell_a, door.cell_b)
+					if not open_keys.has(key):
+						open_keys[key] = true
+						progressed = true
+		if not progressed:
+			return reachable
+	return {}
+
+func _bfs_with_open_keys(gen: LevelGenerator, open_keys: Dictionary) -> Dictionary:
+	var visited: Dictionary = {gen.entrance_pos: true}
+	var queue: Array = [gen.entrance_pos]
+	while not queue.is_empty():
+		var current: Vector2i = queue.pop_front()
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			var n: Vector2i = current + d
+			if n.x < 0 or n.x >= gen.grid_width or n.y < 0 or n.y >= gen.grid_height:
+				continue
+			if visited.has(n):
+				continue
+			if gen.grid[n.x][n.y].is_blocked:
+				continue
+			# Skip closed-door edges
+			var blocking := false
+			for door in gen.doors:
+				if DoorInstance.edge_key(current, n) == DoorInstance.edge_key(door.cell_a, door.cell_b):
+					if not open_keys.has(DoorInstance.edge_key(door.cell_a, door.cell_b)):
+						blocking = true
+					break
+			if blocking:
+				continue
+			visited[n] = true
+			queue.append(n)
+	return visited
+
+func test_every_lever_chain_reachable_with_three_pairs() -> void:
+	# The classic bug: 2 pairs land with both levers behind both
+	# doors. With 3 pairs the cycle case is even more likely. Across
+	# several seeds, every placed lever must be reachable via the
+	# chain (start at entrance, open every reachable lever's doors,
+	# repeat).
+	var biome := _make_biome()
+	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 3, 3)]
+	for s in [101, 202, 303, 404, 505, 606, 707, 808]:
+		var gen := _make_generator(biome, s)
+		if gen.doors.is_empty():
+			continue  # seed couldn't place any pair — fine, not stuck
+		var chain: Dictionary = _simulate_chain_reachable_from_entrance(gen)
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				var cell: GridCell = gen.grid[x][y]
+				if not (cell.object is LeverInstance):
+					continue
+				var pos := Vector2i(x, y)
+				var has_neighbour := false
+				for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+					if chain.has(pos + d):
+						has_neighbour = true
+						break
+				assert_true(has_neighbour,
+					"seed %d: lever at %s is not chain-reachable from entrance" % [s, pos])
+
+func test_exit_remains_chain_reachable_with_linked_pairs() -> void:
+	# Even with locked doors gating the level, the exit must be
+	# reachable assuming the player progressively pulls levers.
+	var biome := _make_biome()
+	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 3, 3)]
+	for s in [111, 222, 333, 444, 555]:
+		var gen := _make_generator(biome, s)
+		var chain: Dictionary = _simulate_chain_reachable_from_entrance(gen)
+		assert_true(chain.has(gen.exit_pos),
+			"seed %d: exit %s not chain-reachable" % [s, gen.exit_pos])
