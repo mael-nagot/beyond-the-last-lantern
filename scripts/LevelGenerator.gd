@@ -584,13 +584,19 @@ func is_edge_blocked(a: Vector2i, b: Vector2i) -> bool:
 # -------------------------------------------------------
 # Linked objects (Phase 8 Task 2b — lever ↔ door pairs)
 #
-# For each LinkedObjectSpawn entry we place count pairs. Each pair:
-#   1. Picks a 1-wide-corridor edge for the door (same eligibility as
-#      decorative doors).
-#   2. Picks a chest-style cell for the lever such that the lever
-#      is reachable from the entrance EVEN WITH the linked door
-#      treated as closed (so the player can always reach the lever
-#      to open the door).
+# For each LinkedObjectSpawn entry we place count pairs. Each pair
+# is validated against CHAIN reachability — not just per-pair
+# reachability — so the player can never end up in a stuck state
+# where every lever is locked behind every door.
+#
+# Chain reachability simulates "starting at the entrance, opening
+# every directly-clickable door, and progressively pulling every
+# lever the player can reach". A pair is only accepted if, after
+# placement, every placed lever AND the exit AND every chest
+# remain in the chain-reachable set. This permits PROGRESSIVE
+# gating (lever_1 opens door_A, behind which is lever_2 — fine)
+# but rejects CYCLES (every lever locked behind every door).
+#
 # Cross-links are recorded on both sides:
 #   - LeverInstance.linked_doors = [door]
 #   - DoorInstance.linked_levers = [lever]
@@ -611,8 +617,11 @@ func _place_linked_objects() -> void:
 			_try_place_linked_pair(spawn)
 
 func _try_place_linked_pair(spawn: LinkedObjectSpawn) -> void:
-	# Edge candidates available right now (excludes edges that already
-	# carry a door — both decorative and previously-placed linked).
+	# Snapshot chain reachability BEFORE the new pair lands. After
+	# placement we require post_chain ⊇ pre_chain ∖ {new_lever_cell}
+	# — i.e. nothing previously reachable becomes unreachable.
+	var pre_chain: Dictionary = _chain_reachable_from_entrance()
+
 	var edges: Array = _candidate_edges_for_door_object(spawn.door_object, spawn.door_min_distance_to_other_object)
 	edges.shuffle()
 	for edge in edges:
@@ -622,33 +631,70 @@ func _try_place_linked_pair(spawn: LinkedObjectSpawn) -> void:
 		if _doors_by_edge.has(DoorInstance.edge_key(a, b)):
 			continue
 
-		# Tentatively place the door.
+		# Tentatively place the door (no lever links yet).
 		var door := DoorInstance.create_door(spawn.door_object, a, b)
 		doors.append(door)
 		_doors_by_edge[DoorInstance.edge_key(a, b)] = door
 
-		# Now find a lever cell reachable with THIS door treated as
-		# closed. (Other doors are open during the test — we don't
-		# want a decorative door elsewhere making placement impossible
-		# for a pair that's perfectly fine on its own.)
-		var closed_edges: Dictionary = {DoorInstance.edge_key(a, b): true}
-		var reachable: Dictionary = _bfs_walkable_with_closed_edges(entrance_pos, closed_edges)
-		var lever_cell: Vector2i = _pick_lever_cell(spawn, door, reachable, closed_edges)
-		if lever_cell == Vector2i(-1, -1):
-			# Roll back the door so we don't ship a half-pair.
-			doors.erase(door)
-			_doors_by_edge.erase(DoorInstance.edge_key(a, b))
-			continue
+		if _try_place_lever_for_door(spawn, door, pre_chain):
+			return  # both committed
 
-		# Commit lever + cross-links.
-		var lever := LeverInstance.create_lever(spawn.lever_object)
-		grid[lever_cell.x][lever_cell.y].object = lever
-		lever.linked_doors = [door]
-		door.linked_levers = [lever]
-		return
+		# No lever cell preserved chain reachability — roll back the
+		# door and try a different edge.
+		doors.erase(door)
+		_doors_by_edge.erase(DoorInstance.edge_key(a, b))
 
 	push_warning("LevelGenerator: could not place linked pair (lever='%s', door='%s')" %
 		[_obj_label(spawn.lever_object), _obj_label(spawn.door_object)])
+
+func _try_place_lever_for_door(spawn: LinkedObjectSpawn, paired_door: DoorInstance, pre_chain: Dictionary) -> bool:
+	# Chest-style cell classification, then a chain-reachability check
+	# per candidate. The candidate is tentatively placed (mutates the
+	# grid); on failure we roll back and try the next.
+	var cells_by_type: Dictionary = _classify_floor_cells()
+	var raw_pool: Array = []
+	for placement_bit in [ObjectSpawn.PLACEMENT_CORRIDOR, ObjectSpawn.PLACEMENT_ROOM, ObjectSpawn.PLACEMENT_DEAD_END]:
+		if (spawn.lever_placement & placement_bit) == 0:
+			continue
+		for pos in cells_by_type[placement_bit]:
+			if pos == entrance_pos or pos == exit_pos:
+				continue
+			if grid[pos.x][pos.y].object != null:
+				continue
+			if _is_any_door_endpoint(pos):
+				continue
+			if not _within_lever_to_door_range(pos, paired_door, spawn):
+				continue
+			raw_pool.append(pos)
+	if raw_pool.is_empty():
+		return false
+	# Graceful-degrade min_distance, matching chest behaviour.
+	var distance: int = max(0, spawn.lever_min_distance_to_other_object)
+	while distance >= 0:
+		var pool: Array = raw_pool.duplicate()
+		if distance > 0:
+			pool = pool.filter(
+				func(p): return not _too_close_to_existing_object(p, distance)
+			)
+		pool.shuffle()
+		for candidate in pool:
+			# Tentatively commit the lever + cross-links so the chain
+			# simulation can see them.
+			var lever := LeverInstance.create_lever(spawn.lever_object)
+			grid[candidate.x][candidate.y].object = lever
+			lever.linked_doors = [paired_door]
+			paired_door.linked_levers = [lever]
+
+			var post_chain: Dictionary = _chain_reachable_from_entrance()
+			if _chain_preserved_after_pair(pre_chain, post_chain, candidate):
+				return true  # leave mutations in place
+
+			# Roll back this candidate.
+			grid[candidate.x][candidate.y].object = null
+			lever.linked_doors = []
+			paired_door.linked_levers = []
+		distance -= 1
+	return false
 
 func _candidate_edges_for_door_object(door_data: ObjectData, min_distance: int) -> Array:
 	# Mirrors `_candidate_edges_for_door` but takes raw ObjectData +
@@ -680,70 +726,75 @@ func _candidate_edges_for_door_object(door_data: ObjectData, min_distance: int) 
 		return []
 	return result
 
-func _pick_lever_cell(spawn: LinkedObjectSpawn, paired_door: DoorInstance, before_reachable: Dictionary, closed_edges: Dictionary) -> Vector2i:
-	# Reusable chest-style cell classification, then a chest-style
-	# reachability check (placing the lever must not shrink the
-	# entrance-reachable set, modulo the lever's own cell, AND the
-	# lever needs a walkable neighbour). Both BFSs respect
-	# closed_edges so the linked door is treated as closed throughout.
-	var cells_by_type: Dictionary = _classify_floor_cells()
-	var raw_pool: Array = []
-	for placement_bit in [ObjectSpawn.PLACEMENT_CORRIDOR, ObjectSpawn.PLACEMENT_ROOM, ObjectSpawn.PLACEMENT_DEAD_END]:
-		if (spawn.lever_placement & placement_bit) == 0:
-			continue
-		for pos in cells_by_type[placement_bit]:
-			if pos == entrance_pos or pos == exit_pos:
-				continue
-			if grid[pos.x][pos.y].object != null:
-				continue
-			if not before_reachable.has(pos):
-				continue
-			if _is_any_door_endpoint(pos):
-				continue
-			if not _within_lever_to_door_range(pos, paired_door, spawn):
-				continue
-			raw_pool.append(pos)
-	if raw_pool.is_empty():
-		return Vector2i(-1, -1)
-	# Graceful-degrade min_distance, matching chest behaviour.
-	var distance: int = max(0, spawn.lever_min_distance_to_other_object)
-	while distance >= 0:
-		var pool: Array = raw_pool.duplicate()
-		if distance > 0:
-			pool = pool.filter(
-				func(p): return not _too_close_to_existing_object(p, distance)
-			)
-		pool.shuffle()
-		for candidate in pool:
-			if _lever_placement_preserves_reachability(candidate, before_reachable, closed_edges):
-				return candidate
-		distance -= 1
-	return Vector2i(-1, -1)
+# -------------------------------------------------------
+# Chain reachability — the safety net for multi-pair lever placement
+# -------------------------------------------------------
+func _chain_reachable_from_entrance() -> Dictionary:
+	# Iterative fixed-point. Start with every directly-clickable door
+	# treated as open (the player can click them anytime). Then BFS,
+	# find every reachable lever, mark its linked doors as openable,
+	# BFS again. Repeat until no new doors open.
+	var open_door_keys: Dictionary = {}
+	for door in doors:
+		if door.data != null and door.data.interactable:
+			open_door_keys[DoorInstance.edge_key(door.cell_a, door.cell_b)] = true
+	var reachable: Dictionary = {}
+	while true:
+		reachable = _bfs_with_doors_state(entrance_pos, open_door_keys)
+		var progressed: bool = false
+		for x in range(grid_width):
+			for y in range(grid_height):
+				var cell: GridCell = grid[x][y]
+				if not (cell.object is LeverInstance):
+					continue
+				var pos := Vector2i(x, y)
+				if not _has_reachable_neighbour(pos, reachable):
+					continue
+				var lever: LeverInstance = cell.object
+				for door in lever.linked_doors:
+					if door == null:
+						continue
+					var key := DoorInstance.edge_key(door.cell_a, door.cell_b)
+					if not open_door_keys.has(key):
+						open_door_keys[key] = true
+						progressed = true
+		if not progressed:
+			return reachable
+	return {}
 
-func _lever_placement_preserves_reachability(lever_cell: Vector2i, before: Dictionary, closed_edges: Dictionary) -> bool:
-	var after: Dictionary = _bfs_walkable_with_closed_edges_and_wall(entrance_pos, closed_edges, lever_cell)
-	for cell_pos in before:
-		if cell_pos == lever_cell:
-			continue
-		if not after.has(cell_pos):
-			return false
+func _bfs_with_doors_state(origin: Vector2i, open_door_keys: Dictionary) -> Dictionary:
+	# BFS treating each door in `doors` as closed UNLESS its edge_key
+	# is in `open_door_keys`. Powers the chain-reachability loop.
+	var closed_edges: Dictionary = {}
+	for door in doors:
+		var key := DoorInstance.edge_key(door.cell_a, door.cell_b)
+		if not open_door_keys.has(key):
+			closed_edges[key] = true
+	return _bfs_walkable_with_closed_edges(origin, closed_edges)
+
+func _has_reachable_neighbour(pos: Vector2i, reachable: Dictionary) -> bool:
 	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
-		if after.has(lever_cell + d):
+		if reachable.has(pos + d):
 			return true
 	return false
 
+func _chain_preserved_after_pair(before: Dictionary, after: Dictionary, new_lever_cell: Vector2i) -> bool:
+	# Every cell reachable BEFORE the new pair must still be reachable
+	# AFTER (modulo the new lever's own blocking cell), and the new
+	# lever must itself have a reachable neighbour. Implicit consequences:
+	#   - existing levers stay chain-reachable (their neighbours were in `before`)
+	#   - existing chests stay interactable (same reason)
+	#   - exit stays reachable (it was in `before`, post-`_validate_path`)
+	for cell_pos in before:
+		if cell_pos == new_lever_cell:
+			continue
+		if not after.has(cell_pos):
+			return false
+	return _has_reachable_neighbour(new_lever_cell, after)
+
 func _bfs_walkable_with_closed_edges(origin: Vector2i, closed_edges: Dictionary) -> Dictionary:
 	# Same as _bfs_walkable_from but treats the given edges as walls.
-	# Used by linked-pair placement to ensure the lever is reachable
-	# even when its linked door blocks the canonical path.
-	return _bfs_walkable_with_closed_edges_and_wall(origin, closed_edges, Vector2i(-1, -1))
-
-func _bfs_walkable_with_closed_edges_and_wall(origin: Vector2i, closed_edges: Dictionary, extra_wall: Vector2i) -> Dictionary:
-	# Same as the closed-edges BFS but additionally pretends `extra_wall`
-	# is a wall. Used when validating a tentative lever placement
-	# without mutating the grid.
-	if origin == extra_wall:
-		return {}
+	# Powers chain reachability for linked-pair validation.
 	var visited: Dictionary = {origin: true}
 	var queue: Array = [origin]
 	while not queue.is_empty():
@@ -755,8 +806,6 @@ func _bfs_walkable_with_closed_edges_and_wall(origin: Vector2i, closed_edges: Di
 				continue
 			var npos := Vector2i(nx, ny)
 			if visited.has(npos):
-				continue
-			if npos == extra_wall:
 				continue
 			var ncell: GridCell = grid[nx][ny]
 			if ncell.is_blocked:

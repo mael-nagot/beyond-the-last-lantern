@@ -197,18 +197,15 @@ The lever lives on a `GridCell.object` (chest-style cell-bound object). The door
 10. ✅ Tests: `test_linked_object_spawn.gd`, `test_lever_instance.gd` (unit); linked-pair placement integration tests in `test_level_generator.gd`
 11. ⏳ Manual asset work (developer): `res://assets/objects/lever_forest.tres` (closed = lever down, opened = lever up sprites), lever sprites + interact sound, add a `LinkedObjectSpawn` entry to `res://assets/biomes/forest.tres`
 
-#### Task 2b critical fix — Multi-pair lever reachability (NEXT)
-**Bug:** With multiple `LinkedObjectSpawn` pairs the placement check ("lever reachable with its OWN linked door closed") is per-pair only — already-placed sibling doors aren't taken into account. Result observed: 2 doors with both levers behind them, player hard-stuck at game start with no reachable lever to open anything.
+#### Task 2b critical fix — Multi-pair lever reachability ✅
+**Bug:** With multiple `LinkedObjectSpawn` pairs the placement check was per-pair only — already-placed sibling doors weren't taken into account. Two doors could land with both levers behind both doors, hard-stucking the player at game start.
 
-**Fix:** Replace the single-edge check with a **chain-reachability** simulation, run after each pair lands:
-1. Start with every door closed. `reachable = BFS from entrance treating ALL door edges as walls.`
-2. For each placed lever inside `reachable`, conceptually pull it: its linked doors become openable. Expand `reachable` accordingly.
-3. Repeat step 2 until no new progress (fixed point).
-4. If **every placed lever** is in the final `reachable` set, the chain converges — accept the new pair. Otherwise roll back the pair (door + lever both) and try a different candidate.
-
-This permits *progressive* gating (lever_1 opens door_A, behind which is lever_2 — fine puzzle) but rejects the *cycle* case (every lever locked behind every door). The same check should also run after `_place_linked_objects()` finishes as a defensive assertion.
-
-**Tests:** integration test that constructs a biome with ≥3 pairs and asserts chain reachability holds across many seeds.
+**Fix:** Replaced the single-edge check with a **chain-reachability** simulation in `LevelGenerator`:
+1. ✅ `_chain_reachable_from_entrance()` — iterative fixed-point. Start with every directly-clickable door treated as open; BFS; mark every lever-reachable door as openable; BFS again until no progress.
+2. ✅ `_try_place_linked_pair()` snapshots `pre_chain` before each attempt; `_try_place_lever_for_door()` mutates the grid with each candidate, computes `post_chain`, and validates that `pre_chain ⊆ post_chain ∪ {new_lever_cell}` AND the new lever has a chain-reachable neighbour. Failures roll back lever + door together — no orphan halves.
+3. ✅ Permits progressive gating (lever_1 opens door_A, behind which is lever_2) but rejects cycles. Implicit consequences: existing levers stay reachable, existing chests stay interactable, exit stays reachable (all were in `pre_chain`).
+4. ✅ Dropped the now-redundant `_lever_placement_preserves_reachability` and `_bfs_walkable_with_closed_edges_and_wall` helpers.
+5. ✅ Tests: `test_every_lever_chain_reachable_with_three_pairs` + `test_exit_remains_chain_reachable_with_linked_pairs` exercise the cycle case across multiple seeds.
 
 #### Task 2b polish — Locked-door click feedback ✅
 The renderer-level meaning of `ObjectData.interactable` shifted: instead of "skip Area3D so clicks pass through" (the original 2a meaning, never used in practice), `interactable = false` now means "click registers but plays a locked sound + HUD toast instead of toggling". Used today to make lever-controlled doors feel like they're really locked when the player clicks them; will extend without further wiring to Task 2c key-locked doors.
