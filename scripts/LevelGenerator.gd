@@ -18,6 +18,7 @@ var floor_loot: Array[LootEntry] = []
 var floor_items_min: int = 3
 var floor_items_max: int = 8
 var objects_pool: Array[ObjectSpawn] = []
+var linked_objects_pool: Array[LinkedObjectSpawn] = []
 
 var grid: Array = []
 var entrance_pos: Vector2i = Vector2i.ZERO
@@ -51,6 +52,7 @@ func configure(biome: BiomeData) -> void:
 	floor_items_min = biome.floor_items_min
 	floor_items_max = biome.floor_items_max
 	objects_pool = biome.objects
+	linked_objects_pool = biome.linked_objects
 
 func generate() -> void:
 	_fill_with_walls()
@@ -67,6 +69,7 @@ func generate() -> void:
 		return
 	_place_objects()
 	_place_doors()
+	_place_linked_objects()
 	_place_items()
 
 # -------------------------------------------------------
@@ -577,6 +580,224 @@ func is_edge_blocked(a: Vector2i, b: Vector2i) -> bool:
 	if d == null:
 		return false
 	return d.is_edge_blocked()
+
+# -------------------------------------------------------
+# Linked objects (Phase 8 Task 2b — lever ↔ door pairs)
+#
+# For each LinkedObjectSpawn entry we place count pairs. Each pair:
+#   1. Picks a 1-wide-corridor edge for the door (same eligibility as
+#      decorative doors).
+#   2. Picks a chest-style cell for the lever such that the lever
+#      is reachable from the entrance EVEN WITH the linked door
+#      treated as closed (so the player can always reach the lever
+#      to open the door).
+# Cross-links are recorded on both sides:
+#   - LeverInstance.linked_doors = [door]
+#   - DoorInstance.linked_levers = [lever]
+# 1-to-1 today; the Array shape is what makes 1-to-many extension
+# straightforward when the roadmap reaches it.
+# -------------------------------------------------------
+func _place_linked_objects() -> void:
+	if linked_objects_pool.is_empty():
+		return
+	for spawn in linked_objects_pool:
+		if spawn == null:
+			continue
+		if spawn.lever_object == null or spawn.door_object == null:
+			push_warning("LevelGenerator: linked spawn missing lever or door object — skipping")
+			continue
+		var count := randi_range(max(0, spawn.count_min), max(spawn.count_min, spawn.count_max))
+		for _i in range(count):
+			_try_place_linked_pair(spawn)
+
+func _try_place_linked_pair(spawn: LinkedObjectSpawn) -> void:
+	# Edge candidates available right now (excludes edges that already
+	# carry a door — both decorative and previously-placed linked).
+	var edges: Array = _candidate_edges_for_door_object(spawn.door_object, spawn.door_min_distance_to_other_object)
+	edges.shuffle()
+	for edge in edges:
+		var pair: Array = edge as Array
+		var a: Vector2i = pair[0]
+		var b: Vector2i = pair[1]
+		if _doors_by_edge.has(DoorInstance.edge_key(a, b)):
+			continue
+
+		# Tentatively place the door.
+		var door := DoorInstance.create_door(spawn.door_object, a, b)
+		doors.append(door)
+		_doors_by_edge[DoorInstance.edge_key(a, b)] = door
+
+		# Now find a lever cell reachable with THIS door treated as
+		# closed. (Other doors are open during the test — we don't
+		# want a decorative door elsewhere making placement impossible
+		# for a pair that's perfectly fine on its own.)
+		var closed_edges: Dictionary = {DoorInstance.edge_key(a, b): true}
+		var reachable: Dictionary = _bfs_walkable_with_closed_edges(entrance_pos, closed_edges)
+		var lever_cell: Vector2i = _pick_lever_cell(spawn, door, reachable, closed_edges)
+		if lever_cell == Vector2i(-1, -1):
+			# Roll back the door so we don't ship a half-pair.
+			doors.erase(door)
+			_doors_by_edge.erase(DoorInstance.edge_key(a, b))
+			continue
+
+		# Commit lever + cross-links.
+		var lever := LeverInstance.create_lever(spawn.lever_object)
+		grid[lever_cell.x][lever_cell.y].object = lever
+		lever.linked_doors = [door]
+		door.linked_levers = [lever]
+		return
+
+	push_warning("LevelGenerator: could not place linked pair (lever='%s', door='%s')" %
+		[_obj_label(spawn.lever_object), _obj_label(spawn.door_object)])
+
+func _candidate_edges_for_door_object(door_data: ObjectData, min_distance: int) -> Array:
+	# Mirrors `_candidate_edges_for_door` but takes raw ObjectData +
+	# min_distance because LinkedObjectSpawn doesn't share the
+	# ObjectSpawn placement-flag shape.
+	var seen: Dictionary = {}
+	var result: Array = []
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var pos := Vector2i(x, y)
+			if not _is_door_endpoint(pos):
+				continue
+			for d: Vector2i in [Vector2i(1, 0), Vector2i(0, 1)]:
+				var npos: Vector2i = pos + d
+				if not _is_door_endpoint(npos):
+					continue
+				var pair: Array = DoorInstance.canonical_pair(pos, npos)
+				var key: String = "%d,%d|%d,%d" % [pair[0].x, pair[0].y, pair[1].x, pair[1].y]
+				if seen.has(key):
+					continue
+				seen[key] = true
+				if min_distance > 0 and _too_close_to_existing_door(pair, min_distance):
+					continue
+				result.append(pair)
+	# Avoid the unused-param warning; door_data is reserved for future
+	# per-door-type placement filtering (e.g. a thick door that needs
+	# 2-wide corridors).
+	if door_data == null:
+		return []
+	return result
+
+func _pick_lever_cell(spawn: LinkedObjectSpawn, paired_door: DoorInstance, before_reachable: Dictionary, closed_edges: Dictionary) -> Vector2i:
+	# Reusable chest-style cell classification, then a chest-style
+	# reachability check (placing the lever must not shrink the
+	# entrance-reachable set, modulo the lever's own cell, AND the
+	# lever needs a walkable neighbour). Both BFSs respect
+	# closed_edges so the linked door is treated as closed throughout.
+	var cells_by_type: Dictionary = _classify_floor_cells()
+	var raw_pool: Array = []
+	for placement_bit in [ObjectSpawn.PLACEMENT_CORRIDOR, ObjectSpawn.PLACEMENT_ROOM, ObjectSpawn.PLACEMENT_DEAD_END]:
+		if (spawn.lever_placement & placement_bit) == 0:
+			continue
+		for pos in cells_by_type[placement_bit]:
+			if pos == entrance_pos or pos == exit_pos:
+				continue
+			if grid[pos.x][pos.y].object != null:
+				continue
+			if not before_reachable.has(pos):
+				continue
+			if _is_any_door_endpoint(pos):
+				continue
+			if not _within_lever_to_door_range(pos, paired_door, spawn):
+				continue
+			raw_pool.append(pos)
+	if raw_pool.is_empty():
+		return Vector2i(-1, -1)
+	# Graceful-degrade min_distance, matching chest behaviour.
+	var distance: int = max(0, spawn.lever_min_distance_to_other_object)
+	while distance >= 0:
+		var pool: Array = raw_pool.duplicate()
+		if distance > 0:
+			pool = pool.filter(
+				func(p): return not _too_close_to_existing_object(p, distance)
+			)
+		pool.shuffle()
+		for candidate in pool:
+			if _lever_placement_preserves_reachability(candidate, before_reachable, closed_edges):
+				return candidate
+		distance -= 1
+	return Vector2i(-1, -1)
+
+func _lever_placement_preserves_reachability(lever_cell: Vector2i, before: Dictionary, closed_edges: Dictionary) -> bool:
+	var after: Dictionary = _bfs_walkable_with_closed_edges_and_wall(entrance_pos, closed_edges, lever_cell)
+	for cell_pos in before:
+		if cell_pos == lever_cell:
+			continue
+		if not after.has(cell_pos):
+			return false
+	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+		if after.has(lever_cell + d):
+			return true
+	return false
+
+func _bfs_walkable_with_closed_edges(origin: Vector2i, closed_edges: Dictionary) -> Dictionary:
+	# Same as _bfs_walkable_from but treats the given edges as walls.
+	# Used by linked-pair placement to ensure the lever is reachable
+	# even when its linked door blocks the canonical path.
+	return _bfs_walkable_with_closed_edges_and_wall(origin, closed_edges, Vector2i(-1, -1))
+
+func _bfs_walkable_with_closed_edges_and_wall(origin: Vector2i, closed_edges: Dictionary, extra_wall: Vector2i) -> Dictionary:
+	# Same as the closed-edges BFS but additionally pretends `extra_wall`
+	# is a wall. Used when validating a tentative lever placement
+	# without mutating the grid.
+	if origin == extra_wall:
+		return {}
+	var visited: Dictionary = {origin: true}
+	var queue: Array = [origin]
+	while not queue.is_empty():
+		var current: Vector2i = queue.pop_front()
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			var nx: int = current.x + d.x
+			var ny: int = current.y + d.y
+			if not _in_bounds(nx, ny):
+				continue
+			var npos := Vector2i(nx, ny)
+			if visited.has(npos):
+				continue
+			if npos == extra_wall:
+				continue
+			var ncell: GridCell = grid[nx][ny]
+			if ncell.is_blocked:
+				continue
+			if closed_edges.has(DoorInstance.edge_key(current, npos)):
+				continue
+			visited[npos] = true
+			queue.append(npos)
+	return visited
+
+func _obj_label(data: ObjectData) -> String:
+	if data != null and data.name_key != "":
+		return data.name_key
+	return "<unnamed>"
+
+func _is_any_door_endpoint(pos: Vector2i) -> bool:
+	# Levers must never sit on a cell that's also a door endpoint —
+	# either decorative or linked (including the door this lever is
+	# being paired with). Visually the lever-right-next-to-its-door
+	# case reads as redundant; mechanically a lever inside the door's
+	# slab projection is just confusing.
+	for door in doors:
+		if door.cell_a == pos or door.cell_b == pos:
+			return true
+	return false
+
+func _within_lever_to_door_range(lever_pos: Vector2i, paired_door: DoorInstance, spawn: LinkedObjectSpawn) -> bool:
+	# Hard-constraint check: lever must be within [min, max] Manhattan
+	# tiles of its OWN paired door (nearest endpoint). max < 0 means
+	# unlimited. min == 0 means no minimum.
+	var min_d: int = max(0, spawn.lever_to_door_min_distance)
+	var max_d: int = spawn.lever_to_door_max_distance
+	if min_d == 0 and max_d < 0:
+		return true
+	var dist: int = min(_manhattan(lever_pos, paired_door.cell_a),
+		_manhattan(lever_pos, paired_door.cell_b))
+	if dist < min_d:
+		return false
+	if max_d >= 0 and dist > max_d:
+		return false
+	return true
 
 # -------------------------------------------------------
 # Items

@@ -63,6 +63,11 @@ extends Resource
 # specify e.g. "1-3 wooden chests AND 0-1 iron chests". Placement (room
 # / corridor / dead-end) is per-entry too.
 @export var objects: Array[ObjectSpawn] = []
+# Lever ↔ door pairs. Placed AFTER `objects` so chests and decorative
+# doors are already in. Each entry produces count_min..count_max
+# pairs; the lever is guaranteed reachable from the entrance even
+# when its linked door is closed.
+@export var linked_objects: Array[LinkedObjectSpawn] = []
 
 @export_group("Sound")
 # One sound is picked at random per step (forward/back/strafe). Empty

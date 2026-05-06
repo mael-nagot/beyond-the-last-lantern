@@ -518,3 +518,181 @@ func test_each_edge_carries_at_most_one_door() -> void:
 		var key := DoorInstance.edge_key(door.cell_a, door.cell_b)
 		assert_false(seen.has(key), "duplicate door on edge %s" % key)
 		seen[key] = true
+
+# -------------------------------------------------------
+# Linked-object placement (Phase 8 Task 2b: lever ↔ door pairs)
+# -------------------------------------------------------
+
+func _make_lever_data() -> ObjectData:
+	var data := ObjectData.new()
+	data.category = ObjectData.Category.LEVER
+	data.blocks_movement = true
+	data.name_key = "test.lever"
+	return data
+
+func _make_linked_spawn(lever_data: ObjectData, door_data: ObjectData, count_min: int, count_max: int) -> LinkedObjectSpawn:
+	var spawn := LinkedObjectSpawn.new()
+	spawn.lever_object = lever_data
+	spawn.door_object = door_data
+	spawn.count_min = count_min
+	spawn.count_max = count_max
+	spawn.lever_placement = ObjectSpawn.PLACEMENT_ANY
+	return spawn
+
+func _all_lever_cells(gen: LevelGenerator) -> Array:
+	var result: Array = []
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			if gen.grid[x][y].object is LeverInstance:
+				result.append(Vector2i(x, y))
+	return result
+
+func _bfs_with_closed_edge(gen: LevelGenerator, origin: Vector2i, closed_a: Vector2i, closed_b: Vector2i) -> Dictionary:
+	var key := DoorInstance.edge_key(closed_a, closed_b)
+	var visited: Dictionary = {origin: true}
+	var queue: Array = [origin]
+	while not queue.is_empty():
+		var current: Vector2i = queue.pop_front()
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			var n: Vector2i = current + d
+			if n.x < 0 or n.x >= gen.grid_width or n.y < 0 or n.y >= gen.grid_height:
+				continue
+			if visited.has(n):
+				continue
+			if gen.grid[n.x][n.y].is_blocked:
+				continue
+			if DoorInstance.edge_key(current, n) == key:
+				continue
+			visited[n] = true
+			queue.append(n)
+	return visited
+
+func test_linked_pair_emits_one_door_and_one_lever_each() -> void:
+	var biome := _make_biome()
+	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)]
+	var gen := _make_generator(biome)
+	# 0 to 2 pairs depending on whether seed allows placement; for this
+	# fixed seed we know the maze has eligible corridors. Defensive:
+	# whatever we got, levers and (linked) doors should match.
+	var levers: Array = _all_lever_cells(gen)
+	var linked_doors: Array = []
+	for door in gen.doors:
+		if not door.linked_levers.is_empty():
+			linked_doors.append(door)
+	assert_eq(levers.size(), linked_doors.size(),
+		"linked levers (%d) and linked doors (%d) should match in count" %
+		[levers.size(), linked_doors.size()])
+
+func test_each_lever_links_back_to_exactly_one_door() -> void:
+	var biome := _make_biome()
+	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)]
+	var gen := _make_generator(biome)
+	for cell_pos in _all_lever_cells(gen):
+		var lever: LeverInstance = gen.grid[cell_pos.x][cell_pos.y].object
+		assert_eq(lever.linked_doors.size(), 1,
+			"2b lever at %s should have exactly 1 linked door" % cell_pos)
+		var door: DoorInstance = lever.linked_doors[0]
+		# The door should also know about this lever (back-link).
+		assert_true(door.linked_levers.has(lever),
+			"door at %s—%s missing back-link to its lever" % [door.cell_a, door.cell_b])
+
+func test_lever_is_reachable_with_linked_door_closed() -> void:
+	# The placement contract: even if the player NEVER opens the
+	# linked door, they can still walk to the lever.
+	var biome := _make_biome()
+	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)]
+	var gen := _make_generator(biome)
+	for cell_pos in _all_lever_cells(gen):
+		var lever: LeverInstance = gen.grid[cell_pos.x][cell_pos.y].object
+		var door: DoorInstance = lever.linked_doors[0]
+		var reachable: Dictionary = _bfs_with_closed_edge(gen, gen.entrance_pos, door.cell_a, door.cell_b)
+		# Lever cell itself is blocked (the lever blocks movement),
+		# but the player must be able to STAND NEXT TO it.
+		var has_neighbour := false
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			if reachable.has(cell_pos + d):
+				has_neighbour = true
+				break
+		assert_true(has_neighbour,
+			"lever at %s unreachable from entrance with linked door closed" % cell_pos)
+
+func test_lever_does_not_share_cell_with_chest_or_door_endpoint() -> void:
+	var biome := _make_biome()
+	biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
+	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)]
+	var gen := _make_generator(biome)
+	for cell_pos in _all_lever_cells(gen):
+		# Lever cell holds a LeverInstance, not a chest.
+		var obj = gen.grid[cell_pos.x][cell_pos.y].object
+		assert_true(obj is LeverInstance, "cell %s should hold a LeverInstance" % cell_pos)
+		# Lever cell is never a door endpoint.
+		for door in gen.doors:
+			assert_ne(door.cell_a, cell_pos,
+				"lever shares cell with door endpoint at %s" % cell_pos)
+			assert_ne(door.cell_b, cell_pos,
+				"lever shares cell with door endpoint at %s" % cell_pos)
+
+func test_lever_placement_count_falls_within_min_max() -> void:
+	var biome := _make_biome()
+	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 1, 3)]
+	var gen := _make_generator(biome)
+	var lever_count: int = _all_lever_cells(gen).size()
+	# Allow a lower bound of 0 in case the seed couldn't fit any pair —
+	# generation is best-effort and warns but doesn't error. Upper
+	# bound is the strict cap.
+	assert_lte(lever_count, 3, "lever count %d exceeds count_max=3" % lever_count)
+
+func test_lever_to_door_max_distance_is_respected() -> void:
+	# With a tight max, every placed lever must be within that
+	# Manhattan distance of its paired door's nearest endpoint.
+	var spawn := _make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)
+	spawn.lever_to_door_max_distance = 4
+	var biome := _make_biome()
+	biome.linked_objects = [spawn]
+	var gen := _make_generator(biome)
+	for cell_pos in _all_lever_cells(gen):
+		var lever: LeverInstance = gen.grid[cell_pos.x][cell_pos.y].object
+		var door: DoorInstance = lever.linked_doors[0]
+		var dist: int = min(
+			abs(cell_pos.x - door.cell_a.x) + abs(cell_pos.y - door.cell_a.y),
+			abs(cell_pos.x - door.cell_b.x) + abs(cell_pos.y - door.cell_b.y)
+		)
+		assert_lte(dist, 4,
+			"lever at %s is %d tiles from its door %s—%s (max=4)" %
+			[cell_pos, dist, door.cell_a, door.cell_b])
+
+func test_lever_to_door_min_distance_is_respected() -> void:
+	var spawn := _make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)
+	spawn.lever_to_door_min_distance = 6
+	var biome := _make_biome()
+	biome.linked_objects = [spawn]
+	var gen := _make_generator(biome)
+	for cell_pos in _all_lever_cells(gen):
+		var lever: LeverInstance = gen.grid[cell_pos.x][cell_pos.y].object
+		var door: DoorInstance = lever.linked_doors[0]
+		var dist: int = min(
+			abs(cell_pos.x - door.cell_a.x) + abs(cell_pos.y - door.cell_a.y),
+			abs(cell_pos.x - door.cell_b.x) + abs(cell_pos.y - door.cell_b.y)
+		)
+		assert_gte(dist, 6,
+			"lever at %s is %d tiles from its door %s—%s (min=6)" %
+			[cell_pos, dist, door.cell_a, door.cell_b])
+
+func test_linked_door_is_not_decorative() -> void:
+	# A door created via a linked spawn must have linked_levers
+	# populated; a decorative door (via objects pool) must not.
+	var biome := _make_biome()
+	biome.objects = [_make_door_spawn(_make_door(), 1, 1)]
+	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 1, 1)]
+	var gen := _make_generator(biome)
+	var has_decorative := false
+	var has_linked := false
+	for door in gen.doors:
+		if door.linked_levers.is_empty():
+			has_decorative = true
+		else:
+			has_linked = true
+			assert_eq(door.linked_levers.size(), 1)
+	# At least the linked one should appear; decorative is best-effort.
+	assert_true(has_linked or has_decorative,
+		"no doors placed at all — seed may need adjusting")

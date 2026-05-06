@@ -24,3 +24,10 @@ func is_chest() -> bool:
 
 func has_remaining_loot() -> bool:
 	return not items.is_empty()
+
+# Renderer-facing predicate so subclasses can derive their visual
+# state from elsewhere — e.g. a LeverInstance returns whether its
+# linked door is open instead of using its own `opened` field. Default
+# matches the cell-bound chest contract: visual mirrors `opened`.
+func get_visual_opened() -> bool:
+	return opened

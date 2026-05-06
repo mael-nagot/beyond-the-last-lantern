@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://bg5ndgcy1a1ak"
-path="res://.godot/imported/door_forest_closed.png-59075b80ab5c22f7380c85c6cedf31a5.ctex"
+path="res://.godot/imported/door_forest_closed.png-6e84d81f348d3c0d1fa7845d67f3982e.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/textures/objects/wall/door_forest_closed.png"
-dest_files=["res://.godot/imported/door_forest_closed.png-59075b80ab5c22f7380c85c6cedf31a5.ctex"]
+source_file="res://assets/textures/objects/door/door_forest_closed.png"
+dest_files=["res://.godot/imported/door_forest_closed.png-6e84d81f348d3c0d1fa7845d67f3982e.ctex"]
 
 [params]
 
