@@ -123,6 +123,10 @@ func _play_locked_feedback(data: ObjectData) -> void:
 		SoundManager.play(data.locked_sound)
 	if _hud != null and data.locked_message_key != "":
 		_hud.show_toast(data.locked_message_key)
+	# Small camera jolt — softer than a wall bump, just enough to
+	# read as "you tried, it didn't budge".
+	if _dungeon_view != null:
+		_dungeon_view.shake_camera(0.4)
 
 func _pull_lever(lever: LeverInstance) -> void:
 	# A non-interactable lever (rusted shut, magically sealed, ...)

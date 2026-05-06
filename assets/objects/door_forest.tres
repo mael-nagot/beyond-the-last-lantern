@@ -3,6 +3,7 @@
 [ext_resource type="Script" uid="uid://br4c1mxr8q1a" path="res://scripts/ObjectData.gd" id="1_8lfuq"]
 [ext_resource type="Texture2D" uid="uid://bg5ndgcy1a1ak" path="res://assets/textures/objects/door/door_forest_closed.png" id="1_eleah"]
 [ext_resource type="AudioStream" uid="uid://dpbmbhb5jpjpn" path="res://assets/sounds/objects/door_forest_open.ogg" id="2_j37ck"]
+[ext_resource type="AudioStream" uid="uid://d4f3tgybtgy6d" path="res://assets/sounds/objects/lever_forest_locked.ogg" id="3_dxj6f"]
 [ext_resource type="Texture2D" uid="uid://bbehxt2kcrym1" path="res://assets/textures/objects/door/door_forest_opened.png" id="3_j37ck"]
 
 [resource]
@@ -16,4 +17,6 @@ world_height = 6.3
 world_width = 4.6
 interactable = false
 interact_sound = ExtResource("2_j37ck")
+locked_sound = ExtResource("3_dxj6f")
+locked_message_key = "object.door_forest.locked"
 metadata/_custom_type_script = "uid://br4c1mxr8q1a"
