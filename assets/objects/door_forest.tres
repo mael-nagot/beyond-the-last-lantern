@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="ObjectData" format=3 uid="uid://b0furuompokno"]
+
+[ext_resource type="Script" uid="uid://br4c1mxr8q1a" path="res://scripts/ObjectData.gd" id="1_8lfuq"]
+[ext_resource type="Texture2D" uid="uid://bg5ndgcy1a1ak" path="res://assets/textures/objects/wall/door_forest_closed.png" id="1_ltvvr"]
+[ext_resource type="Texture2D" uid="uid://bbehxt2kcrym1" path="res://assets/textures/objects/wall/door_forest_opened.png" id="2_eleah"]
+[ext_resource type="AudioStream" uid="uid://dpbmbhb5jpjpn" path="res://assets/sounds/objects/door_forest_open.ogg" id="2_j37ck"]
+
+[resource]
+script = ExtResource("1_8lfuq")
+name_key = "object.door_wooden.name"
+description_key = "object.door_wooden.description"
+category = 1
+closed_sprite = ExtResource("1_ltvvr")
+opened_sprite = ExtResource("2_eleah")
+world_height = 6.3
+world_width = 4.6
+interact_sound = ExtResource("2_j37ck")
+metadata/_custom_type_script = "uid://br4c1mxr8q1a"

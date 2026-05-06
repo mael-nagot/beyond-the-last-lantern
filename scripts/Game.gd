@@ -92,8 +92,20 @@ func _wire_drop_targets() -> void:
 func _on_object_clicked(instance: ObjectInstance, _grid_pos: Vector2i) -> void:
 	if instance == null or instance.data == null:
 		return
+	if instance is DoorInstance:
+		_toggle_door(instance as DoorInstance)
+		return
 	if instance.is_chest():
 		_open_chest(instance)
+
+func _toggle_door(door: DoorInstance) -> void:
+	door.opened = not door.opened
+	SoundManager.play(door.data.interact_sound)
+	if _dungeon_view != null:
+		_dungeon_view.rebuild_doors()
+	# Door state may have just opened a path the map should reflect on
+	# its next redraw — the player has to take a step before the slab
+	# marker style would change visibly anyway.
 
 func _open_chest(instance: ObjectInstance) -> void:
 	if not instance.opened:

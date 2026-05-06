@@ -25,6 +25,11 @@ var exit_pos: Vector2i = Vector2i.ZERO
 var _current_corridor_width: int = 1
 var _room_rects: Array = []
 
+# Doors live on EDGES, not on cells. Authoritative list (renderer +
+# map iterate this); _doors_by_edge is just an O(1) lookup index.
+var doors: Array[DoorInstance] = []
+var _doors_by_edge: Dictionary = {}  # edge_key (String) -> DoorInstance
+
 func configure(biome: BiomeData) -> void:
 	if biome == null:
 		push_error("LevelGenerator: biome is null, using defaults")
@@ -49,6 +54,8 @@ func configure(biome: BiomeData) -> void:
 
 func generate() -> void:
 	_fill_with_walls()
+	doors.clear()
+	_doors_by_edge.clear()
 	if room_count > 0:
 		_place_rooms()
 	_grow_maze()
@@ -59,6 +66,7 @@ func generate() -> void:
 		generate()
 		return
 	_place_objects()
+	_place_doors()
 	_place_items()
 
 # -------------------------------------------------------
@@ -317,6 +325,10 @@ func _place_objects() -> void:
 	for spawn in objects_pool:
 		if spawn == null or spawn.object == null:
 			continue
+		# Doors are edge-bound; they're handled by _place_doors() and
+		# never stored on a GridCell.
+		if spawn.object.category == ObjectData.Category.DOOR:
+			continue
 		var count := randi_range(max(0, spawn.count_min), max(spawn.count_min, spawn.count_max))
 		for _i in range(count):
 			_try_place_object(spawn, cells_by_type)
@@ -435,6 +447,136 @@ func _classify_single(pos: Vector2i) -> int:
 	if _is_in_room(pos):
 		return ObjectSpawn.PLACEMENT_ROOM
 	return ObjectSpawn.PLACEMENT_CORRIDOR
+
+# -------------------------------------------------------
+# Doors (edge-based — never stored on a GridCell)
+#
+# A door sits on the boundary between two adjacent floor cells. Both
+# cells must be 1-cell-wide-corridor cells (exactly 2 non-wall
+# neighbours each), neither can be entrance / exit, and neither can
+# already hold a chest / blocking object. Reachability isn't an issue
+# for decorative doors — open doors don't block, and closed doors are
+# always re-openable by the player. (Task 2c will add gating logic
+# under ObjectSpawn.must_gate_content.)
+# -------------------------------------------------------
+func _place_doors() -> void:
+	if objects_pool.is_empty():
+		return
+	for spawn in objects_pool:
+		if spawn == null or spawn.object == null:
+			continue
+		if spawn.object.category != ObjectData.Category.DOOR:
+			continue
+		var count := randi_range(max(0, spawn.count_min), max(spawn.count_min, spawn.count_max))
+		for _i in range(count):
+			_try_place_door(spawn)
+
+func _try_place_door(spawn: ObjectSpawn) -> void:
+	# Build the candidate edge list once per door — eligibility
+	# depends on already-placed doors, but the underlying corridor
+	# topology is fixed.
+	var candidates: Array = _candidate_edges_for_door(spawn)
+	var distance: int = max(0, spawn.min_distance_to_other_object)
+	while distance >= 0:
+		var pool: Array = candidates.duplicate()
+		if distance > 0:
+			pool = pool.filter(
+				func(edge): return not _too_close_to_existing_door(edge, distance)
+			)
+		# Filter out edges that already have a door (could happen if
+		# multiple door spawns share corridors).
+		pool = pool.filter(
+			func(edge): return not _doors_by_edge.has(DoorInstance.edge_key(edge[0], edge[1]))
+		)
+		if not pool.is_empty():
+			var edge: Array = pool[randi() % pool.size()]
+			var inst := DoorInstance.create_door(spawn.object, edge[0], edge[1])
+			doors.append(inst)
+			_doors_by_edge[DoorInstance.edge_key(edge[0], edge[1])] = inst
+			return
+		distance -= 1
+	push_warning("LevelGenerator: could not place door '%s' — no eligible 1-wide-corridor edge available" % _spawn_label(spawn))
+
+func _candidate_edges_for_door(spawn: ObjectSpawn) -> Array:
+	# Returns an Array of [cell_a, cell_b] pairs (canonically sorted)
+	# where a door of this spawn type may be placed. ObjectSpawn's
+	# placement flags (Corridor / Room / Dead End) are kept for symmetry
+	# with chests but doors only meaningfully live on Corridor edges.
+	if not spawn.allows(ObjectSpawn.PLACEMENT_CORRIDOR):
+		return []
+	var seen: Dictionary = {}
+	var result: Array = []
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var pos := Vector2i(x, y)
+			if not _is_door_endpoint(pos):
+				continue
+			# Only walk east + south to avoid emitting each edge twice.
+			for d: Vector2i in [Vector2i(1, 0), Vector2i(0, 1)]:
+				var npos: Vector2i = pos + d
+				if not _is_door_endpoint(npos):
+					continue
+				var pair: Array = DoorInstance.canonical_pair(pos, npos)
+				var key: String = "%d,%d|%d,%d" % [pair[0].x, pair[0].y, pair[1].x, pair[1].y]
+				if seen.has(key):
+					continue
+				seen[key] = true
+				result.append(pair)
+	return result
+
+func _is_door_endpoint(pos: Vector2i) -> bool:
+	# A cell qualifies as a door endpoint iff:
+	#   - it's a non-wall cell (FLOOR / ENTRANCE / EXIT — but we exclude
+	#     entrance/exit explicitly because doors must never sit on them),
+	#   - it has exactly 2 non-wall orthogonal neighbours (1-wide
+	#     corridor — straight or bend; T-junctions, dead-ends, room
+	#     interiors are excluded by this count),
+	#   - it isn't already holding a chest / blocking object.
+	if not _in_bounds(pos.x, pos.y):
+		return false
+	var cell: GridCell = grid[pos.x][pos.y]
+	if cell == null:
+		return false
+	if cell.cell_type == GridCell.CellType.WALL:
+		return false
+	if cell.cell_type == GridCell.CellType.ENTRANCE or cell.cell_type == GridCell.CellType.EXIT:
+		return false
+	if cell.object != null:
+		return false
+	var floor_neighbours := 0
+	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+		var nx: int = pos.x + d.x
+		var ny: int = pos.y + d.y
+		if _in_bounds(nx, ny) and grid[nx][ny].cell_type != GridCell.CellType.WALL:
+			floor_neighbours += 1
+	return floor_neighbours == 2
+
+func _too_close_to_existing_door(edge: Array, min_distance: int) -> bool:
+	if min_distance <= 0:
+		return false
+	var a: Vector2i = edge[0]
+	var b: Vector2i = edge[1]
+	for existing in doors:
+		var dist: int = min(
+			min(_manhattan(a, existing.cell_a), _manhattan(a, existing.cell_b)),
+			min(_manhattan(b, existing.cell_a), _manhattan(b, existing.cell_b))
+		)
+		if dist < min_distance:
+			return true
+	return false
+
+func _manhattan(a: Vector2i, b: Vector2i) -> int:
+	return abs(a.x - b.x) + abs(a.y - b.y)
+
+# Public API used by PlayerController (movement check) and rendering.
+func get_door_at_edge(a: Vector2i, b: Vector2i) -> DoorInstance:
+	return _doors_by_edge.get(DoorInstance.edge_key(a, b), null)
+
+func is_edge_blocked(a: Vector2i, b: Vector2i) -> bool:
+	var d: DoorInstance = _doors_by_edge.get(DoorInstance.edge_key(a, b), null)
+	if d == null:
+		return false
+	return d.is_edge_blocked()
 
 # -------------------------------------------------------
 # Items

@@ -162,10 +162,30 @@ Split into 5 incremental tasks. Task 1 builds the foundation that the rest reuse
 9. ✅ `LootPopup` UI: full-screen modal showing chest contents as a grid; click slot → take that stack; "Take All" enabled via `ItemBar.would_fit_all` dry-run; click backdrop or X → close. Remaining items stay in chest for later.
 10. ✅ Localization: `object.chest_wooden.name/description`, `object.chest_iron.name/description`, `ui.loot.title_chest`, `ui.loot.take_all`
 
-#### Task 2 — Doors + switches/levers (next)
-1. Door object with `closed` / `opened` states; closed blocks movement, opened doesn't
-2. Switch/lever object that toggles a target door's state
-3. BFS still passes after every state change (doors close to walls but always have a switch path)
+#### Task 2a — Decorative doors (direct-click toggle) ✅ (code; awaits manual asset/biome wiring)
+Doors live on the EDGE between two adjacent corridor cells, never on a `GridCell`.
+1. ✅ `DoorInstance.gd` (RefCounted, extends `ObjectInstance`) — stores `cell_a`, `cell_b` canonically; `axis()`, `is_edge_blocked()`, static `canonical_pair` / `edge_key` / `create_door` helpers
+2. ✅ `ObjectData.world_width: float` (0 = keep texture aspect; > 0 forces non-uniform horizontal stretch via `Sprite3D.scale.x` so a square wall texture renders at corridor proportions)
+3. ✅ `ObjectData.interactable: bool` (false = skip Area3D so clicks pass through; reserved for future archways/vaults)
+4. ✅ `ObjectSpawn.must_gate_content: bool` (reserved for Task 2c; default false)
+5. ✅ `LevelGenerator.doors: Array[DoorInstance]` + `_doors_by_edge` index; `_place_doors()` runs after `_place_objects()`. Door endpoints must be 1-cell-wide-corridor cells (exactly 2 non-wall neighbours each), neither entrance/exit, neither holds a chest. `min_distance_to_other_object` honoured with the same graceful-degrade-by-1 approach chests use. `is_edge_blocked(a, b)` is the single source of truth for movement.
+6. ✅ `PlayerController._step()` wall-bumps when `LevelGenerator.is_edge_blocked(current, target)` is true
+7. ✅ `DungeonView._build_doors()` (separate code path from `_build_objects`): each door is a `Node3D` anchored at the edge midpoint, Y-rotated to the corridor axis; non-billboarded `Sprite3D` (with optional `scale.x` stretch); SIBLING `Area3D` + box collider so the sprite's `scale.x` doesn't deform the collider. Door positions are STATIC — never refreshed on movement or turn — so they cannot drift.
+8. ✅ `Game._on_object_clicked` dispatches `DoorInstance` to a toggle handler that flips `opened`, plays `interact_sound`, and calls `DungeonView.rebuild_doors()`
+9. ✅ `MapPopup` draws door slabs on cell boundaries (filled when blocking, outline when open) — only when both endpoints are explored
+10. ✅ Localization: `object.door_wooden.name`, `object.door_wooden.description`
+11. ✅ Tests: `test_door_instance.gd` (unit), door placement integration tests in `test_level_generator.gd`
+12. ⏳ Manual asset work (developer): `res://assets/objects/door_wooden.tres` + textures + sound; add door spawn to `res://assets/biomes/forest.tres`
+
+#### Task 2b — Levers + linked doors
+1. `LinkedObjectSpawn` resource for lever ↔ door pairing during placement
+2. Lever object (clickable cell-bound object) that toggles its paired door regardless of distance
+3. Lever placement guarantees the door's gating remains solvable
+
+#### Task 2c — Locked doors + gating placement
+1. `ObjectSpawn.must_gate_content` placement check: closing this door (alone, others treated as open) must cut off at least one chest cell or the exit
+2. Once-only locks (key / lever / quest trigger) — once unlocked, never re-locks
+3. Atmospheric pre-opened doors via `ObjectSpawn.starts_open`
 
 #### Task 3 — Traps
 - Spike trap (periodic up/down)
