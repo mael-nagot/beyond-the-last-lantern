@@ -41,13 +41,25 @@ enum Category {
 @export var lean_toward_player: float = 0.0
 
 @export_group("Interaction")
-# When false, the renderer skips the Area3D + collider so clicks pass
-# through. Used by future decorative archways/vaults that should look
-# like doors but never react. Doors set this true.
+# When true (default): clicking the object toggles its state (chest
+# opens, door swings, lever pulls). When false: the click still
+# registers but the object plays `locked_sound` and the HUD shows a
+# toast built from `locked_message_key` instead of changing state —
+# used for doors that need a lever / key to actually open. The Area3D
+# is created either way, so the player gets feedback rather than a
+# silent dead click.
 @export var interactable: bool = true
 
 @export_group("Sound")
+# Played on a successful interaction (chest opens, door swings, lever
+# pulls).
 @export var interact_sound: AudioStream
+# Played when the click is REJECTED because `interactable = false` —
+# the locked-door thunk / key-rattle. If null, no sound plays.
+@export var locked_sound: AudioStream
+# Translation key for the toast shown when a click is rejected
+# (`interactable = false`). Empty = no toast.
+@export var locked_message_key: String = ""
 
 # Loot is configured per-placement on `ObjectSpawn.loot_table` (in the
 # biome) — see scripts/LootTable.gd. That keeps the chest's visual

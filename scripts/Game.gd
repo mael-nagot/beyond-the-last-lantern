@@ -102,6 +102,12 @@ func _on_object_clicked(instance: ObjectInstance, _grid_pos: Vector2i) -> void:
 		_open_chest(instance)
 
 func _toggle_door(door: DoorInstance) -> void:
+	# A non-interactable door (lever-only or key-required) gives the
+	# player audio + toast feedback instead of toggling. The Area3D
+	# is always built so the click registers either way.
+	if not door.data.interactable:
+		_play_locked_feedback(door.data)
+		return
 	door.opened = not door.opened
 	SoundManager.play(door.data.interact_sound)
 	if _dungeon_view != null:
@@ -112,7 +118,22 @@ func _toggle_door(door: DoorInstance) -> void:
 		if not door.linked_levers.is_empty():
 			_dungeon_view.rebuild_objects()
 
+func _play_locked_feedback(data: ObjectData) -> void:
+	if data.locked_sound != null:
+		SoundManager.play(data.locked_sound)
+	if _hud != null and data.locked_message_key != "":
+		_hud.show_toast(data.locked_message_key)
+	# Small camera jolt — softer than a wall bump, just enough to
+	# read as "you tried, it didn't budge".
+	if _dungeon_view != null:
+		_dungeon_view.shake_camera(0.4)
+
 func _pull_lever(lever: LeverInstance) -> void:
+	# A non-interactable lever (rusted shut, magically sealed, ...)
+	# gives feedback instead of pulling — same contract as doors.
+	if not lever.data.interactable:
+		_play_locked_feedback(lever.data)
+		return
 	# Pulling flips every linked door's state. The lever's own visual
 	# is derived (mirrors the doors), so we don't store its own bool.
 	# 2b ships with one linked door per lever; multi-door pairing
@@ -126,6 +147,9 @@ func _pull_lever(lever: LeverInstance) -> void:
 		_dungeon_view.rebuild_objects()
 
 func _open_chest(instance: ObjectInstance) -> void:
+	if not instance.data.interactable:
+		_play_locked_feedback(instance.data)
+		return
 	if not instance.opened:
 		_roll_chest_loot(instance)
 		instance.opened = true

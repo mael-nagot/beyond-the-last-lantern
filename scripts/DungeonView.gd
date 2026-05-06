@@ -307,22 +307,23 @@ func _make_door_node(door: DoorInstance) -> Node3D:
 	root.add_child(sprite)
 
 	# Click pickability lives on a sibling Area3D so the sprite's
-	# scale.x doesn't deform the collider. Skip entirely for non-
-	# interactable variants (future archways/vaults).
-	if data.interactable:
-		var area := Area3D.new()
-		area.input_ray_pickable = true
-		area.set_meta("object_instance", door)
-		# grid_pos is meaningless for an edge object; expose cell_a as
-		# a stable single-cell sentinel for handlers that expect one.
-		area.set_meta("grid_pos", door.cell_a)
-		var col := CollisionShape3D.new()
-		var box := BoxShape3D.new()
-		var box_width: float = data.world_width if data.world_width > 0.0 else CELL_SIZE
-		box.size = Vector3(box_width, data.world_height, 0.6)
-		col.shape = box
-		area.add_child(col)
-		root.add_child(area)
+	# scale.x doesn't deform the collider. The Area3D is created
+	# REGARDLESS of `data.interactable` — that flag now controls
+	# whether the click toggles the door or just plays feedback
+	# (locked sound + toast). Either way, the click must register.
+	var area := Area3D.new()
+	area.input_ray_pickable = true
+	area.set_meta("object_instance", door)
+	# grid_pos is meaningless for an edge object; expose cell_a as
+	# a stable single-cell sentinel for handlers that expect one.
+	area.set_meta("grid_pos", door.cell_a)
+	var col := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	var box_width: float = data.world_width if data.world_width > 0.0 else CELL_SIZE
+	box.size = Vector3(box_width, data.world_height, 0.6)
+	col.shape = box
+	area.add_child(col)
+	root.add_child(area)
 
 	return root
 
@@ -478,22 +479,25 @@ var _shake_tween: Tween = null
 var _shake_origin: Vector3 = Vector3.ZERO
 
 # Brief omni-directional jolt of the camera position. Used for wall
-# bumps; safe to call rapid-fire — an active shake is killed and the
-# camera reset before a fresh shake starts so successive bumps don't
-# drift.
-func shake_camera() -> void:
+# bumps and rejected interactions (locked-door click feedback).
+# `magnitude` scales the base SHAKE_INTENSITY: 1.0 = full wall bump,
+# ~0.4 = a softer "click on locked thing" jolt. Safe to call rapid-
+# fire — an active shake is killed and the camera reset before a
+# fresh shake starts so successive shakes don't drift.
+func shake_camera(magnitude: float = 1.0) -> void:
 	if _shake_tween != null and _shake_tween.is_running():
 		_shake_tween.kill()
 		camera.position = _shake_origin
 	_shake_origin = camera.position
 	_shake_tween = create_tween()
+	var intensity: float = SHAKE_INTENSITY * magnitude
 	var step_dur := SHAKE_DURATION / float(SHAKE_STEPS)
 	for i in range(SHAKE_STEPS):
 		var decay := 1.0 - float(i) / float(SHAKE_STEPS)
 		var offset := Vector3(
-			randf_range(-SHAKE_INTENSITY, SHAKE_INTENSITY),
-			randf_range(-SHAKE_INTENSITY, SHAKE_INTENSITY) * 0.4,
-			randf_range(-SHAKE_INTENSITY, SHAKE_INTENSITY),
+			randf_range(-intensity, intensity),
+			randf_range(-intensity, intensity) * 0.4,
+			randf_range(-intensity, intensity),
 		) * decay
 		_shake_tween.tween_property(camera, "position", _shake_origin + offset, step_dur)
 	_shake_tween.tween_property(camera, "position", _shake_origin, step_dur)
