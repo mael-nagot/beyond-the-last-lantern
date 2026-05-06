@@ -307,22 +307,23 @@ func _make_door_node(door: DoorInstance) -> Node3D:
 	root.add_child(sprite)
 
 	# Click pickability lives on a sibling Area3D so the sprite's
-	# scale.x doesn't deform the collider. Skip entirely for non-
-	# interactable variants (future archways/vaults).
-	if data.interactable:
-		var area := Area3D.new()
-		area.input_ray_pickable = true
-		area.set_meta("object_instance", door)
-		# grid_pos is meaningless for an edge object; expose cell_a as
-		# a stable single-cell sentinel for handlers that expect one.
-		area.set_meta("grid_pos", door.cell_a)
-		var col := CollisionShape3D.new()
-		var box := BoxShape3D.new()
-		var box_width: float = data.world_width if data.world_width > 0.0 else CELL_SIZE
-		box.size = Vector3(box_width, data.world_height, 0.6)
-		col.shape = box
-		area.add_child(col)
-		root.add_child(area)
+	# scale.x doesn't deform the collider. The Area3D is created
+	# REGARDLESS of `data.interactable` — that flag now controls
+	# whether the click toggles the door or just plays feedback
+	# (locked sound + toast). Either way, the click must register.
+	var area := Area3D.new()
+	area.input_ray_pickable = true
+	area.set_meta("object_instance", door)
+	# grid_pos is meaningless for an edge object; expose cell_a as
+	# a stable single-cell sentinel for handlers that expect one.
+	area.set_meta("grid_pos", door.cell_a)
+	var col := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	var box_width: float = data.world_width if data.world_width > 0.0 else CELL_SIZE
+	box.size = Vector3(box_width, data.world_height, 0.6)
+	col.shape = box
+	area.add_child(col)
+	root.add_child(area)
 
 	return root
 

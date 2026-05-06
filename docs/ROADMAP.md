@@ -191,6 +191,13 @@ The lever lives on a `GridCell.object` (chest-style cell-bound object). The door
 10. ✅ Tests: `test_linked_object_spawn.gd`, `test_lever_instance.gd` (unit); linked-pair placement integration tests in `test_level_generator.gd`
 11. ⏳ Manual asset work (developer): `res://assets/objects/lever_forest.tres` (closed = lever down, opened = lever up sprites), lever sprites + interact sound, add a `LinkedObjectSpawn` entry to `res://assets/biomes/forest.tres`
 
+#### Task 2b polish — Locked-door click feedback ✅
+The renderer-level meaning of `ObjectData.interactable` shifted: instead of "skip Area3D so clicks pass through" (the original 2a meaning, never used in practice), `interactable = false` now means "click registers but plays a locked sound + HUD toast instead of toggling". Used today to make lever-controlled doors feel like they're really locked when the player clicks them; will extend without further wiring to Task 2c key-locked doors.
+1. ✅ `ObjectData.locked_sound` (feedback SFX) and `ObjectData.locked_message_key` (toast translation key)
+2. ✅ `DungeonView` always builds the door's Area3D — the click must register either way for feedback to fire
+3. ✅ Every Game.gd click dispatch (chest / door / lever) short-circuits to `_play_locked_feedback` when `instance.data.interactable` is false
+4. ✅ Localization: `object.door_forest.locked`
+
 #### Task 2b follow-up — Richer lever ↔ door pairing
 1. Allow one lever to toggle multiple doors (lever's `linked_doors` already an Array)
 2. Allow one door to be toggled by multiple levers (door's `linked_levers` already an Array; lever sprite already uses "any door open" — confirm or revisit semantics for many-to-many)

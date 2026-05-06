@@ -14,5 +14,6 @@ closed_sprite = ExtResource("1_eleah")
 opened_sprite = ExtResource("3_j37ck")
 world_height = 6.3
 world_width = 4.6
+interactable = false
 interact_sound = ExtResource("2_j37ck")
 metadata/_custom_type_script = "uid://br4c1mxr8q1a"
