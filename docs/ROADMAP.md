@@ -162,6 +162,12 @@ Split into 5 incremental tasks. Task 1 builds the foundation that the rest reuse
 9. ✅ `LootPopup` UI: full-screen modal showing chest contents as a grid; click slot → take that stack; "Take All" enabled via `ItemBar.would_fit_all` dry-run; click backdrop or X → close. Remaining items stay in chest for later.
 10. ✅ Localization: `object.chest_wooden.name/description`, `object.chest_iron.name/description`, `ui.loot.title_chest`, `ui.loot.take_all`
 
+#### Task 1 polish — Chest loot pickup sounds
+Floor pickup plays `ItemData.pickup_drop_sound` (see `Game._on_pickup_pressed`), but transferring items out of a chest via `LootPopup` is silent. Two fixes, both in `Game.gd`:
+1. `_on_loot_item_taken(slot_index)`: after the successful transfer, play the moved `ItemInstance`'s `data.pickup_drop_sound`
+2. `_on_loot_take_all()`: play the FIRST transferred item's `pickup_drop_sound` once (single sound, not N — N would be audio spam on a full chest)
+Edge case: stacks remaining in the chest because the bar was full shouldn't play the sound (nothing was actually picked up).
+
 #### Task 2a — Decorative doors (direct-click toggle) ✅ (code; awaits manual asset/biome wiring)
 Doors live on the EDGE between two adjacent corridor cells, never on a `GridCell`.
 1. ✅ `DoorInstance.gd` (RefCounted, extends `ObjectInstance`) — stores `cell_a`, `cell_b` canonically; `axis()`, `is_edge_blocked()`, static `canonical_pair` / `edge_key` / `create_door` helpers
