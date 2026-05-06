@@ -633,7 +633,7 @@ func _try_place_linked_pair(spawn: LinkedObjectSpawn) -> void:
 		# for a pair that's perfectly fine on its own.)
 		var closed_edges: Dictionary = {DoorInstance.edge_key(a, b): true}
 		var reachable: Dictionary = _bfs_walkable_with_closed_edges(entrance_pos, closed_edges)
-		var lever_cell: Vector2i = _pick_lever_cell(spawn, reachable, closed_edges)
+		var lever_cell: Vector2i = _pick_lever_cell(spawn, door, reachable, closed_edges)
 		if lever_cell == Vector2i(-1, -1):
 			# Roll back the door so we don't ship a half-pair.
 			doors.erase(door)
@@ -680,7 +680,7 @@ func _candidate_edges_for_door_object(door_data: ObjectData, min_distance: int) 
 		return []
 	return result
 
-func _pick_lever_cell(spawn: LinkedObjectSpawn, before_reachable: Dictionary, closed_edges: Dictionary) -> Vector2i:
+func _pick_lever_cell(spawn: LinkedObjectSpawn, paired_door: DoorInstance, before_reachable: Dictionary, closed_edges: Dictionary) -> Vector2i:
 	# Reusable chest-style cell classification, then a chest-style
 	# reachability check (placing the lever must not shrink the
 	# entrance-reachable set, modulo the lever's own cell, AND the
@@ -699,6 +699,8 @@ func _pick_lever_cell(spawn: LinkedObjectSpawn, before_reachable: Dictionary, cl
 			if not before_reachable.has(pos):
 				continue
 			if _is_any_door_endpoint(pos):
+				continue
+			if not _within_lever_to_door_range(pos, paired_door, spawn):
 				continue
 			raw_pool.append(pos)
 	if raw_pool.is_empty():
@@ -780,6 +782,22 @@ func _is_any_door_endpoint(pos: Vector2i) -> bool:
 		if door.cell_a == pos or door.cell_b == pos:
 			return true
 	return false
+
+func _within_lever_to_door_range(lever_pos: Vector2i, paired_door: DoorInstance, spawn: LinkedObjectSpawn) -> bool:
+	# Hard-constraint check: lever must be within [min, max] Manhattan
+	# tiles of its OWN paired door (nearest endpoint). max < 0 means
+	# unlimited. min == 0 means no minimum.
+	var min_d: int = max(0, spawn.lever_to_door_min_distance)
+	var max_d: int = spawn.lever_to_door_max_distance
+	if min_d == 0 and max_d < 0:
+		return true
+	var dist: int = min(_manhattan(lever_pos, paired_door.cell_a),
+		_manhattan(lever_pos, paired_door.cell_b))
+	if dist < min_d:
+		return false
+	if max_d >= 0 and dist > max_d:
+		return false
+	return true
 
 # -------------------------------------------------------
 # Items

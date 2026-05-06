@@ -179,7 +179,7 @@ Doors live on the EDGE between two adjacent corridor cells, never on a `GridCell
 
 #### Task 2b — Levers + linked doors ✅ (code; awaits manual asset/biome wiring)
 The lever lives on a `GridCell.object` (chest-style cell-bound object). The door lives on an edge (Task 2a). They cross-link at placement time so each remembers the other.
-1. ✅ `LinkedObjectSpawn.gd` Resource (biome-level pair entry: lever_object, door_object, count, lever_placement, lever_min_distance, door_min_distance, door_must_gate_content reserved for 2c)
+1. ✅ `LinkedObjectSpawn.gd` Resource (biome-level pair entry: lever_object, door_object, count, lever_placement, lever_min_distance / door_min_distance for anti-clustering, lever_to_door_min_distance / lever_to_door_max_distance for puzzle spread, door_must_gate_content reserved for 2c)
 2. ✅ `BiomeData.linked_objects: Array[LinkedObjectSpawn]` (separate from `objects` so chests/decorative-doors keep their simple shape)
 3. ✅ `LeverInstance.gd` (RefCounted, extends `ObjectInstance`) — adds `linked_doors: Array`, overrides `get_visual_opened()` so the lever sprite mirrors "any linked door is open"
 4. ✅ `DoorInstance.linked_levers: Array` back-link populated at placement; used by `Game._toggle_door` to refresh lever sprites after a direct door click

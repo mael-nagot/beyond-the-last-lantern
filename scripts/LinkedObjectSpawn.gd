@@ -30,10 +30,29 @@ extends Resource
 # Where the lever is allowed to spawn (chest-style flags).
 @export_flags("Corridor", "Room", "Dead End") var lever_placement: int = ObjectSpawn.PLACEMENT_DEFAULT
 
-# Manhattan-distance preferences (graceful degrade by 1 down to 0,
-# matching ObjectSpawn / LootEntry behaviour).
+# Anti-clustering: minimum Manhattan distance from the lever to ANY
+# already-placed cell-bound object (chests, other levers from earlier
+# pairs) — NOT specifically to the lever's own paired door. Graceful-
+# degrades by 1 down to 0 if no candidate qualifies, matching the
+# chest / decorative-door convention.
 @export var lever_min_distance_to_other_object: int = 0
+# Same anti-clustering rule for the candidate DOOR's nearest endpoint
+# vs. the nearest endpoint of any already-placed door.
 @export var door_min_distance_to_other_object: int = 0
+
+@export_group("Lever ↔ Door spread")
+# Manhattan distance from the lever cell to the nearest endpoint of
+# its OWN paired door. These shape the puzzle's flavour:
+#   - Small min, small max → lever right next to its door (obvious)
+#   - Large min, large max → lever hidden far away (a real detour)
+#   - Wide range            → mix of both per spawn
+# Hard constraints (no graceful degrade) — if no candidate cell fits,
+# the pair is skipped with a warning so the designer notices and
+# adjusts the bounds.
+@export var lever_to_door_min_distance: int = 0
+# Maximum Manhattan distance from the lever to its paired door. Use
+# -1 for "unlimited" (anywhere reachable on the map).
+@export var lever_to_door_max_distance: int = -1
 
 # Reserved for Task 2c — when true, the door's placement requires
 # that closing it cuts off something meaningful (chest cell or exit).

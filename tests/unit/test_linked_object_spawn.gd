@@ -7,6 +7,8 @@ func test_defaults_to_one_pair_with_default_lever_placement() -> void:
 	assert_eq(spawn.lever_placement, ObjectSpawn.PLACEMENT_DEFAULT)
 	assert_eq(spawn.lever_min_distance_to_other_object, 0)
 	assert_eq(spawn.door_min_distance_to_other_object, 0)
+	assert_eq(spawn.lever_to_door_min_distance, 0)
+	assert_eq(spawn.lever_to_door_max_distance, -1, "default should be unlimited (-1)")
 	assert_false(spawn.door_must_gate_content)
 
 func test_holds_object_data_refs() -> void:

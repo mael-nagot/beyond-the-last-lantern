@@ -642,6 +642,42 @@ func test_lever_placement_count_falls_within_min_max() -> void:
 	# bound is the strict cap.
 	assert_lte(lever_count, 3, "lever count %d exceeds count_max=3" % lever_count)
 
+func test_lever_to_door_max_distance_is_respected() -> void:
+	# With a tight max, every placed lever must be within that
+	# Manhattan distance of its paired door's nearest endpoint.
+	var spawn := _make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)
+	spawn.lever_to_door_max_distance = 4
+	var biome := _make_biome()
+	biome.linked_objects = [spawn]
+	var gen := _make_generator(biome)
+	for cell_pos in _all_lever_cells(gen):
+		var lever: LeverInstance = gen.grid[cell_pos.x][cell_pos.y].object
+		var door: DoorInstance = lever.linked_doors[0]
+		var dist: int = min(
+			abs(cell_pos.x - door.cell_a.x) + abs(cell_pos.y - door.cell_a.y),
+			abs(cell_pos.x - door.cell_b.x) + abs(cell_pos.y - door.cell_b.y)
+		)
+		assert_lte(dist, 4,
+			"lever at %s is %d tiles from its door %s—%s (max=4)" %
+			[cell_pos, dist, door.cell_a, door.cell_b])
+
+func test_lever_to_door_min_distance_is_respected() -> void:
+	var spawn := _make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)
+	spawn.lever_to_door_min_distance = 6
+	var biome := _make_biome()
+	biome.linked_objects = [spawn]
+	var gen := _make_generator(biome)
+	for cell_pos in _all_lever_cells(gen):
+		var lever: LeverInstance = gen.grid[cell_pos.x][cell_pos.y].object
+		var door: DoorInstance = lever.linked_doors[0]
+		var dist: int = min(
+			abs(cell_pos.x - door.cell_a.x) + abs(cell_pos.y - door.cell_a.y),
+			abs(cell_pos.x - door.cell_b.x) + abs(cell_pos.y - door.cell_b.y)
+		)
+		assert_gte(dist, 6,
+			"lever at %s is %d tiles from its door %s—%s (min=6)" %
+			[cell_pos, dist, door.cell_a, door.cell_b])
+
 func test_linked_door_is_not_decorative() -> void:
 	# A door created via a linked spawn must have linked_levers
 	# populated; a decorative door (via objects pool) must not.

@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="ObjectData" format=3 uid="uid://cqso31osmprq3"]
+
+[ext_resource type="Script" uid="uid://br4c1mxr8q1a" path="res://scripts/ObjectData.gd" id="1_2idwr"]
+[ext_resource type="Texture2D" uid="uid://dmu3j47rhcyod" path="res://assets/textures/objects/lever/lever_forest_down.png" id="1_r2eg6"]
+[ext_resource type="AudioStream" uid="uid://55rk40dljm5j" path="res://assets/sounds/objects/lever_forest_pull.ogg" id="2_f1ufu"]
+[ext_resource type="Texture2D" uid="uid://xlob8mykydbx" path="res://assets/textures/objects/lever/lever_forest_up.png" id="3_g464i"]
+
+[resource]
+script = ExtResource("1_2idwr")
+name_key = "object.lever_forest.name"
+description_key = "object.lever_forest.description"
+category = 2
+closed_sprite = ExtResource("1_r2eg6")
+opened_sprite = ExtResource("3_g464i")
+world_height = 1.5
+lean_toward_player = 1.0
+interact_sound = ExtResource("2_f1ufu")
+metadata/_custom_type_script = "uid://br4c1mxr8q1a"
