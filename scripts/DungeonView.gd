@@ -188,7 +188,10 @@ func _build_objects() -> void:
 			if cell == null or cell.object == null or cell.object.data == null:
 				continue
 			var data: ObjectData = cell.object.data
-			var tex: Texture2D = data.opened_sprite if (cell.object.opened and data.opened_sprite != null) else data.closed_sprite
+			# get_visual_opened() lets a LeverInstance derive its sprite
+			# from its linked door's state; for a chest it just mirrors
+			# the chest's own `opened` flag.
+			var tex: Texture2D = data.opened_sprite if (cell.object.get_visual_opened() and data.opened_sprite != null) else data.closed_sprite
 			if tex == null:
 				continue
 			var grid_pos := Vector2i(x, y)

@@ -7,8 +7,8 @@
 
 [resource]
 script = ExtResource("1_8lfuq")
-name_key = "object.door_wooden.name"
-description_key = "object.door_wooden.description"
+name_key = "object.door_forest.name"
+description_key = "object.door_forest.description"
 category = 1
 closed_sprite = ExtResource("1_ltvvr")
 opened_sprite = ExtResource("2_eleah")

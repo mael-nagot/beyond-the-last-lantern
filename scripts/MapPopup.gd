@@ -229,6 +229,11 @@ func _draw_player_arrow(center: Vector2, facing: Vector2i, arrow_size: float, co
 func _draw_object_marker(rect_pos: Vector2, rect_size: Vector2, cell_size: float, instance: ObjectInstance) -> void:
 	var data: ObjectData = instance.data
 	var center := rect_pos + rect_size * 0.5
+	# Levers render as a smaller diamond so they read as distinct from
+	# chests at a glance even though both are cell-bound.
+	if instance is LeverInstance:
+		_draw_lever_marker(center, cell_size, instance as LeverInstance)
+		return
 	var marker_size: float = cell_size * 0.55
 	var marker_rect := Rect2(center - Vector2(marker_size, marker_size) * 0.5,
 		Vector2(marker_size, marker_size))
@@ -249,6 +254,29 @@ func _draw_object_marker(rect_pos: Vector2, rect_size: Vector2, cell_size: float
 		var border := Color(color.r * 0.6, color.g * 0.6, color.b * 0.6)
 		var w: float = max(cell_size * 0.06, 1.0)
 		map_draw.draw_rect(marker_rect, border, false, w)
+
+func _draw_lever_marker(center: Vector2, cell_size: float, lever: LeverInstance) -> void:
+	# Small grey diamond, filled when the linked door is closed,
+	# outline-only when it's open (visually consistent with the door
+	# slab style on the same map).
+	var s: float = cell_size * 0.30
+	var diamond := PackedVector2Array([
+		center + Vector2(0, -s),
+		center + Vector2(s, 0),
+		center + Vector2(0, s),
+		center + Vector2(-s, 0),
+	])
+	var color := Color(0.40, 0.42, 0.48)  # slate / iron tone
+	var line_width: float = max(cell_size * 0.08, 1.0)
+	if lever.get_visual_opened():
+		# Linked door is open — outline only.
+		for i in range(4):
+			map_draw.draw_line(diamond[i], diamond[(i + 1) % 4], color, line_width)
+	else:
+		map_draw.draw_colored_polygon(diamond, color)
+		var border := Color(color.r * 0.5, color.g * 0.5, color.b * 0.5)
+		for i in range(4):
+			map_draw.draw_line(diamond[i], diamond[(i + 1) % 4], border, max(line_width * 0.6, 1.0))
 
 func _draw_door_slab(door: DoorInstance, offset: Vector2, cell_size: float, line_width: float) -> void:
 	# A door sits on the boundary between cell_a and cell_b. The slab

@@ -173,14 +173,34 @@ Doors live on the EDGE between two adjacent corridor cells, never on a `GridCell
 7. ✅ `DungeonView._build_doors()` (separate code path from `_build_objects`): each door is a `Node3D` anchored at the edge midpoint, Y-rotated to the corridor axis; non-billboarded `Sprite3D` (with optional `scale.x` stretch); SIBLING `Area3D` + box collider so the sprite's `scale.x` doesn't deform the collider. Door positions are STATIC — never refreshed on movement or turn — so they cannot drift.
 8. ✅ `Game._on_object_clicked` dispatches `DoorInstance` to a toggle handler that flips `opened`, plays `interact_sound`, and calls `DungeonView.rebuild_doors()`
 9. ✅ `MapPopup` draws door slabs on cell boundaries (filled when blocking, outline when open) — only when both endpoints are explored
-10. ✅ Localization: `object.door_wooden.name`, `object.door_wooden.description`
+10. ✅ Localization: `object.door_forest.name`, `object.door_forest.description`
 11. ✅ Tests: `test_door_instance.gd` (unit), door placement integration tests in `test_level_generator.gd`
-12. ⏳ Manual asset work (developer): `res://assets/objects/door_wooden.tres` + textures + sound; add door spawn to `res://assets/biomes/forest.tres`
+12. ✅ Manual asset work (developer): `res://assets/objects/door_forest.tres` + textures + sound; door spawn added to `res://assets/biomes/forest.tres`
 
-#### Task 2b — Levers + linked doors
-1. `LinkedObjectSpawn` resource for lever ↔ door pairing during placement
-2. Lever object (clickable cell-bound object) that toggles its paired door regardless of distance
-3. Lever placement guarantees the door's gating remains solvable
+#### Task 2b — Levers + linked doors ✅ (code; awaits manual asset/biome wiring)
+The lever lives on a `GridCell.object` (chest-style cell-bound object). The door lives on an edge (Task 2a). They cross-link at placement time so each remembers the other.
+1. ✅ `LinkedObjectSpawn.gd` Resource (biome-level pair entry: lever_object, door_object, count, lever_placement, lever_min_distance, door_min_distance, door_must_gate_content reserved for 2c)
+2. ✅ `BiomeData.linked_objects: Array[LinkedObjectSpawn]` (separate from `objects` so chests/decorative-doors keep their simple shape)
+3. ✅ `LeverInstance.gd` (RefCounted, extends `ObjectInstance`) — adds `linked_doors: Array`, overrides `get_visual_opened()` so the lever sprite mirrors "any linked door is open"
+4. ✅ `DoorInstance.linked_levers: Array` back-link populated at placement; used by `Game._toggle_door` to refresh lever sprites after a direct door click
+5. ✅ `ObjectInstance.get_visual_opened()` virtual method (default returns `opened`) — DungeonView reads it instead of `opened` for cell-bound rendering, so the chest contract stays unchanged
+6. ✅ `LevelGenerator._place_linked_objects()` runs after `_place_doors()`. For each pair: pick a 1-wide corridor edge for the door (reuse decorative-door eligibility), then pick a chest-style cell for the lever that's reachable from the entrance EVEN WITH the linked door treated as closed. Rolls back the door if no lever cell qualifies, so we never ship orphan halves.
+7. ✅ `Game._on_object_clicked` dispatches `LeverInstance` to a pull handler that flips every linked door's state, plays the lever's interact sound, and rebuilds both door and cell-object visuals
+8. ✅ `MapPopup` draws lever as a small slate diamond (filled when the linked door is closed; outline-only when open) so players can find their levers from the map
+9. ✅ Localization: `object.lever_forest.name`, `object.lever_forest.description`
+10. ✅ Tests: `test_linked_object_spawn.gd`, `test_lever_instance.gd` (unit); linked-pair placement integration tests in `test_level_generator.gd`
+11. ⏳ Manual asset work (developer): `res://assets/objects/lever_forest.tres` (closed = lever down, opened = lever up sprites), lever sprites + interact sound, add a `LinkedObjectSpawn` entry to `res://assets/biomes/forest.tres`
+
+#### Task 2b follow-up — Richer lever ↔ door pairing
+1. Allow one lever to toggle multiple doors (lever's `linked_doors` already an Array)
+2. Allow one door to be toggled by multiple levers (door's `linked_levers` already an Array; lever sprite already uses "any door open" — confirm or revisit semantics for many-to-many)
+3. Decide AND/OR semantics if needed (e.g. door opens only when ALL levers pulled vs. ANY lever pulled). Today the model is "each pull flips each linked door", which is consistent for 1:1 and degrades reasonably for many.
+4. Update `LinkedObjectSpawn` shape to express N:M pairing rules (probably `lever_count_per_pair`, `door_count_per_pair`, or a more declarative pairing graph)
+
+#### Task 2c — Locked doors + gating placement
+1. `ObjectSpawn.must_gate_content` placement check: closing this door (alone, others treated as open) must cut off at least one chest cell or the exit
+2. Once-only locks (key / lever / quest trigger) — once unlocked, never re-locks
+3. Atmospheric pre-opened doors via `ObjectSpawn.starts_open`
 
 #### Task 2c — Locked doors + gating placement
 1. `ObjectSpawn.must_gate_content` placement check: closing this door (alone, others treated as open) must cut off at least one chest cell or the exit

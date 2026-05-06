@@ -95,6 +95,9 @@ func _on_object_clicked(instance: ObjectInstance, _grid_pos: Vector2i) -> void:
 	if instance is DoorInstance:
 		_toggle_door(instance as DoorInstance)
 		return
+	if instance is LeverInstance:
+		_pull_lever(instance as LeverInstance)
+		return
 	if instance.is_chest():
 		_open_chest(instance)
 
@@ -103,9 +106,24 @@ func _toggle_door(door: DoorInstance) -> void:
 	SoundManager.play(door.data.interact_sound)
 	if _dungeon_view != null:
 		_dungeon_view.rebuild_doors()
-	# Door state may have just opened a path the map should reflect on
-	# its next redraw — the player has to take a step before the slab
-	# marker style would change visibly anyway.
+		# Lever sprites mirror their linked door's state via
+		# get_visual_opened() — refresh cell-bound objects so any
+		# levers paired with this door swap their sprite too.
+		if not door.linked_levers.is_empty():
+			_dungeon_view.rebuild_objects()
+
+func _pull_lever(lever: LeverInstance) -> void:
+	# Pulling flips every linked door's state. The lever's own visual
+	# is derived (mirrors the doors), so we don't store its own bool.
+	# 2b ships with one linked door per lever; multi-door pairing
+	# falls out naturally when the list grows.
+	for door in lever.linked_doors:
+		if door != null:
+			door.opened = not door.opened
+	SoundManager.play(lever.data.interact_sound)
+	if _dungeon_view != null:
+		_dungeon_view.rebuild_doors()
+		_dungeon_view.rebuild_objects()
 
 func _open_chest(instance: ObjectInstance) -> void:
 	if not instance.opened:

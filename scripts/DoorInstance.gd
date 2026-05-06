@@ -15,6 +15,14 @@ extends ObjectInstance
 var cell_a: Vector2i
 var cell_b: Vector2i
 
+# Back-link to any levers that toggle this door. Populated by
+# LevelGenerator at placement time when this door is part of a
+# LinkedObjectSpawn. Empty for decorative doors. Used by the click
+# handler to refresh lever visuals after the door state changes
+# (lever sprite mirrors door state via LeverInstance.get_visual_opened).
+# 2b ships at most 1 entry; richer pairing extends naturally.
+var linked_levers: Array = []  # Array[LeverInstance] — untyped to avoid cyclic typed-array trouble
+
 static func canonical_pair(a: Vector2i, b: Vector2i) -> Array:
 	if a.x < b.x or (a.x == b.x and a.y < b.y):
 		return [a, b]
