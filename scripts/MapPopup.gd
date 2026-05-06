@@ -190,6 +190,17 @@ func _on_map_draw() -> void:
 				for i in range(4):
 					map_draw.draw_line(diamond[i], diamond[(i + 1) % 4], Color(0.1, 0.5, 0.1), line_width)
 
+	# Draw doors as thin slabs on cell boundaries. Filled when the
+	# door currently blocks; outline-only when it's open. Only drawn
+	# if BOTH endpoint cells have been explored, so the slab doesn't
+	# leak fog-of-war info about unvisited corridors.
+	for door in generator.doors:
+		if door == null:
+			continue
+		if not map_data.is_explored(door.cell_a) or not map_data.is_explored(door.cell_b):
+			continue
+		_draw_door_slab(door, offset, cell_size, line_width)
+
 	# Draw player arrow (blinking, bigger)
 	if _blink_visible:
 		var player_center = offset + Vector2(
@@ -238,6 +249,40 @@ func _draw_object_marker(rect_pos: Vector2, rect_size: Vector2, cell_size: float
 		var border := Color(color.r * 0.6, color.g * 0.6, color.b * 0.6)
 		var w: float = max(cell_size * 0.06, 1.0)
 		map_draw.draw_rect(marker_rect, border, false, w)
+
+func _draw_door_slab(door: DoorInstance, offset: Vector2, cell_size: float, line_width: float) -> void:
+	# A door sits on the boundary between cell_a and cell_b. The slab
+	# is a thin rectangle perpendicular to the corridor axis, centred
+	# on that boundary, with length spanning the corridor width.
+	var axis: Vector2i = door.axis()
+	var thickness: float = max(cell_size * 0.22, 2.0)
+	var span: float = cell_size * 0.78
+	var slab: Rect2
+	if axis == Vector2i(1, 0):
+		# E-W corridor → boundary is the vertical line at x = cell_b.x * cell_size,
+		# slab runs vertically (along Y), narrow horizontally (along X).
+		var bx: float = float(door.cell_b.x) * cell_size + offset.x
+		var cy: float = (float(door.cell_a.y) + 0.5) * cell_size + offset.y
+		slab = Rect2(
+			Vector2(bx - thickness * 0.5, cy - span * 0.5),
+			Vector2(thickness, span)
+		)
+	else:
+		# N-S corridor → boundary is the horizontal line at y = cell_b.y * cell_size,
+		# slab runs horizontally (along X), narrow vertically (along Y).
+		var by: float = float(door.cell_b.y) * cell_size + offset.y
+		var cx: float = (float(door.cell_a.x) + 0.5) * cell_size + offset.x
+		slab = Rect2(
+			Vector2(cx - span * 0.5, by - thickness * 0.5),
+			Vector2(span, thickness)
+		)
+	var color := Color(0.45, 0.25, 0.10)  # door brown, distinct from chest
+	if door.is_edge_blocked():
+		map_draw.draw_rect(slab, color)
+		var border := Color(color.r * 0.6, color.g * 0.6, color.b * 0.6)
+		map_draw.draw_rect(slab, border, false, max(line_width * 0.5, 1.0))
+	else:
+		map_draw.draw_rect(slab, color, false, max(line_width * 0.7, 1.0))
 
 func redraw() -> void:
 	if map_draw != null:

@@ -11,5 +11,7 @@ object.chest_wooden.name,Wooden Chest
 object.chest_wooden.description,A sturdy wooden chest.
 object.chest_iron.name,Iron Chest
 object.chest_iron.description,A reinforced iron chest.
+object.door_wooden.name,Wooden Door
+object.door_wooden.description,A weathered wooden door blocking the path.
 ui.loot.title_chest,Chest
 ui.loot.take_all,Take All

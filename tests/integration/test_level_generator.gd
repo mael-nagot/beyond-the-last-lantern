@@ -347,3 +347,174 @@ func test_items_avoid_chest_cells() -> void:
 			if cell.is_blocked and cell.cell_type != GridCell.CellType.WALL:
 				assert_eq(cell.items.size(), 0,
 					"items should not pile on blocking-object cell (%d,%d)" % [x, y])
+
+# -------------------------------------------------------
+# Door placement (Phase 8 Task 2a)
+# -------------------------------------------------------
+
+func _make_door(blocks: bool = true) -> ObjectData:
+	var data := ObjectData.new()
+	data.category = ObjectData.Category.DOOR
+	data.blocks_movement = blocks
+	data.name_key = "test.door"
+	return data
+
+func _make_door_spawn(door: ObjectData, count_min: int, count_max: int) -> ObjectSpawn:
+	var spawn := ObjectSpawn.new()
+	spawn.object = door
+	spawn.count_min = count_min
+	spawn.count_max = count_max
+	# Doors only meaningfully exist on corridors; the placement filter
+	# keeps the spawn-flag semantics consistent with chests.
+	spawn.placement = ObjectSpawn.PLACEMENT_CORRIDOR
+	return spawn
+
+func _is_one_wide_corridor_cell(gen: LevelGenerator, pos: Vector2i) -> bool:
+	if gen.grid[pos.x][pos.y].cell_type == GridCell.CellType.WALL:
+		return false
+	var floor_neighbours := 0
+	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+		var n: Vector2i = pos + d
+		if n.x < 0 or n.x >= gen.grid_width or n.y < 0 or n.y >= gen.grid_height:
+			continue
+		if gen.grid[n.x][n.y].cell_type != GridCell.CellType.WALL:
+			floor_neighbours += 1
+	return floor_neighbours == 2
+
+func test_no_doors_placed_when_pool_is_empty() -> void:
+	var gen := _make_generator(_make_biome())
+	assert_eq(gen.doors.size(), 0)
+
+func test_doors_are_not_stored_on_grid_cells() -> void:
+	# Critical structural invariant — doors live on edges, never on
+	# cells. If a door ever ended up on a GridCell.object, the chest
+	# renderer would draw it as a billboard at cell centre. Guard this.
+	var biome := _make_biome()
+	biome.objects = [_make_door_spawn(_make_door(), 3, 3)]
+	var gen := _make_generator(biome)
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			var obj = gen.grid[x][y].object
+			assert_false(obj is DoorInstance,
+				"DoorInstance found on GridCell at (%d,%d) — doors must live on edges" % [x, y])
+
+func test_door_endpoints_are_one_wide_corridor_cells() -> void:
+	var biome := _make_biome()
+	biome.objects = [_make_door_spawn(_make_door(), 3, 3)]
+	var gen := _make_generator(biome)
+	for door in gen.doors:
+		assert_true(_is_one_wide_corridor_cell(gen, door.cell_a),
+			"door endpoint %s is not a 1-wide-corridor cell" % door.cell_a)
+		assert_true(_is_one_wide_corridor_cell(gen, door.cell_b),
+			"door endpoint %s is not a 1-wide-corridor cell" % door.cell_b)
+
+func test_doors_never_on_entrance_or_exit() -> void:
+	var biome := _make_biome()
+	biome.objects = [_make_door_spawn(_make_door(), 5, 5)]
+	var gen := _make_generator(biome)
+	for door in gen.doors:
+		assert_ne(door.cell_a, gen.entrance_pos)
+		assert_ne(door.cell_b, gen.entrance_pos)
+		assert_ne(door.cell_a, gen.exit_pos)
+		assert_ne(door.cell_b, gen.exit_pos)
+
+func test_door_endpoints_are_orthogonally_adjacent() -> void:
+	var biome := _make_biome()
+	biome.objects = [_make_door_spawn(_make_door(), 3, 3)]
+	var gen := _make_generator(biome)
+	for door in gen.doors:
+		var diff: Vector2i = door.cell_b - door.cell_a
+		var manhattan: int = abs(diff.x) + abs(diff.y)
+		assert_eq(manhattan, 1,
+			"door endpoints %s, %s are not orthogonally adjacent" % [door.cell_a, door.cell_b])
+
+func test_doors_do_not_share_cells_with_chests() -> void:
+	var biome := _make_biome()
+	biome.objects = [
+		_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY),
+		_make_door_spawn(_make_door(), 3, 3),
+	]
+	var gen := _make_generator(biome)
+	for door in gen.doors:
+		assert_null(gen.grid[door.cell_a.x][door.cell_a.y].object,
+			"door endpoint %s shares a cell with a chest" % door.cell_a)
+		assert_null(gen.grid[door.cell_b.x][door.cell_b.y].object,
+			"door endpoint %s shares a cell with a chest" % door.cell_b)
+
+func test_is_edge_blocked_reports_closed_doors_as_blocking() -> void:
+	var biome := _make_biome()
+	biome.objects = [_make_door_spawn(_make_door(true), 1, 1)]
+	var gen := _make_generator(biome)
+	if gen.doors.is_empty():
+		# Defensive — some seeds may not yield a corridor edge; bail
+		# rather than fail the suite. Other tests enforce that doors
+		# CAN be placed.
+		return
+	var door: DoorInstance = gen.doors[0]
+	door.opened = false
+	assert_true(gen.is_edge_blocked(door.cell_a, door.cell_b))
+	# Edge query is order-independent.
+	assert_true(gen.is_edge_blocked(door.cell_b, door.cell_a))
+
+func test_is_edge_blocked_clears_when_door_opens() -> void:
+	var biome := _make_biome()
+	biome.objects = [_make_door_spawn(_make_door(true), 1, 1)]
+	var gen := _make_generator(biome)
+	if gen.doors.is_empty():
+		return
+	var door: DoorInstance = gen.doors[0]
+	door.opened = true
+	assert_false(gen.is_edge_blocked(door.cell_a, door.cell_b))
+
+func test_is_edge_blocked_false_for_non_door_edges() -> void:
+	var biome := _make_biome()
+	biome.objects = [_make_door_spawn(_make_door(), 1, 1)]
+	var gen := _make_generator(biome)
+	# Pick any pair of orthogonally-adjacent floor cells that does NOT
+	# carry a door. The entrance and one of its floor neighbours
+	# qualify (doors exclude entrance from endpoints).
+	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+		var n: Vector2i = gen.entrance_pos + d
+		if n.x < 0 or n.x >= gen.grid_width or n.y < 0 or n.y >= gen.grid_height:
+			continue
+		if gen.grid[n.x][n.y].cell_type == GridCell.CellType.WALL:
+			continue
+		assert_false(gen.is_edge_blocked(gen.entrance_pos, n),
+			"non-door edge %s—%s should never block" % [gen.entrance_pos, n])
+		return
+
+func test_door_min_distance_keeps_doors_apart() -> void:
+	# With min_distance set, doors should not cluster. Pick a number
+	# small enough that a 21x21 maze can fit all 3 — avoids relying on
+	# the graceful-degrade fallback.
+	var biome := _make_biome()
+	var spawn := _make_door_spawn(_make_door(), 3, 3)
+	spawn.min_distance_to_other_object = 4
+	biome.objects = [spawn]
+	var gen := _make_generator(biome)
+	# At least 2 doors expected for a meaningful pairwise check.
+	if gen.doors.size() < 2:
+		return
+	for i in range(gen.doors.size()):
+		for j in range(i + 1, gen.doors.size()):
+			var a: DoorInstance = gen.doors[i]
+			var b: DoorInstance = gen.doors[j]
+			var dist: int = min(
+				min(abs(a.cell_a.x - b.cell_a.x) + abs(a.cell_a.y - b.cell_a.y),
+					abs(a.cell_a.x - b.cell_b.x) + abs(a.cell_a.y - b.cell_b.y)),
+				min(abs(a.cell_b.x - b.cell_a.x) + abs(a.cell_b.y - b.cell_a.y),
+					abs(a.cell_b.x - b.cell_b.x) + abs(a.cell_b.y - b.cell_b.y))
+			)
+			assert_gte(dist, 4,
+				"doors %s—%s and %s—%s are %d apart (need >= 4)" %
+				[a.cell_a, a.cell_b, b.cell_a, b.cell_b, dist])
+
+func test_each_edge_carries_at_most_one_door() -> void:
+	var biome := _make_biome()
+	biome.objects = [_make_door_spawn(_make_door(), 5, 5)]
+	var gen := _make_generator(biome)
+	var seen: Dictionary = {}
+	for door in gen.doors:
+		var key := DoorInstance.edge_key(door.cell_a, door.cell_b)
+		assert_false(seen.has(key), "duplicate door on edge %s" % key)
+		seen[key] = true

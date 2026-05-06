@@ -15,6 +15,7 @@
 [ext_resource type="Script" uid="uid://q2yc7peloed8" path="res://scripts/ObjectSpawn.gd" id="10_nhtug"]
 [ext_resource type="Resource" uid="uid://d01cmd6cq5v2o" path="res://assets/objects/chest_wooden.tres" id="11_00k5e"]
 [ext_resource type="Resource" uid="uid://mtigjawa2y3e" path="res://assets/loot_tables/forest_chest_1.tres" id="11_bq1p8"]
+[ext_resource type="Resource" uid="uid://b0furuompokno" path="res://assets/objects/door_forest.tres" id="13_bq1p8"]
 
 [sub_resource type="Resource" id="Resource_ve4a7"]
 script = ExtResource("4_458bs")
@@ -29,6 +30,15 @@ count_min = 8
 count_max = 10
 loot_table = ExtResource("11_bq1p8")
 min_distance_to_other_object = 6
+metadata/_custom_type_script = "uid://q2yc7peloed8"
+
+[sub_resource type="Resource" id="Resource_5n6tb"]
+script = ExtResource("10_nhtug")
+object = ExtResource("13_bq1p8")
+count_min = 3
+count_max = 4
+placement = 1
+min_distance_to_other_object = 3
 metadata/_custom_type_script = "uid://q2yc7peloed8"
 
 [resource]
@@ -46,5 +56,5 @@ triplanar_sharpness = 0.2
 floor_loot = Array[ExtResource("4_458bs")]([SubResource("Resource_ve4a7")])
 floor_items_min = 8
 floor_items_max = 12
-objects = Array[ExtResource("10_nhtug")]([SubResource("Resource_bq1p8")])
+objects = Array[ExtResource("10_nhtug")]([SubResource("Resource_bq1p8"), SubResource("Resource_5n6tb")])
 move_sounds = Array[AudioStream]([ExtResource("7_sstbg"), ExtResource("8_0wobd"), ExtResource("9_nhtug")])

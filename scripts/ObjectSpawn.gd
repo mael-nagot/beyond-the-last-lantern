@@ -27,5 +27,12 @@ const PLACEMENT_DEFAULT  := PLACEMENT_ROOM | PLACEMENT_DEAD_END
 # other.
 @export var min_distance_to_other_object: int = 0
 
+# Reserved for Task 2c (locked / keyed / lever-gated doors). When true,
+# the placement code requires that closing this door (and only this
+# door) cuts off at least one chest cell or the exit — making the door
+# a meaningful gate. Task 2a default is false (decorative doors that
+# can spawn anywhere a 1-cell-wide corridor accepts them).
+@export var must_gate_content: bool = false
+
 func allows(placement_type: int) -> bool:
 	return (placement & placement_type) != 0

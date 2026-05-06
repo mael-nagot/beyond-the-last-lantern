@@ -76,7 +76,11 @@ func turn_right() -> void:
 func _step(delta: Vector2i) -> void:
 	var target = grid_pos + delta
 	var cell   = _generator.get_cell(target.x, target.y)
-	if cell and not cell.is_blocked:
+	# Wall-bump if the target cell itself is blocked OR if a closed
+	# door blocks the edge between the current cell and the target.
+	# Edge check works for both axis-aligned moves and strafes since
+	# every move goes between two orthogonally adjacent cells.
+	if cell and not cell.is_blocked and not _generator.is_edge_blocked(grid_pos, target):
 		grid_pos = target
 		_update_camera()
 		SoundManager.play_move()

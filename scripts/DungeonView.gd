@@ -36,6 +36,7 @@ var _current_grid_pos: Vector2i = Vector2i.ZERO
 var generator: LevelGenerator
 var _items_root: Node3D
 var _objects_root: Node3D
+var _doors_root: Node3D
 var _object_sprites: Dictionary = {}  # Vector2i -> Sprite3D (for cheap per-move repositioning)
 var drop_target: DungeonDropTarget
 
@@ -43,9 +44,11 @@ func setup(gen: LevelGenerator) -> void:
 	generator = gen
 	_ensure_items_root()
 	_ensure_objects_root()
+	_ensure_doors_root()
 	_ensure_drop_target()
 	_build_mesh()
 	_build_objects()
+	_build_doors()
 	_build_items()
 	_place_camera_at_entrance()
 	_apply_biome_environment()
@@ -65,6 +68,13 @@ func _ensure_objects_root() -> void:
 	_objects_root = Node3D.new()
 	_objects_root.name = "ObjectsRoot"
 	sub_viewport.add_child(_objects_root)
+
+func _ensure_doors_root() -> void:
+	if _doors_root != null and is_instance_valid(_doors_root):
+		return
+	_doors_root = Node3D.new()
+	_doors_root.name = "DoorsRoot"
+	sub_viewport.add_child(_doors_root)
 
 func _ensure_drop_target() -> void:
 	if drop_target != null and is_instance_valid(drop_target):
@@ -163,6 +173,11 @@ func rebuild_objects() -> void:
 		return
 	_build_objects()
 
+func rebuild_doors() -> void:
+	if _doors_root == null:
+		return
+	_build_doors()
+
 func _build_objects() -> void:
 	for child in _objects_root.get_children():
 		child.queue_free()
@@ -239,6 +254,93 @@ func _refresh_object_positions() -> void:
 		if cell == null or cell.object == null or cell.object.data == null:
 			continue
 		sprite.position = _object_position(grid_pos, cell.object.data)
+
+# -------------------------------------------------------
+# Doors — edge-based, fully static once placed. NEVER repositioned
+# on player movement / turn. Position and orientation are derived
+# entirely from (cell_a, cell_b) on the DoorInstance.
+# -------------------------------------------------------
+func _build_doors() -> void:
+	for child in _doors_root.get_children():
+		child.queue_free()
+	if generator == null:
+		return
+	for door in generator.doors:
+		if door == null or door.data == null:
+			continue
+		var node := _make_door_node(door)
+		if node != null:
+			_doors_root.add_child(node)
+
+func _make_door_node(door: DoorInstance) -> Node3D:
+	var data: ObjectData = door.data
+	var tex: Texture2D = data.opened_sprite if (door.opened and data.opened_sprite != null) else data.closed_sprite
+	if tex == null:
+		return null
+
+	# Anchor the whole door (visual + collider) at the edge midpoint
+	# so position is computed once and never drifts.
+	var root := Node3D.new()
+	root.position = _door_position(door)
+	root.rotation_degrees = Vector3(0.0, _door_y_rotation_deg(door), 0.0)
+
+	var sprite := Sprite3D.new()
+	sprite.texture = tex
+	var tex_w: int = max(1, tex.get_width())
+	var tex_h: int = max(1, tex.get_height())
+	sprite.pixel_size = data.world_height / float(tex_h)
+	sprite.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+	# Sprite3D is centred — the root already sits at (mid_x, world_h/2 + y_off, mid_z),
+	# so the sprite stays at local origin.
+	sprite.position = Vector3.ZERO
+	# Stretch horizontally so a square wall texture renders at corridor
+	# proportions. world_width = 0 keeps the texture's natural aspect.
+	if data.world_width > 0.0:
+		var natural_world_width: float = float(tex_w) * sprite.pixel_size
+		if natural_world_width > 0.0:
+			sprite.scale = Vector3(data.world_width / natural_world_width, 1.0, 1.0)
+	root.add_child(sprite)
+
+	# Click pickability lives on a sibling Area3D so the sprite's
+	# scale.x doesn't deform the collider. Skip entirely for non-
+	# interactable variants (future archways/vaults).
+	if data.interactable:
+		var area := Area3D.new()
+		area.input_ray_pickable = true
+		area.set_meta("object_instance", door)
+		# grid_pos is meaningless for an edge object; expose cell_a as
+		# a stable single-cell sentinel for handlers that expect one.
+		area.set_meta("grid_pos", door.cell_a)
+		var col := CollisionShape3D.new()
+		var box := BoxShape3D.new()
+		var box_width: float = data.world_width if data.world_width > 0.0 else CELL_SIZE
+		box.size = Vector3(box_width, data.world_height, 0.6)
+		col.shape = box
+		area.add_child(col)
+		root.add_child(area)
+
+	return root
+
+func _door_position(door: DoorInstance) -> Vector3:
+	# Midpoint between cell centres. With cell_a + cell_b canonically
+	# sorted (axis is (1,0) or (0,1)), this lands exactly on the cell
+	# boundary along the corridor axis.
+	var mid_x: float = (float(door.cell_a.x + door.cell_b.x) + 1.0) * 0.5 * CELL_SIZE
+	var mid_z: float = (float(door.cell_a.y + door.cell_b.y) + 1.0) * 0.5 * CELL_SIZE
+	var y: float = door.data.world_height * 0.5 + door.data.y_offset
+	return Vector3(mid_x, y, mid_z)
+
+func _door_y_rotation_deg(door: DoorInstance) -> float:
+	# Default Sprite3D faces local -Z. To make the door's plane sit on
+	# the cell boundary we rotate around Y depending on the corridor's
+	# axis:
+	#   axis (1,0) (E-W corridor) → door faces +/- X → rotate 90°
+	#   axis (0,1) (N-S corridor) → door faces +/- Z → rotate 0°
+	if door.axis() == Vector2i(1, 0):
+		return 90.0
+	return 0.0
 
 func _build_items() -> void:
 	for child in _items_root.get_children():
