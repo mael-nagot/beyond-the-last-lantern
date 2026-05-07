@@ -339,10 +339,12 @@ func _on_item_dropped_on_dungeon(slot_index: int, source_instance: ItemInstance)
 	_update_pickup_prompt()
 
 func _on_move(action: String) -> void:
-	# Map is a planning view — letting movement bleed through while
-	# it's open / fading out is disorienting. Same gate applies to
-	# the pad and to keyboard input below.
-	if _is_map_blocking_input():
+	# Any modal popup that paused the world (map today; future
+	# settings / inventory) should suppress movement. Reading
+	# `get_tree().paused` keeps this generic — every future popup
+	# that registers as a pause source automatically gates input
+	# without changing this callback.
+	if _is_world_paused():
 		return
 	match action:
 		"forward":     _player_controller.move_forward()
@@ -354,8 +356,12 @@ func _on_move(action: String) -> void:
 	_update_map()
 	_update_pickup_prompt()
 
-func _is_map_blocking_input() -> bool:
-	return _hud != null and _hud.map_popup != null and _hud.map_popup.is_open()
+func _is_world_paused() -> bool:
+	# Single source of truth: the SceneTree's paused flag, owned by
+	# HUD's pause-source registry. Game.gd doesn't need to know
+	# WHICH popup paused — only whether gameplay input should be
+	# routed through.
+	return get_tree() != null and get_tree().paused
 
 func _update_map() -> void:
 	if _hud and _player_controller:
@@ -405,10 +411,11 @@ func _input(event: InputEvent) -> void:
 		return
 	if event.is_echo():
 		return
-	# Map blocks every gameplay-affecting key (movement, pickup,
-	# debug spawns / damage). Map close is wired to the map's own ✕
-	# button, so we don't need an Escape-to-close shortcut here.
-	if _is_map_blocking_input():
+	# A paused world (modal popup open) blocks every gameplay-
+	# affecting key (movement, pickup, debug spawns / damage). Modal
+	# closes are wired to their own ✕ buttons, so we don't need an
+	# Escape-to-close shortcut here.
+	if _is_world_paused():
 		return
 	match event.keycode:
 		KEY_W, KEY_UP:   _player_controller.move_forward()

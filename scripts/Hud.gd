@@ -22,6 +22,14 @@ var item_description_popup: ItemDescriptionPopup
 var map_data: MapData
 var _dungeon_view: DungeonView = null
 
+# Modal popups that should freeze gameplay (map today; future
+# settings / inventory) call add_pause_source / remove_pause_source.
+# The set composes — closing one popup while another is still open
+# keeps the tree paused. Toggling SceneTree.paused freezes every
+# node not flagged PROCESS_MODE_ALWAYS, which is what we want for
+# enemies, traps, timers, and tweens that arrive in later phases.
+var _pause_sources: Dictionary = {}
+
 func _ready() -> void:
 	# HUDRoot covers the full screen with mouse_filter=PASS. Without this
 	# override, every drag over the dungeon area is captured by HUDRoot
@@ -53,6 +61,28 @@ func _ready() -> void:
 	var btn_map = top_bar.get_node("BtnMap")
 	if btn_map:
 		btn_map.pressed.connect(func(): map_popup.open())
+
+	# Modal popups that should freeze gameplay register themselves
+	# via these signals — adds the popup id to the pause source set
+	# on open, removes on close. Future settings / inventory popups
+	# follow the same shape.
+	map_popup.pause_requested.connect(func(): add_pause_source("map"))
+	map_popup.pause_released.connect(func(): remove_pause_source("map"))
+
+func add_pause_source(id: String) -> void:
+	_pause_sources[id] = true
+	_refresh_pause()
+
+func remove_pause_source(id: String) -> void:
+	_pause_sources.erase(id)
+	_refresh_pause()
+
+func is_world_paused() -> bool:
+	return not _pause_sources.is_empty()
+
+func _refresh_pause() -> void:
+	if get_tree() != null:
+		get_tree().paused = not _pause_sources.is_empty()
 
 func show_toast(translation_key: String, duration: float = Toast.DEFAULT_DURATION) -> void:
 	if toast != null:

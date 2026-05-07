@@ -8,14 +8,22 @@ var generator: LevelGenerator
 var player_pos: Vector2i = Vector2i.ZERO
 var player_facing: Vector2i = Vector2i(0, -1)
 
+signal pause_requested
+signal pause_released
+
 var _blink_visible: bool = true
 var _blink_timer: float = 0.0
+var _paused: bool = false  # Whether THIS popup is currently a pause source
 
 @onready var background  : ColorRect = $Background
 @onready var close_button: Button    = $CloseButton
 @onready var map_draw    : Control   = $MapDrawArea
 
 func _ready() -> void:
+	# PROCESS_MODE_ALWAYS so our open / close tweens, blink _process,
+	# and the ✕ button keep working while the SceneTree is paused.
+	# (It's MapPopup that *causes* the pause, after all.)
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	visible = false
 	close_button.text = "✕"
 	close_button.pressed.connect(func(): close())
@@ -47,6 +55,7 @@ func open() -> void:
 	map_draw.queue_redraw()
 	SoundManager.play_map_open()
 	_play_open_animation()
+	_request_pause()
 
 func close() -> void:
 	if _anim_tween != null and _anim_tween.is_running():
@@ -56,12 +65,26 @@ func close() -> void:
 
 func is_open() -> bool:
 	# True from open() until _finish_close flips visible to false
-	# (i.e. for the full close animation tail). Game.gd uses this to
-	# gate movement / pickup / debug input — we keep gating during
-	# the close tail because letting a held W key leak through right
-	# as the map fades out is more disorienting than holding for
-	# another ~0.2 s.
+	# (i.e. for the full close animation tail). Game.gd reads this
+	# in tests / debug. The runtime input gate goes through
+	# `get_tree().paused` instead so future settings / inventory
+	# popups gate input the same way without re-checking each one.
 	return visible
+
+func _request_pause() -> void:
+	# Idempotent — repeated open() during a close-tween shouldn't
+	# stack pause sources, and HUD's source set already de-dupes by
+	# id, but we keep this clean too.
+	if _paused:
+		return
+	_paused = true
+	pause_requested.emit()
+
+func _release_pause() -> void:
+	if not _paused:
+		return
+	_paused = false
+	pause_released.emit()
 
 func _play_open_animation() -> void:
 	# Anchor the page at the top-left so the unfurl reads as a left
@@ -95,6 +118,13 @@ func _finish_close() -> void:
 	scale = Vector2.ONE
 	rotation = 0.0
 	modulate.a = 1.0
+	_release_pause()
+
+func _exit_tree() -> void:
+	# Defensive: if the popup is removed (scene change, freed) while
+	# still holding the pause source, release it so we never leave
+	# the SceneTree paused with no popup to close it.
+	_release_pause()
 
 func update_player(pos: Vector2i, facing: Vector2i) -> void:
 	player_pos    = pos
