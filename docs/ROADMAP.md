@@ -82,8 +82,15 @@
 - Debug full reveal toggle
 - Map updates on every player movement
 
-#### Phase 6 polish — Map should pause input
-While the map popup is open, WASD / Q-E / movement-pad presses still drive the player forward, which is disorienting because the map is meant to be a planning view. Fix: gate `Game._input` and the movement-pad signals on `_hud.map_popup.is_open()` (already exists). Also gate the F-pickup hotkey and F1/F2/F3 debug keys for consistency. Re-enable on map close.
+#### Phase 6 polish — Map should pause input ✅
+Architected as proper world-pause via `SceneTree.paused`, not a narrow input gate, so it scales to future systems (traps, enemies, timers, tweens) and to future modal popups (settings, inventory) without per-popup wiring.
+
+1. ✅ HUD owns a `_pause_sources: Dictionary` keyed by popup id; `add_pause_source(id)` / `remove_pause_source(id)` reflects the set onto `get_tree().paused`. The set composes — closing one popup while another is open keeps the tree paused.
+2. ✅ `MapPopup` emits `pause_requested` (on open) and `pause_released` (on `_finish_close` and defensively on `_exit_tree`); HUD wires those to `add_pause_source("map")` / `remove_pause_source("map")` in `_ready`. Future settings / inventory popups follow the same signal shape.
+3. ✅ `MapPopup.process_mode = PROCESS_MODE_ALWAYS` so its open / close tween, blink `_process`, and ✕ button keep working while the SceneTree is paused. Children inherit. Default popups (LootPopup, ItemDescriptionPopup) don't pause — they're gameplay-adjacent.
+4. ✅ `Game._on_move` and `Game._input` both early-return via `_is_world_paused()` (reads `get_tree().paused`) — generic gate, no per-popup checks.
+5. ✅ Free benefit: when traps (Phase 8 Task 3) and enemies (Phase 10) arrive with `_process` / `_physics_process` / `Timer` / `Tween` based ticks, they'll freeze automatically while a modal is up — no extra wiring per system.
+6. ✅ Tests: world-pause gating is UI / SceneTree-state behaviour rather than pure logic, and both `HUD` and `MapPopup` are scene-driven (use `@onready` refs to scene children), so a programmatic GUT test can't construct them cleanly. Covered by the manual test plan instead.
 
 ---
 
