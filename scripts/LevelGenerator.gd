@@ -714,13 +714,25 @@ func _try_place_levers_for_cluster(spawn: LinkedObjectSpawn, doors_in_cluster: A
 	# enforces spacing WITHIN the cluster, not just against
 	# pre-existing levers / chests. Returns the placed lever instances
 	# on success or an empty Array on failure (caller rolls back doors).
+	#
+	# Spread heuristic: lever_1 is picked randomly (so multiple
+	# attempts vary), but lever_2..levers_per are picked
+	# FARTHEST-FIRST among the eligible pool — i.e. the candidate
+	# whose Manhattan distance to its nearest already-placed sibling
+	# is maximum. This is what keeps cluster levers spread across
+	# the map even when the user-set min_distance is genuinely
+	# satisfiable but not strictly required by the eligibility filter.
+	# Without farthest-first, the algorithm degrades min_distance
+	# eagerly until even diagonally-adjacent siblings pass.
 	var distance: int = max(0, spawn.lever_min_distance_to_other_object)
 	while distance >= 0:
-		# A few attempts per distance — random shuffles can lock into
-		# an unrecoverable combo, so retrying with a fresh shuffle
-		# helps. Bounded so a hostile pool can't burn forever.
+		# Many random attempts at THIS distance before degrading —
+		# the chain-reachability check can reject combos that look
+		# fine on paper, so we want plenty of variation in lever_1
+		# before stepping down. 30 is enough that a hostile-but-
+		# placeable layout finds a hit; tunable.
 		var attempts: int = 0
-		var max_combo_attempts: int = 6
+		var max_combo_attempts: int = 30
 		while attempts < max_combo_attempts:
 			attempts += 1
 			var levers: Array = []
@@ -731,8 +743,17 @@ func _try_place_levers_for_cluster(spawn: LinkedObjectSpawn, doors_in_cluster: A
 				if pool.is_empty():
 					combo_succeeded = false
 					break
-				pool.shuffle()
-				var cell_pos: Vector2i = pool[0]
+				var cell_pos: Vector2i
+				if lever_cells.is_empty():
+					# First lever: random for attempt-to-attempt
+					# variety.
+					pool.shuffle()
+					cell_pos = pool[0]
+				else:
+					# Subsequent levers: pick the candidate whose
+					# nearest-sibling distance is maximum. Maximises
+					# spread without needing to degrade `distance`.
+					cell_pos = _pick_farthest_from(pool, lever_cells)
 				var lever := LeverInstance.create_lever(spawn.lever_object)
 				grid[cell_pos.x][cell_pos.y].object = lever
 				levers.append(lever)
@@ -761,6 +782,26 @@ func _try_place_levers_for_cluster(spawn: LinkedObjectSpawn, doors_in_cluster: A
 				door.linked_levers = []
 		distance -= 1
 	return []
+
+func _pick_farthest_from(pool: Array, existing: Array) -> Vector2i:
+	# Returns the cell in `pool` that maximises its minimum Manhattan
+	# distance to any cell in `existing`. Used for sibling-lever
+	# placement so the cluster's levers spread across the map even
+	# when the eligibility pool would technically allow tighter
+	# packing. `pool` and `existing` are non-empty by the caller's
+	# contract.
+	var best: Vector2i = pool[0]
+	var best_min: int = -1
+	for candidate in pool:
+		var nearest: int = -1
+		for e in existing:
+			var d: int = absi(candidate.x - e.x) + absi(candidate.y - e.y)
+			if nearest < 0 or d < nearest:
+				nearest = d
+		if nearest > best_min:
+			best_min = nearest
+			best = candidate
+	return best
 
 func _eligible_lever_cells(spawn: LinkedObjectSpawn, doors_in_cluster: Array, min_distance: int) -> Array:
 	# Build the lever-eligibility pool fresh — re-classifies cells

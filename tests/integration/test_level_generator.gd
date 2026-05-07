@@ -1007,13 +1007,13 @@ func test_cluster_doors_respect_min_distance_between_siblings() -> void:
 					[s, d1.cell_a, d1.cell_b, d2.cell_a, d2.cell_b, dist])
 
 func test_cluster_levers_respect_min_distance_between_siblings() -> void:
-	# Same regression coverage on the lever side. With
-	# `lever_min_distance_to_other_object = 4`, two levers in the same
-	# cluster shouldn't land adjacent. Lever spacing has graceful
-	# degrade (down to 0), so we assert the actual minimum holds at
-	# whatever distance the algorithm settled on — i.e. SOME
-	# spacing-aware placement happened, not the pre-fix "first M
-	# cells of the shuffled pool" behaviour.
+	# Regression coverage on the lever side. With farthest-first
+	# placement and 30 attempts before degrading, modest spacing
+	# constraints should hold across reasonable seeds — not just
+	# "spacing > 1" (which the pre-fix bug let through), but the
+	# actual user-set distance. We use a soft 4 here so degrading
+	# to 3 occasionally is fine; what we don't want is degradation
+	# all the way to 1-2 (diagonally adjacent levers).
 	var spawn := _make_linked_spawn(_make_lever_data(), _make_door(), 1, 1)
 	spawn.levers_per_cluster = 3
 	spawn.doors_per_cluster = 1
@@ -1025,17 +1025,16 @@ func test_cluster_levers_respect_min_distance_between_siblings() -> void:
 		var lever_cells: Array = _all_lever_cells(gen)
 		if lever_cells.size() < 3:
 			continue
-		# Find the actual minimum pairwise distance among placed
-		# cluster levers. It should be > 1 (the pre-fix bug let
-		# adjacent cells through).
 		var min_pair: int = -1
 		for i in range(lever_cells.size()):
 			for j in range(i + 1, lever_cells.size()):
 				var d: int = absi(lever_cells[i].x - lever_cells[j].x) + absi(lever_cells[i].y - lever_cells[j].y)
 				if min_pair < 0 or d < min_pair:
 					min_pair = d
-		assert_gt(min_pair, 1,
-			"seed %d: cluster levers shouldn't be adjacent — got min pair distance %d" % [s, min_pair])
+		# Allow some degrade (down to 3) for cramped seeds, but
+		# never let levers end up diagonally adjacent (Manhattan 2).
+		assert_gte(min_pair, 3,
+			"seed %d: cluster levers should be ≥3 apart — got min pair distance %d (degraded too far)" % [s, min_pair])
 
 func test_or_cluster_at_least_one_lever_chain_reachable() -> void:
 	# OR clusters only need ONE lever chain-reachable (any pull opens
