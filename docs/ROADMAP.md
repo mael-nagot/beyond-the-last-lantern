@@ -238,8 +238,10 @@ Multiple key-locked pairs in the same biome shared the same `key_*.tres`, so all
 4. ✅ Renderers updated to call `inst.get_icon()` / `inst.get_dungeon_sprite()`: `ItemBar._refresh_slot` (TextureButton.texture_normal), `DungeonView._make_item_sprite` (Sprite3D.texture, signature now takes ItemInstance), `LootPopup` (slot button texture).
 5. ✅ Tests: `test_item_instance` extended (`hue_shift` default; `apply_hue_shift` clears cache when shift is 0; baked pixels actually rotate hue); `test_keys_are_hue_shifted_per_pair_index` (integration — pair 0 falls through to data.icon, pair ≥ 1 has non-zero shift and a distinct baked icon).
 
-#### Task 2b follow-up — Enforce `door_must_gate_content` on LinkedObjectSpawn
-The flag exists on `LinkedObjectSpawn` (since 2a) but is RESERVED — placement of lever-locked doors does NOT reject useless gates. Only `KeyDoorSpawn` enforces the rule today. Easy extension: call the existing `_door_gates_content(door)` after `_try_place_lever_for_door` succeeds, roll back the pair (lever + door) if it returns false. Same chain v2 simulation, same content set (chest, lever, key, exit). One inspector field stops being a no-op.
+#### Task 2b follow-up — Enforce `door_must_gate_content` on LinkedObjectSpawn ✅
+1. ✅ `LevelGenerator._try_place_linked_pair` now calls `_door_gates_content(door)` after `_try_place_lever_for_door` commits the pair; on rejection, both halves are rolled back via the new `_rollback_linked_pair` helper and the loop tries another edge
+2. ✅ Default stays `false` so existing biomes / tests keep their previous behaviour — designers opt in per spawn
+3. ✅ Tests: `test_linked_must_gate_content_rejects_useless_locks` (every placed lever-locked door gates a chest / lever / key / exit) and `test_linked_pair_rollback_clears_lever_cell_when_must_gate_rejects` (multi-seed: every lever cell still resolves to a door in `gen.doors`, no orphan levers shipped)
 
 #### Task 2b follow-up — Richer lever ↔ door pairing
 1. Allow one lever to toggle multiple doors (lever's `linked_doors` already an Array)

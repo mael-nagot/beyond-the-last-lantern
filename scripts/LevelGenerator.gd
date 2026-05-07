@@ -640,10 +640,21 @@ func _try_place_linked_pair(spawn: LinkedObjectSpawn) -> void:
 		_doors_by_edge[DoorInstance.edge_key(a, b)] = door
 
 		if _try_place_lever_for_door(spawn, door, pre_chain):
+			# must_gate_content check — placement-time only. After we
+			# confirmed the world is solvable WITH the lever pullable,
+			# verify the door actually GATES something when it stays
+			# closed. If not, the lock is meaningless — try another
+			# edge (rolling back BOTH lever and door so we never ship
+			# orphan halves). Same simulator + content set as the
+			# KeyDoorSpawn check, just against the lever-locked door.
+			if spawn.door_must_gate_content and not _door_gates_content(door):
+				_rollback_linked_pair(door)
+				continue
 			return  # both committed
 
 		# No lever cell preserved chain reachability — roll back the
-		# door and try a different edge.
+		# door and try a different edge. (Lever wasn't placed, just
+		# the door — no lever cleanup needed here.)
 		doors.erase(door)
 		_doors_by_edge.erase(DoorInstance.edge_key(a, b))
 
@@ -1012,6 +1023,24 @@ func _door_gates_content(door: DoorInstance) -> bool:
 						if not _has_reachable_neighbour(pos, restricted_chain):
 							return true
 	return false
+
+func _rollback_linked_pair(door: DoorInstance) -> void:
+	# Mirror of _rollback_key_door_pair but for lever-locked doors.
+	# Removes the door from the doors list / index AND clears every
+	# cell holding a lever cross-linked to it. Used when
+	# door_must_gate_content rejects an otherwise-valid placement.
+	var levers_to_clear: Array = door.linked_levers.duplicate()
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var cell: GridCell = grid[x][y]
+			if cell.object != null and cell.object in levers_to_clear:
+				cell.object = null
+	for lever in levers_to_clear:
+		if lever != null:
+			lever.linked_doors = []
+	door.linked_levers = []
+	doors.erase(door)
+	_doors_by_edge.erase(DoorInstance.edge_key(door.cell_a, door.cell_b))
 
 func _rollback_key_door_pair(door: DoorInstance) -> void:
 	# Remove the door from the doors list / index AND any items
