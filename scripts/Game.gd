@@ -205,7 +205,14 @@ func _on_loot_item_taken(slot_index: int) -> void:
 	if slot_index < 0 or slot_index >= instance.items.size():
 		return
 	var item: ItemInstance = instance.items[slot_index]
+	# Snapshot stack count up-front so we can tell whether anything
+	# actually moved into the bar — `add_item` mutates `item` and
+	# returns it as the leftover when the bar can't fit everything.
+	var before_count: int = item.stack_count if item != null else 0
 	var leftover: ItemInstance = _hud.item_bar.add_item(item)
+	var transferred: bool = (leftover == null) or (leftover.stack_count < before_count)
+	if transferred and item != null and item.data != null:
+		SoundManager.play(item.data.pickup_drop_sound)
 	if leftover == null:
 		instance.items.remove_at(slot_index)
 	# else: same instance with reduced stack stays in chest
@@ -220,12 +227,27 @@ func _on_loot_take_all() -> void:
 	var instance: ObjectInstance = _hud.loot_popup.get_current_instance()
 	if instance == null:
 		return
+	# Pick the first item-with-a-sound up-front, mirroring the floor-
+	# pickup pattern in _on_pickup_pressed. We play this sound once
+	# at the end if anything was actually transferred — playing it
+	# per-item would spam the audio on a full chest.
+	var pickup_sound: AudioStream = null
+	for item in instance.items:
+		if item != null and item.data != null and item.data.pickup_drop_sound != null:
+			pickup_sound = item.data.pickup_drop_sound
+			break
 	# would_fit_all has already gated the button — but defend in case of races.
 	var copy: Array = instance.items.duplicate()
+	var any_transferred := false
 	for item in copy:
+		var before_count: int = item.stack_count if item != null else 0
 		var leftover: ItemInstance = _hud.item_bar.add_item(item)
+		if (leftover == null) or (leftover.stack_count < before_count):
+			any_transferred = true
 		if leftover == null:
 			instance.items.erase(item)
+	if any_transferred:
+		SoundManager.play(pickup_sound)
 	if instance.items.is_empty():
 		_hud.loot_popup.close()
 	else:
