@@ -37,6 +37,16 @@ var generator: LevelGenerator
 var _items_root: Node3D
 var _objects_root: Node3D
 var _doors_root: Node3D
+var _decorations_root: Node3D
+# Decorations using face_camera mode — DungeonView's `_process` rotates
+# each one each frame to face the camera, with a designer-configured
+# X-axis tilt so the top leans toward the player.
+var _billboard_decorations: Array[Node3D] = []
+# Lights that flicker — DungeonView's `_process` jitters each one's
+# `light_energy` around its base value using a cheap multi-octave sine
+# pseudo-noise. Metadata on each light stores base_energy, amount,
+# and a per-placement phase so torches don't flicker in sync.
+var _flickering_lights: Array[OmniLight3D] = []
 var _object_sprites: Dictionary = {}  # Vector2i -> Sprite3D (for cheap per-move repositioning)
 var drop_target: DungeonDropTarget
 
@@ -45,11 +55,13 @@ func setup(gen: LevelGenerator) -> void:
 	_ensure_items_root()
 	_ensure_objects_root()
 	_ensure_doors_root()
+	_ensure_decorations_root()
 	_ensure_drop_target()
 	_build_mesh()
 	_build_objects()
 	_build_doors()
 	_build_items()
+	_build_wall_decorations()
 	_place_camera_at_entrance()
 	_apply_biome_environment()
 	_update_viewport_size()
@@ -75,6 +87,13 @@ func _ensure_doors_root() -> void:
 	_doors_root = Node3D.new()
 	_doors_root.name = "DoorsRoot"
 	sub_viewport.add_child(_doors_root)
+
+func _ensure_decorations_root() -> void:
+	if _decorations_root != null and is_instance_valid(_decorations_root):
+		return
+	_decorations_root = Node3D.new()
+	_decorations_root.name = "WallDecorationsRoot"
+	sub_viewport.add_child(_decorations_root)
 
 func _ensure_drop_target() -> void:
 	if drop_target != null and is_instance_valid(drop_target):
@@ -344,6 +363,174 @@ func _door_y_rotation_deg(door: DoorInstance) -> float:
 	#   axis (0,1) (N-S corridor) → door faces +/- Z → rotate 0°
 	if door.axis() == Vector2i(1, 0):
 		return 90.0
+	return 0.0
+
+func _build_wall_decorations() -> void:
+	_billboard_decorations.clear()
+	_flickering_lights.clear()
+	for child in _decorations_root.get_children():
+		child.queue_free()
+	if generator == null:
+		return
+	for inst in generator.wall_decorations:
+		if inst == null or inst.data == null:
+			continue
+		var node := _make_wall_decoration_node(inst)
+		if node != null:
+			_decorations_root.add_child(node)
+
+func _process(_delta: float) -> void:
+	_update_billboard_decorations()
+	_update_flickering_lights()
+
+func _update_billboard_decorations() -> void:
+	# Per-frame Y-billboard with X-tilt for face_camera decorations.
+	# Each root sits at the BOTTOM of its sprite (anchored to the wall),
+	# so this basis rotates the sprite around the wall-attached base —
+	# the bottom never moves, only the top swings.
+	if camera == null or _billboard_decorations.is_empty():
+		return
+	var cam_pos: Vector3 = camera.global_position
+	for root in _billboard_decorations:
+		if not is_instance_valid(root):
+			continue
+		var dx: float = cam_pos.x - root.global_position.x
+		var dz: float = cam_pos.z - root.global_position.z
+		if dx * dx + dz * dz < 0.0001:
+			continue
+		var y_angle: float = atan2(dx, dz)
+		var x_tilt: float = root.get_meta("billboard_tilt", 0.0)
+		# Y rotation (face camera) THEN X tilt — composition order
+		# matters: applying X first puts the lean in the local frame
+		# after the Y face-camera rotation, so the top tilts toward
+		# the camera regardless of where the camera is.
+		root.basis = Basis(Vector3.UP, y_angle) * Basis(Vector3.RIGHT, x_tilt)
+
+func _update_flickering_lights() -> void:
+	# Cheap multi-octave sine produces a fire-like wobble: three
+	# non-commensurate frequencies summed and normalised to roughly
+	# [-1, 1]. Per-light phase decorrelates the array so torches
+	# never flicker in unison.
+	if _flickering_lights.is_empty():
+		return
+	var t: float = float(Time.get_ticks_msec()) / 1000.0
+	for light in _flickering_lights:
+		if not is_instance_valid(light):
+			continue
+		var base: float = light.get_meta("flicker_base_energy", 1.0)
+		var amount: float = light.get_meta("flicker_amount", 0.0)
+		var phase: float = light.get_meta("flicker_phase", 0.0)
+		var n: float = sin(t * 17.0 + phase) * 0.5 \
+			+ sin(t * 31.0 + phase * 1.7) * 0.3 \
+			+ sin(t * 7.0 + phase * 2.3) * 0.2
+		light.light_energy = base * (1.0 + n * amount)
+
+func _make_wall_decoration_node(inst: WallDecorationInstance) -> Node3D:
+	var data: WallDecorationData = inst.data
+	var sprite := _make_wall_decoration_sprite(data)
+	if sprite == null:
+		return null
+
+	var root := Node3D.new()
+	root.position = _wall_decoration_position(inst)
+	if data.face_camera:
+		# Sprite extends UP from root (= bottom of decoration). Per-frame
+		# basis update in `_update_billboard_decorations` rotates the
+		# root to face the camera + tilt top toward camera. The bottom
+		# stays pinned to root (= wall surface) under any rotation.
+		sprite.position = Vector3(0.0, data.world_height * 0.5, 0.0)
+		root.set_meta("billboard_tilt", deg_to_rad(data.top_tilt_degrees))
+		_billboard_decorations.append(root)
+	else:
+		root.rotation_degrees = Vector3(0.0, _wall_decoration_y_rotation_deg(inst), 0.0)
+	root.add_child(sprite)
+
+	if data.light_energy > 0.0:
+		var light := OmniLight3D.new()
+		light.light_color = data.light_color
+		light.light_energy = data.light_energy
+		light.omni_range = data.light_range
+		# Position is relative to the sprite's CENTRE in both modes so
+		# `light_y_offset` is portable between flat and face_camera.
+		var sprite_centre_y_local: float = data.world_height * 0.5 if data.face_camera else 0.0
+		light.position = Vector3(0.0, sprite_centre_y_local + data.light_y_offset, 0.0)
+		root.add_child(light)
+		if data.light_flicker_amount > 0.0:
+			light.set_meta("flicker_base_energy", data.light_energy)
+			light.set_meta("flicker_amount", data.light_flicker_amount)
+			light.set_meta("flicker_phase", randf_range(0.0, TAU))
+			_flickering_lights.append(light)
+
+	return root
+
+func _make_wall_decoration_sprite(data: WallDecorationData) -> SpriteBase3D:
+	# Picks AnimatedSprite3D for animated decorations (torches), Sprite3D
+	# for static ones (paintings). Same anchoring + scaling logic for
+	# both — the caller positions / rotates the returned node.
+	var sprite: SpriteBase3D = null
+	var tex_h: int = 0
+	if data.is_animated():
+		var animated := AnimatedSprite3D.new()
+		animated.sprite_frames = data.frames
+		var anim_name: String = data.default_animation
+		if anim_name == "" or not data.frames.has_animation(anim_name):
+			anim_name = data.frames.get_animation_names()[0] if data.frames.get_animation_names().size() > 0 else ""
+		if anim_name != "":
+			animated.animation = anim_name
+			animated.play(anim_name)
+			var first_frame: Texture2D = data.frames.get_frame_texture(anim_name, 0)
+			if first_frame != null:
+				tex_h = first_frame.get_height()
+		sprite = animated
+	else:
+		if data.texture == null:
+			return null
+		var s := Sprite3D.new()
+		s.texture = data.texture
+		tex_h = data.texture.get_height()
+		sprite = s
+	if tex_h <= 0:
+		tex_h = 1
+	sprite.pixel_size = data.world_height / float(tex_h)
+	sprite.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+	return sprite
+
+func _wall_decoration_position(inst: WallDecorationInstance) -> Vector3:
+	# Cell centre, then shift by half a cell in `wall_dir` to land on the
+	# wall face, then pull back into the corridor by `depth_offset` so
+	# the sprite doesn't Z-fight the wall texture beneath.
+	#
+	# Y placement differs by mode. Flat: root sits at the visual centre
+	# of the decoration. Face-camera: root sits at the BOTTOM (so the
+	# X-axis tilt rotates around the wall-attached base). Both modes
+	# end up with the decoration's centre at the same height
+	# (wall_height/2 + y_offset), which keeps `y_offset` semantically
+	# stable when designers flip the flag.
+	var cx: float = inst.cell.x * CELL_SIZE + CELL_SIZE * 0.5
+	var cz: float = inst.cell.y * CELL_SIZE + CELL_SIZE * 0.5
+	var face_x: float = cx + float(inst.wall_dir.x) * CELL_SIZE * 0.5
+	var face_z: float = cz + float(inst.wall_dir.y) * CELL_SIZE * 0.5
+	var pulled_x: float = face_x - float(inst.wall_dir.x) * inst.data.depth_offset
+	var pulled_z: float = face_z - float(inst.wall_dir.y) * inst.data.depth_offset
+	var y_centre: float = wall_height * 0.5 + inst.data.y_offset
+	if inst.data.face_camera:
+		return Vector3(pulled_x, y_centre - inst.data.world_height * 0.5, pulled_z)
+	return Vector3(pulled_x, y_centre, pulled_z)
+
+func _wall_decoration_y_rotation_deg(inst: WallDecorationInstance) -> float:
+	# Match the wall mesh's own y_rotation so the decoration sits flush
+	# with the wall and faces the same way (visible side toward the
+	# corridor). Mapping mirrors `_build_mesh`'s wall_offsets table.
+	if inst.wall_dir == Vector2i(0, -1):  # north wall
+		return 0.0
+	if inst.wall_dir == Vector2i(0, 1):   # south wall
+		return 180.0
+	if inst.wall_dir == Vector2i(-1, 0):  # west wall
+		return 90.0
+	if inst.wall_dir == Vector2i(1, 0):   # east wall
+		return 270.0
 	return 0.0
 
 func _build_items() -> void:

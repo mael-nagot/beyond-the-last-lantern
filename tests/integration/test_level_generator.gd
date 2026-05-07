@@ -1402,3 +1402,102 @@ func test_chest_spawned_key_lands_inside_a_chest() -> void:
 			if found:
 				break
 		assert_true(found, "key for lock %s not found inside any chest" % door.lock_id)
+
+# -------------------------------------------------------
+# Wall decorations (Phase 8 Task 4)
+# -------------------------------------------------------
+
+func _make_wall_deco_data(world_height: float = 1.5) -> WallDecorationData:
+	var data := WallDecorationData.new()
+	var img := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+	data.texture = ImageTexture.create_from_image(img)
+	data.world_height = world_height
+	return data
+
+func _make_wall_deco_spawn(data: WallDecorationData, count_min: int, count_max: int, placement: int = ObjectSpawn.PLACEMENT_ANY) -> WallDecorationSpawn:
+	var spawn := WallDecorationSpawn.new()
+	spawn.decoration = data
+	spawn.count_min = count_min
+	spawn.count_max = count_max
+	spawn.placement = placement
+	return spawn
+
+func test_no_wall_decorations_when_pool_is_empty() -> void:
+	var gen := _make_generator(_make_biome())
+	assert_eq(gen.wall_decorations.size(), 0)
+
+func test_wall_decorations_count_falls_within_min_max() -> void:
+	var biome := _make_biome()
+	biome.wall_decorations = [_make_wall_deco_spawn(_make_wall_deco_data(), 4, 4)]
+	var gen := _make_generator(biome)
+	assert_eq(gen.wall_decorations.size(), 4)
+
+func test_wall_decorations_attach_to_actual_walls() -> void:
+	var biome := _make_biome()
+	biome.wall_decorations = [_make_wall_deco_spawn(_make_wall_deco_data(), 6, 6)]
+	var gen := _make_generator(biome)
+	for inst in gen.wall_decorations:
+		var nx: int = inst.cell.x + inst.wall_dir.x
+		var ny: int = inst.cell.y + inst.wall_dir.y
+		assert_true(nx >= 0 and nx < gen.grid_width and ny >= 0 and ny < gen.grid_height,
+			"decoration at %s wall_dir %s points out of bounds" % [inst.cell, inst.wall_dir])
+		assert_eq(gen.grid[nx][ny].cell_type, GridCell.CellType.WALL,
+			"decoration at %s wall_dir %s points to a non-wall cell" % [inst.cell, inst.wall_dir])
+
+func test_wall_decorations_attach_to_floor_cells_only() -> void:
+	var biome := _make_biome()
+	biome.wall_decorations = [_make_wall_deco_spawn(_make_wall_deco_data(), 5, 5)]
+	var gen := _make_generator(biome)
+	for inst in gen.wall_decorations:
+		var cell: GridCell = gen.grid[inst.cell.x][inst.cell.y]
+		assert_ne(cell.cell_type, GridCell.CellType.WALL,
+			"decoration host cell %s is a wall — should be floor" % inst.cell)
+
+func test_wall_decoration_face_uniqueness() -> void:
+	var biome := _make_biome()
+	biome.wall_decorations = [_make_wall_deco_spawn(_make_wall_deco_data(), 8, 8)]
+	var gen := _make_generator(biome)
+	var seen: Dictionary = {}
+	for inst in gen.wall_decorations:
+		var key: String = inst.get_face_key()
+		assert_false(seen.has(key), "duplicate wall face %s" % key)
+		seen[key] = true
+
+func test_wall_decoration_min_distance_keeps_them_apart() -> void:
+	var biome := _make_biome()
+	var spawn := _make_wall_deco_spawn(_make_wall_deco_data(), 3, 3)
+	spawn.min_distance_to_other_decoration = 4
+	biome.wall_decorations = [spawn]
+	var gen := _make_generator(biome)
+	var positions := []
+	for inst in gen.wall_decorations:
+		positions.append(inst.cell)
+	for i in range(positions.size()):
+		for j in range(i + 1, positions.size()):
+			var dist: int = abs(positions[i].x - positions[j].x) + abs(positions[i].y - positions[j].y)
+			assert_gte(dist, 4,
+				"decorations at %s and %s are %d apart (need >= 4)" %
+				[positions[i], positions[j], dist])
+
+func test_wall_decoration_respects_placement_flags() -> void:
+	var biome := _make_biome()
+	biome.wall_decorations = [_make_wall_deco_spawn(_make_wall_deco_data(), 2, 2, ObjectSpawn.PLACEMENT_DEAD_END)]
+	var gen := _make_generator(biome)
+	for inst in gen.wall_decorations:
+		var floor_neighbours := 0
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			var n: Vector2i = inst.cell + d
+			if n.x >= 0 and n.x < gen.grid_width and n.y >= 0 and n.y < gen.grid_height:
+				if gen.grid[n.x][n.y].cell_type != GridCell.CellType.WALL:
+					floor_neighbours += 1
+		assert_eq(floor_neighbours, 1,
+			"decoration host %s should be a dead-end (1 floor neighbour)" % inst.cell)
+
+func test_wall_decoration_animated_path_uses_frames() -> void:
+	var data := WallDecorationData.new()
+	data.frames = SpriteFrames.new()
+	var biome := _make_biome()
+	biome.wall_decorations = [_make_wall_deco_spawn(data, 1, 1)]
+	var gen := _make_generator(biome)
+	for inst in gen.wall_decorations:
+		assert_true(inst.data.is_animated())

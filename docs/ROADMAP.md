@@ -287,10 +287,16 @@ A door tagged with a `lock_id` requires a matching key item (`ItemData` with `ke
 - Immobilize trap (player can't move, can turn and attack)
 - Alert trap (aggros enemies in 10-tile radius — needs Phase 10 enemies first)
 
-#### Task 4 — Wall-mounted decorations
-- Paintings, torches, lanterns
-- Sprite3D pinned to a wall face rather than floor
-- No interaction; pure ambiance
+#### Task 4 — Wall-mounted decorations ✅ (code; awaits manual asset wiring)
+Paintings, torches, lanterns mounted on wall faces (a side of a floor cell that abuts a wall cell). No interaction; pure ambiance. Animated decorations (torches) supported via `SpriteFrames`.
+1. ✅ `WallDecorationData.gd` Resource — `texture: Texture2D` (static) OR `frames: SpriteFrames` (animated, takes precedence). `is_animated()` predicate. `world_height` / `y_offset` / `depth_offset` for sizing. Optional `light_color` / `light_energy` / `light_range` — when energy > 0 the renderer attaches an `OmniLight3D` for torch glow.
+2. ✅ `WallDecorationInstance.gd` (RefCounted) — placement record holding `cell` (host floor cell) + `wall_dir` (cardinal direction into the wall). `face_key()` and `_wall_faces_used` prevent two decos from stacking on the same face.
+3. ✅ `WallDecorationSpawn.gd` Resource — biome-level entry: `decoration`, `count_min/max`, `placement` (Corridor/Room/Dead End flags reused from `ObjectSpawn`), `min_distance_to_other_decoration` with graceful-degrade-by-1 spreading.
+4. ✅ `BiomeData.wall_decorations: Array[WallDecorationSpawn]`
+5. ✅ `LevelGenerator._place_wall_decorations()` runs LAST among scenery passes. For each spawn: build (cell, wall_dir) candidate pool from cells matching placement flags whose wall_dir neighbour is a WALL cell, apply min_distance with graceful degrade, place.
+6. ✅ `DungeonView._build_wall_decorations()` — separate render path. Anchors a `Node3D` at the wall-face midpoint, Y-rotates to match the wall mesh's own rotation. Picks `AnimatedSprite3D` (auto-plays `default_animation`) when `frames` is set, else `Sprite3D`. Adds `OmniLight3D` child when `light_energy > 0`. `WallDecorationsRoot` Node3D under SubViewport.
+7. ✅ Tests: unit (data defaults, is_animated precedence, instance + face_key, spawn placement flags); integration (count_min/max respected, decorations attach to actual walls, host cell is floor, face uniqueness, min_distance, placement flag filtering, animated path uses frames).
+8. ⏳ Manual asset work (developer): torch frame PNGs (128×128, 4 frames), `SpriteFrames.tres`, `torch_forest.tres` referencing the frames + a warm orange light, add a `WallDecorationSpawn` entry to `forest.tres`.
 
 #### Task 5 — Campfires
 - Rest point (heal HP/MP, save?)

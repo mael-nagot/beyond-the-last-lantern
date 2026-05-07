@@ -46,6 +46,8 @@ res://assets/
 │   ├── objects/
 │   │   ├── floor/             ← chest, campfire, trap sprites
 │   │   └── wall/              ← lever, painting, torch, door sprites
+│   ├── decorations/
+│   │   └── torch/             ← per-decoration folder for multi-frame animations (torch_forest_01.png … _04.png)
 │   └── ui/
 │       ├── buttons/           ← custom button textures (if replacing default)
 │       ├── panels/            ← panel background textures
@@ -104,6 +106,7 @@ Additional texture types may be added later (roughness, AO, specular) but are no
 - Wall/floor/ceiling textures: 512×512 or 256×256 pixels
 - Item icons: 64×64 or 128×128 pixels
 - Item dungeon sprites: 128×128 or 256×256 pixels (transparent background)
+- Wall decoration sprites (paintings, torches, lanterns): 128×128 pixels (transparent background) — for animated decorations, every frame must be the **exact same dimensions** with the same anchor (mounting bracket pixel) across frames, or the sprite will jitter on loop
 - Enemy sprites: 256×256 or 512×512 pixels (transparent background)
 - Character portraits: 128×128 or 256×256 pixels
 
