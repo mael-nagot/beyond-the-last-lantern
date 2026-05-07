@@ -18,6 +18,7 @@ const SCREEN_MARGIN = 4.0
 var pickup_prompt: PickupPrompt
 var toast: Toast
 var loot_popup: LootPopup
+var item_description_popup: ItemDescriptionPopup
 var map_data: MapData
 var _dungeon_view: DungeonView = null
 
@@ -41,6 +42,10 @@ func _ready() -> void:
 	loot_popup.name = "LootPopup"
 	loot_popup.setup(item_bar)
 	hud_root.add_child(loot_popup)
+
+	item_description_popup = ItemDescriptionPopup.new()
+	item_description_popup.name = "ItemDescriptionPopup"
+	hud_root.add_child(item_description_popup)
 
 	get_viewport().size_changed.connect(_on_viewport_resized)
 	_apply_layout()

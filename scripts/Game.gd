@@ -84,6 +84,11 @@ func _wire_drop_targets() -> void:
 		_hud.loot_popup.item_taken.connect(_on_loot_item_taken)
 		_hud.loot_popup.take_all_requested.connect(_on_loot_take_all)
 		_hud.loot_popup.close_requested.connect(_on_loot_close)
+	if _hud != null and _hud.item_bar != null:
+		_hud.item_bar.slot_clicked.connect(_on_item_slot_clicked)
+		_hud.item_bar.inventory_changed.connect(_on_inventory_changed)
+	if _hud != null and _hud.item_description_popup != null:
+		_hud.item_description_popup.close_requested.connect(_on_item_description_close)
 
 # -------------------------------------------------------
 # Chest interaction
@@ -283,6 +288,30 @@ func _on_loot_take_all() -> void:
 func _on_loot_close() -> void:
 	if _hud != null and _hud.loot_popup != null:
 		_hud.loot_popup.close()
+
+func _on_item_slot_clicked(slot_index: int) -> void:
+	if _hud == null or _hud.item_bar == null or _hud.item_description_popup == null:
+		return
+	var inst: ItemInstance = _hud.item_bar.get_slot(slot_index)
+	if inst == null or inst.data == null:
+		return
+	# Tapping the same slot while the popup is already showing it
+	# closes — feels like a toggle.
+	var popup: ItemDescriptionPopup = _hud.item_description_popup
+	if popup.is_open() and popup.get_current_instance() == inst:
+		popup.close()
+		return
+	popup.open(inst)
+
+func _on_inventory_changed() -> void:
+	# Any inventory mutation (drag-use, drop on dungeon, pickup, debug
+	# spawn) closes the popup so it never displays stale state.
+	if _hud != null and _hud.item_description_popup != null and _hud.item_description_popup.is_open():
+		_hud.item_description_popup.close()
+
+func _on_item_description_close() -> void:
+	if _hud != null and _hud.item_description_popup != null:
+		_hud.item_description_popup.close()
 
 func _on_item_used_on_character(slot_index: int, _character_index: int) -> void:
 	if _hud == null or _hud.item_bar == null:

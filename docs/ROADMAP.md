@@ -144,14 +144,16 @@ Future-friendly behaviours:
 - Drop on dungeon currently drops onto the current cell. The roadmap notes a future split: lower 1/3 of the dungeon view = drop on current cell; upper 2/3 = throw at enemies up to N tiles away (Phase 10 combat targeting).
 - `Character` is intentionally minimal — Phase 9 will replace it with a full `CharacterData` resource (stats, equipment, spells).
 
-#### Phase 7 polish — Item description popup
-Clicking (single click, not drag) an item slot in the bar should open a small popup showing the item's name + description (and any other relevant metadata — durability for equipment later, key id for keys, effect summary for consumables). Closing on click-outside or X. Useful in particular for the player who has multiple visually-similar keys (different `key_id`) and wants to know which lock each one opens, but generally good UX for any item.
-Sketch:
-- New `ItemInfoPopup.gd` scene/Control (or reuse the existing `Toast`/`LootPopup` patterns) — full or partial overlay with name + description block
-- Wire `ItemSlotButton.pressed` (currently used only for drag) to also fire an `info_requested(slot_index)` signal that opens the popup. Drag-start still cancels the click → no popup when dragging
-- Toggle behaviour: clicking the same slot again closes the popup; clicking a different slot swaps content
-- Localization: name + description already use `tr()` via `ItemData.get_display_name()` / `get_display_description()` — no new keys needed
-- Stretch: special section for keys showing the `lock_id` (for debug / "this key opens lock copper_2")
+#### Phase 7 polish — Item description popup ✅
+Single-click (not drag) on a populated item-bar slot opens a centered modal showing the item's tinted icon, translated name, and translated description. Especially useful for Phase 8 Task 2c keys whose hue tints differ but whose name/description are identical — the popup surfaces the tint at a much larger size and pairs visually with the matching lock on the map.
+1. ✅ `ItemDescriptionPopup.gd` (Control) — full-screen modal with backdrop, panel, big icon, name label, autowrap description, ✕ button
+2. ✅ Built programmatically by `HUD.gd` and exposed as `item_description_popup` (mirrors the LootPopup wiring)
+3. ✅ `Game.gd` subscribes to the existing `ItemBar.slot_clicked` (already emitted, previously unconnected) — empty slots are no-ops, tapping the same slot while the popup is open toggles closed
+4. ✅ `Game.gd` subscribes to `ItemBar.inventory_changed` so any mutation (drag-use, dungeon drop, pickup, F1 spawn) auto-closes the popup — the popup never shows stale state
+5. ✅ Drag-source isn't disturbed: `TextureButton.pressed` only fires on a complete click cycle, so `_get_drag_data` continues to win when the mouse drags past threshold
+6. ✅ Per-instance icon: the popup uses `ItemInstance.get_icon()` so hue-rotated keys (Task 2c follow-up) are shown in their actual baked tint, not the data's untinted source
+7. ✅ Localization: no new keys needed — `ItemData.get_display_name()` / `get_display_description()` already wrap `tr()`. The ✕ glyph is symbolic and matches LootPopup
+8. ✅ Tests: `test_item_description_popup.gd` (integration) — visibility, null-instance safety, name/description content, per-instance icon for hue-shifted keys, close + backdrop signals
 
 #### Deferred (blocked by other phases)
 - Drag-to-equip (Phase 9 — character inventory)
