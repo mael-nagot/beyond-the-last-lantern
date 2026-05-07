@@ -173,6 +173,8 @@ func _play_lever_locked_feedback(door: DoorInstance) -> void:
 	if _dungeon_view != null:
 		_dungeon_view.shake_camera(0.4)
 
+const _LEVER_DOOR_SOUND_DELAY: float = 0.2
+
 func _pull_lever(lever: LeverInstance) -> void:
 	if not lever.data.interactable:
 		_play_locked_feedback(lever.data)
@@ -191,11 +193,14 @@ func _pull_lever(lever: LeverInstance) -> void:
 		if door.opened != was_opened and changed_door_data == null:
 			changed_door_data = door.data
 	SoundManager.play(lever.data.interact_sound)
-	if changed_door_data != null:
-		SoundManager.play(changed_door_data.interact_sound)
 	if _dungeon_view != null:
 		_dungeon_view.rebuild_doors()
 		_dungeon_view.rebuild_objects()
+	if changed_door_data != null:
+		# Brief delay so the door's "thunk" lands AFTER the lever
+		# click instead of stepping on it — reads as cause-and-effect.
+		await get_tree().create_timer(_LEVER_DOOR_SOUND_DELAY).timeout
+		SoundManager.play(changed_door_data.interact_sound)
 
 func _open_chest(instance: ObjectInstance) -> void:
 	if not instance.data.interactable:
