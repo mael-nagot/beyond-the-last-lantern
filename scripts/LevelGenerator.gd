@@ -639,11 +639,13 @@ func _try_place_linked_cluster(spawn: LinkedObjectSpawn) -> void:
 	# AND-cluster configs (multiple levers in a narrow distance band
 	# from a single door, plus must_gate) genuinely need many random
 	# door positions to find one where the chain check passes for
-	# every cluster lever — 25 is enough headroom for those cases
-	# without burning forever on truly impossible configs. Per-
-	# attempt cost is now low thanks to the object-position
-	# snapshot in `_eligible_lever_cells`.
-	var max_attempts: int = 25
+	# every cluster lever AND the spacing constraint holds at the
+	# user-set distance. 50 matches the empirically-good ceiling
+	# from the previous "slow but worked" version (30 outer × 30
+	# inner combos, plus generous margin); per-attempt cost is now
+	# low enough thanks to the object-position snapshot in
+	# `_eligible_lever_cells` that the typical-case load stays fast.
+	var max_attempts: int = 50
 	var attempt: int = 0
 	while attempt < max_attempts:
 		attempt += 1
@@ -761,6 +763,26 @@ func _try_place_levers_for_cluster(spawn: LinkedObjectSpawn, doors_in_cluster: A
 	# loop because cells_by_type is invariant for this cluster's
 	# placement (cell types don't change as we shuffle objects).
 	var cells_by_type: Dictionary = _classify_floor_cells()
+
+	# AND-cluster pre-filter: every lever must be reachable from
+	# entrance when the cluster's doors are CLOSED — otherwise it
+	# can never be pulled, and AND requires every lever pulled.
+	# Without this filter, farthest-first happily spreads levers
+	# across the map and often lands one or two on the gated side,
+	# failing the chain check and forcing the distance to degrade.
+	# Build the entrance-reachable set once with all cluster doors
+	# treated as permanently closed; AND placement filters to it.
+	# OR clusters skip this — any one reachable lever opens every
+	# cluster door, so the others are free to sit gated-side as
+	# secondary triggers.
+	var entrance_side: Dictionary = {}
+	if spawn.lever_logic == DoorInstance.LeverLogic.AND:
+		var excluded_for_cluster: Dictionary = {}
+		for d in doors_in_cluster:
+			if d != null:
+				excluded_for_cluster[DoorInstance.edge_key(d.cell_a, d.cell_b)] = true
+		entrance_side = _chain_reachable_from_entrance(excluded_for_cluster)
+
 	var distance: int = max(0, spawn.lever_min_distance_to_other_object)
 	while distance >= 0:
 		# Many random attempts at THIS distance before degrading —
@@ -776,7 +798,7 @@ func _try_place_levers_for_cluster(spawn: LinkedObjectSpawn, doors_in_cluster: A
 			var lever_cells: Array = []
 			var combo_succeeded := true
 			for i in range(levers_per):
-				var pool: Array = _eligible_lever_cells(spawn, doors_in_cluster, distance, cells_by_type)
+				var pool: Array = _eligible_lever_cells(spawn, doors_in_cluster, distance, cells_by_type, entrance_side)
 				if pool.is_empty():
 					combo_succeeded = false
 					break
@@ -840,16 +862,20 @@ func _pick_farthest_from(pool: Array, existing: Array) -> Vector2i:
 			best = candidate
 	return best
 
-func _eligible_lever_cells(spawn: LinkedObjectSpawn, doors_in_cluster: Array, min_distance: int, cells_by_type: Dictionary) -> Array:
+func _eligible_lever_cells(spawn: LinkedObjectSpawn, doors_in_cluster: Array, min_distance: int, cells_by_type: Dictionary, entrance_side: Dictionary) -> Array:
 	# Build the lever-eligibility pool — excludes occupied cells,
 	# applies placement-flag and lever-to-cluster-range filters,
-	# and the spacing constraint against other objects. `cells_by_type`
+	# the spacing constraint against other objects, and (for AND
+	# clusters only) the entrance-side pre-filter. `cells_by_type`
 	# is passed in (invariant for the cluster's placement) so we
 	# don't re-classify per call. The object snapshot is built
 	# fresh so previously-placed cluster siblings appear in the
-	# spacing check.
+	# spacing check. `entrance_side` is empty for OR clusters
+	# (they tolerate gated-side levers) and the entrance-reachable
+	# set when cluster doors are closed for AND clusters.
 	var pool: Array = []
 	var object_positions: Array = _all_object_positions() if min_distance > 0 else []
+	var enforce_entrance_side: bool = not entrance_side.is_empty()
 	for placement_bit in [ObjectSpawn.PLACEMENT_CORRIDOR, ObjectSpawn.PLACEMENT_ROOM, ObjectSpawn.PLACEMENT_DEAD_END]:
 		if (spawn.lever_placement & placement_bit) == 0:
 			continue
@@ -863,6 +889,8 @@ func _eligible_lever_cells(spawn: LinkedObjectSpawn, doors_in_cluster: Array, mi
 			if not _within_lever_to_cluster_range(pos, doors_in_cluster, spawn):
 				continue
 			if min_distance > 0 and _too_close_to_object_set(pos, object_positions, min_distance):
+				continue
+			if enforce_entrance_side and not _has_reachable_neighbour(pos, entrance_side):
 				continue
 			pool.append(pos)
 	return pool
