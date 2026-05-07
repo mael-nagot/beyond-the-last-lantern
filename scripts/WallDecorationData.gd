@@ -45,6 +45,13 @@ extends Resource
 # beneath, which is rendered with triplanar mapping and may not be
 # perfectly coplanar with the cell boundary.
 @export var depth_offset: float = 0.02
+# Cross-billboard mode (Minecraft-style "+" from above). When true the
+# renderer spawns a SECOND sprite perpendicular to the first, sharing
+# the same texture / frames / animation. Looking from any angle the
+# player sees at least one near-head-on face — gives torches and
+# lanterns visual volume instead of disappearing edge-on when walked
+# past. Leave false for paintings and other intrinsically flat decos.
+@export var cross_billboard: bool = false
 
 @export_group("Light")
 # When `light_energy > 0`, the renderer attaches an `OmniLight3D` as a

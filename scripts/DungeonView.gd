@@ -370,8 +370,60 @@ func _build_wall_decorations() -> void:
 
 func _make_wall_decoration_node(inst: WallDecorationInstance) -> Node3D:
 	var data: WallDecorationData = inst.data
+	var primary := _make_wall_decoration_sprite(data)
+	if primary == null:
+		return null
+
+	var root := Node3D.new()
+	root.position = _wall_decoration_position(inst)
+	root.rotation_degrees = Vector3(0.0, _wall_decoration_y_rotation_deg(inst), 0.0)
+	root.add_child(primary)
+
+	# Cross billboard: second sprite at 90° around local Y, sharing the
+	# same texture / frames so the player sees a "+" from above. Shifted
+	# forward by half its width so the back edge sits at the wall —
+	# otherwise the back half would bury into the wall and cut the
+	# torch visually in half when seen from the side. Both
+	# AnimatedSprite3Ds share the SpriteFrames + are added in the same
+	# frame, so their animations stay in sync.
+	if data.cross_billboard:
+		var perpendicular := _make_wall_decoration_sprite(data)
+		if perpendicular != null:
+			perpendicular.rotation_degrees = Vector3(0.0, 90.0, 0.0)
+			var tex_w: int = _decoration_texture_width(data)
+			var sprite_width: float = float(tex_w) * perpendicular.pixel_size
+			perpendicular.position = Vector3(0.0, 0.0, sprite_width * 0.5)
+			root.add_child(perpendicular)
+
+	if data.light_energy > 0.0:
+		var light := OmniLight3D.new()
+		light.light_color = data.light_color
+		light.light_energy = data.light_energy
+		light.omni_range = data.light_range
+		root.add_child(light)
+
+	return root
+
+func _decoration_texture_width(data: WallDecorationData) -> int:
+	# Texture pixel width — for animated decos uses the first frame.
+	# Used by the cross-billboard offset to size the perpendicular plane.
+	if data.is_animated() and data.frames != null:
+		var anim_name: String = data.default_animation
+		if anim_name == "" or not data.frames.has_animation(anim_name):
+			var names: PackedStringArray = data.frames.get_animation_names()
+			if names.size() == 0:
+				return 1
+			anim_name = names[0]
+		var f: Texture2D = data.frames.get_frame_texture(anim_name, 0)
+		return f.get_width() if f != null else 1
+	if data.texture != null:
+		return data.texture.get_width()
+	return 1
+
+func _make_wall_decoration_sprite(data: WallDecorationData) -> SpriteBase3D:
 	# Picks AnimatedSprite3D for animated decorations (torches), Sprite3D
-	# for static ones (paintings). Same anchoring logic for both.
+	# for static ones (paintings). Same anchoring + scaling logic for
+	# both — the caller positions / rotates the returned node.
 	var sprite: SpriteBase3D = null
 	var tex_h: int = 0
 	if data.is_animated():
@@ -400,20 +452,7 @@ func _make_wall_decoration_node(inst: WallDecorationInstance) -> Node3D:
 	sprite.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
-
-	var root := Node3D.new()
-	root.position = _wall_decoration_position(inst)
-	root.rotation_degrees = Vector3(0.0, _wall_decoration_y_rotation_deg(inst), 0.0)
-	root.add_child(sprite)
-
-	if data.light_energy > 0.0:
-		var light := OmniLight3D.new()
-		light.light_color = data.light_color
-		light.light_energy = data.light_energy
-		light.omni_range = data.light_range
-		root.add_child(light)
-
-	return root
+	return sprite
 
 func _wall_decoration_position(inst: WallDecorationInstance) -> Vector3:
 	# Cell centre, then shift by half a cell in `wall_dir` to land on the

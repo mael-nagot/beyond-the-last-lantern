@@ -21,6 +21,8 @@
 [ext_resource type="Resource" uid="uid://d01cmd6cq5v2o" path="res://assets/objects/chest_wooden.tres" id="11_00k5e"]
 [ext_resource type="Resource" uid="uid://mtigjawa2y3e" path="res://assets/loot_tables/forest_chest_1.tres" id="11_bq1p8"]
 [ext_resource type="Resource" uid="uid://b0furuompokno" path="res://assets/objects/door_forest.tres" id="13_bq1p8"]
+[ext_resource type="Script" uid="uid://c4fbuyttq7iik" path="res://scripts/WallDecorationSpawn.gd" id="21_evnw4"]
+[ext_resource type="Resource" uid="uid://bcwekrkc5e52" path="res://assets/decorations/torch01.tres" id="22_obsjo"]
 
 [sub_resource type="Resource" id="Resource_ve4a7"]
 script = ExtResource("4_458bs")
@@ -72,6 +74,14 @@ placement = 1
 min_distance_to_other_object = 3
 metadata/_custom_type_script = "uid://q2yc7peloed8"
 
+[sub_resource type="Resource" id="Resource_3vyya"]
+script = ExtResource("21_evnw4")
+decoration = ExtResource("22_obsjo")
+count_min = 30
+count_max = 30
+min_distance_to_other_decoration = 4
+metadata/_custom_type_script = "uid://c4fbuyttq7iik"
+
 [resource]
 script = ExtResource("1_5w715")
 wall_albedo = Array[Texture2D]([ExtResource("7_bq1p8")])
@@ -90,4 +100,5 @@ floor_items_max = 12
 objects = Array[ExtResource("10_nhtug")]([SubResource("Resource_bq1p8"), SubResource("Resource_5n6tb")])
 linked_objects = Array[ExtResource("7_fvx5y")]([SubResource("Resource_ivfat")])
 key_door_spawns = Array[ExtResource("7_w7wxy")]([SubResource("Resource_evnw4")])
+wall_decorations = Array[ExtResource("21_evnw4")]([SubResource("Resource_3vyya")])
 move_sounds = Array[AudioStream]([ExtResource("7_sstbg"), ExtResource("8_0wobd"), ExtResource("9_nhtug")])

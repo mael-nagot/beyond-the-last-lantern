@@ -110,8 +110,10 @@ When multiple location flags are enabled, the per-pair lottery is **weighted-ran
 ### WallDecorationData.gd
 **Type:** Resource (data only, loaded as .tres files in `res://assets/decorations/`)
 **Purpose:** Template for a wall-mounted decoration (paintings, torches, lanterns, banners). Distinct from `ObjectData` because wall decos live on a wall FACE (a side of a floor cell that abuts a wall cell), never block movement, never carry interactions, and may be animated. Static decorations set `texture: Texture2D` and leave `frames` null; animated decorations set `frames: SpriteFrames` and leave `texture` null. `is_animated()` returns true when `frames` is set — the renderer uses this to pick `AnimatedSprite3D` (auto-plays `default_animation`, defaults to "idle") vs `Sprite3D`. `world_height` controls real-world size via `pixel_size = world_height / texture_height`. `y_offset` shifts vertically from the wall's mid-height. `depth_offset` (default 0.02) pulls the sprite slightly off the wall face to prevent Z-fighting with the triplanar wall texture beneath. Optional `light_color` / `light_energy` / `light_range` — when `light_energy > 0`, the renderer attaches an `OmniLight3D` as a child for glowing torches and lanterns; energy 0 = no light spawned (paintings).
-**Key exports:** name_key, description_key, texture, frames, default_animation, world_height, y_offset, depth_offset, light_color, light_energy, light_range
+**Key exports:** name_key, description_key, texture, frames, default_animation, world_height, y_offset, depth_offset, cross_billboard, light_color, light_energy, light_range
 **Key methods:** is_animated(), get_display_name(), get_display_description()
+
+**Cross billboard:** When `cross_billboard = true`, the renderer spawns a SECOND sprite perpendicular to the first (sharing the same texture / frames). From any angle the player sees at least one near-head-on face, giving torches and lanterns visual volume instead of disappearing edge-on when the player walks past. The perpendicular sprite is shifted forward so its back edge sits at the wall, so the decoration appears to protrude into the corridor. Leave false for paintings and other intrinsically flat decos.
 
 ### WallDecorationInstance.gd
 **Type:** RefCounted

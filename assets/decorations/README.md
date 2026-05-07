@@ -16,6 +16,7 @@
    - **Static**: set `Texture` to your single PNG. Leave `Frames` null.
    - **Animated**: set `Frames` to the SpriteFrames resource. Make sure `Default Animation` matches the animation name. Leave `Texture` null.
    - Set `World Height` (~1.5 for a torch, ~2.0 for a tall painting).
+   - For 3D-volume decorations (torches, lanterns), enable `Cross Billboard`. The renderer then renders a second sprite at 90° to the first so the decoration reads as having depth from any viewing angle. Leave false for flat paintings.
    - For glowing decorations, set `Light Color` (warm orange ≈ `1, 0.7, 0.4`), `Light Energy` (~1.5–2.0 for a torch), `Light Range` (~6).
 4. Wire it into a biome:
    - Open the biome `.tres` (e.g. `res://assets/biomes/forest.tres`).

@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="WallDecorationData" format=3 uid="uid://bcwekrkc5e52"]
+
+[ext_resource type="Script" uid="uid://d0vaqgopwsaml" path="res://scripts/WallDecorationData.gd" id="1_88h4h"]
+[ext_resource type="SpriteFrames" uid="uid://dutfddkksqee4" path="res://assets/sprite_frames/decorations/torch01.tres" id="1_p5lok"]
+
+[resource]
+script = ExtResource("1_88h4h")
+name_key = "decoration.torch_forest.name"
+frames = ExtResource("1_p5lok")
+cross_billboard = true
+light_color = Color(1, 0.85430586, 0.6651851, 1)
+light_energy = 1.5
+metadata/_custom_type_script = "uid://d0vaqgopwsaml"
