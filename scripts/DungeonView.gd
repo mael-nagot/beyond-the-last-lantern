@@ -42,6 +42,11 @@ var _decorations_root: Node3D
 # each one each frame to face the camera, with a designer-configured
 # X-axis tilt so the top leans toward the player.
 var _billboard_decorations: Array[Node3D] = []
+# Lights that flicker — DungeonView's `_process` jitters each one's
+# `light_energy` around its base value using a cheap multi-octave sine
+# pseudo-noise. Metadata on each light stores base_energy, amount,
+# and a per-placement phase so torches don't flicker in sync.
+var _flickering_lights: Array[OmniLight3D] = []
 var _object_sprites: Dictionary = {}  # Vector2i -> Sprite3D (for cheap per-move repositioning)
 var drop_target: DungeonDropTarget
 
@@ -362,6 +367,7 @@ func _door_y_rotation_deg(door: DoorInstance) -> float:
 
 func _build_wall_decorations() -> void:
 	_billboard_decorations.clear()
+	_flickering_lights.clear()
 	for child in _decorations_root.get_children():
 		child.queue_free()
 	if generator == null:
@@ -375,6 +381,7 @@ func _build_wall_decorations() -> void:
 
 func _process(_delta: float) -> void:
 	_update_billboard_decorations()
+	_update_flickering_lights()
 
 func _update_billboard_decorations() -> void:
 	# Per-frame Y-billboard with X-tilt for face_camera decorations.
@@ -398,6 +405,25 @@ func _update_billboard_decorations() -> void:
 		# after the Y face-camera rotation, so the top tilts toward
 		# the camera regardless of where the camera is.
 		root.basis = Basis(Vector3.UP, y_angle) * Basis(Vector3.RIGHT, x_tilt)
+
+func _update_flickering_lights() -> void:
+	# Cheap multi-octave sine produces a fire-like wobble: three
+	# non-commensurate frequencies summed and normalised to roughly
+	# [-1, 1]. Per-light phase decorrelates the array so torches
+	# never flicker in unison.
+	if _flickering_lights.is_empty():
+		return
+	var t: float = float(Time.get_ticks_msec()) / 1000.0
+	for light in _flickering_lights:
+		if not is_instance_valid(light):
+			continue
+		var base: float = light.get_meta("flicker_base_energy", 1.0)
+		var amount: float = light.get_meta("flicker_amount", 0.0)
+		var phase: float = light.get_meta("flicker_phase", 0.0)
+		var n: float = sin(t * 17.0 + phase) * 0.5 \
+			+ sin(t * 31.0 + phase * 1.7) * 0.3 \
+			+ sin(t * 7.0 + phase * 2.3) * 0.2
+		light.light_energy = base * (1.0 + n * amount)
 
 func _make_wall_decoration_node(inst: WallDecorationInstance) -> Node3D:
 	var data: WallDecorationData = inst.data
@@ -424,7 +450,16 @@ func _make_wall_decoration_node(inst: WallDecorationInstance) -> Node3D:
 		light.light_color = data.light_color
 		light.light_energy = data.light_energy
 		light.omni_range = data.light_range
+		# Position is relative to the sprite's CENTRE in both modes so
+		# `light_y_offset` is portable between flat and face_camera.
+		var sprite_centre_y_local: float = data.world_height * 0.5 if data.face_camera else 0.0
+		light.position = Vector3(0.0, sprite_centre_y_local + data.light_y_offset, 0.0)
 		root.add_child(light)
+		if data.light_flicker_amount > 0.0:
+			light.set_meta("flicker_base_energy", data.light_energy)
+			light.set_meta("flicker_amount", data.light_flicker_amount)
+			light.set_meta("flicker_phase", randf_range(0.0, TAU))
+			_flickering_lights.append(light)
 
 	return root
 

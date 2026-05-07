@@ -17,7 +17,8 @@
    - **Animated**: set `Frames` to the SpriteFrames resource. Make sure `Default Animation` matches the animation name. Leave `Texture` null.
    - Set `World Height` (~1.5 for a torch, ~2.0 for a tall painting).
    - For 3D-volume decorations (torches, lanterns), enable `Face Camera` and set `Top Tilt Degrees` (~15 is a good starting point). The renderer then pins the base to the wall and rotates the sprite each frame to face the player with the top leaning out — reads as a 3D object the player walks around. Leave `Face Camera` off for flat paintings.
-   - For glowing decorations, set `Light Color` (warm orange ≈ `1, 0.7, 0.4`), `Light Energy` (~1.5–2.0 for a torch), `Light Range` (~6).
+   - For glowing decorations, set `Light Color` (warm orange ≈ `1, 0.7, 0.4`), `Light Energy` (~1.5–2.0 for a torch), `Light Range` (~6). Use `Light Y Offset` to push the bright spot up onto the flame instead of the middle of the wooden handle — for a 1.5 m torch with the flame in the upper third, ~`0.4` works well. Negative values shift it down.
+   - For flickering lights (torches, candles), set `Light Flicker Amount` to ~`0.15`–`0.25` (fraction of base energy). 0 = steady glow. Each placement gets its own random phase, so torches in the same biome never pulse in sync.
 4. Wire it into a biome:
    - Open the biome `.tres` (e.g. `res://assets/biomes/forest.tres`).
    - In the `Wall Decorations` array, add a `WallDecorationSpawn`. Set `Decoration` to your new resource, `Count Min/Max`, `Placement` flags, optional `Min Distance To Other Decoration`.

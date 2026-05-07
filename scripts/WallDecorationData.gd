@@ -68,6 +68,18 @@ extends Resource
 @export var light_color: Color = Color(1.0, 0.7, 0.4)
 @export var light_energy: float = 0.0
 @export var light_range: float = 6.0
+# Vertical offset (in metres) of the light source relative to the
+# sprite's CENTRE. 0 = at the centre. Positive = up. Used to position
+# the bright spot on the flame instead of in the middle of the
+# torch's wooden handle. The offset rotates with the sprite under
+# `face_camera` tilt, so the glow tracks the flame as it leans.
+@export var light_y_offset: float = 0.0
+# Flicker magnitude as a fraction of base energy. 0 = no flicker
+# (steady glow). 0.15–0.25 reads as a torch / candle flame; higher
+# values feel jittery / unstable. Driven by a multi-octave sine in
+# DungeonView's `_process`, with a per-placement phase offset so
+# every torch flickers independently.
+@export var light_flicker_amount: float = 0.0
 
 func is_animated() -> bool:
 	return frames != null

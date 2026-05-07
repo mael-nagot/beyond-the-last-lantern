@@ -11,6 +11,8 @@ func test_defaults() -> void:
 	assert_false(data.face_camera)
 	assert_almost_eq(data.top_tilt_degrees, 15.0, 0.0001)
 	assert_eq(data.light_energy, 0.0)
+	assert_eq(data.light_y_offset, 0.0)
+	assert_eq(data.light_flicker_amount, 0.0)
 
 func test_is_animated_false_when_only_texture_set() -> void:
 	var data := WallDecorationData.new()
