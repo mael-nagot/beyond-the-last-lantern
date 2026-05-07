@@ -8,7 +8,8 @@ func test_defaults() -> void:
 	assert_eq(data.world_height, 1.5)
 	assert_eq(data.y_offset, 0.0)
 	assert_almost_eq(data.depth_offset, 0.02, 0.0001)
-	assert_false(data.cross_billboard)
+	assert_false(data.face_camera)
+	assert_almost_eq(data.top_tilt_degrees, 15.0, 0.0001)
 	assert_eq(data.light_energy, 0.0)
 
 func test_is_animated_false_when_only_texture_set() -> void:

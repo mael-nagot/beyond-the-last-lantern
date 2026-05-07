@@ -7,7 +7,7 @@
 script = ExtResource("1_88h4h")
 name_key = "decoration.torch_forest.name"
 frames = ExtResource("1_p5lok")
-cross_billboard = true
+face_camera = true
 light_color = Color(1, 0.85430586, 0.6651851, 1)
 light_energy = 1.5
 metadata/_custom_type_script = "uid://d0vaqgopwsaml"

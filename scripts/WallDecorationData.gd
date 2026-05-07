@@ -45,13 +45,21 @@ extends Resource
 # beneath, which is rendered with triplanar mapping and may not be
 # perfectly coplanar with the cell boundary.
 @export var depth_offset: float = 0.02
-# Cross-billboard mode (Minecraft-style "+" from above). When true the
-# renderer spawns a SECOND sprite perpendicular to the first, sharing
-# the same texture / frames / animation. Looking from any angle the
-# player sees at least one near-head-on face — gives torches and
-# lanterns visual volume instead of disappearing edge-on when walked
-# past. Leave false for paintings and other intrinsically flat decos.
-@export var cross_billboard: bool = false
+
+@export_group("Face-camera mode")
+# When true, the decoration always faces the player (Y-axis billboard
+# updated per frame from DungeonView), with its BASE pinned to the
+# wall and its top leaning out into the corridor by `top_tilt_degrees`.
+# Reads as a 3D object that the player walks around, instead of a
+# flat sprite that disappears edge-on. Leave false for paintings and
+# other decos that should sit flat on the wall.
+@export var face_camera: bool = false
+# How far the top of the decoration leans away from the wall toward
+# the player, in degrees. Only applies when `face_camera = true`. The
+# bottom stays anchored to the wall regardless of tilt. 0 = vertical
+# (no lean). ~10–20° gives a torch a clear protruding silhouette
+# without looking like it's about to fall off.
+@export var top_tilt_degrees: float = 15.0
 
 @export_group("Light")
 # When `light_energy > 0`, the renderer attaches an `OmniLight3D` as a

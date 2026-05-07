@@ -38,6 +38,10 @@ var _items_root: Node3D
 var _objects_root: Node3D
 var _doors_root: Node3D
 var _decorations_root: Node3D
+# Decorations using face_camera mode — DungeonView's `_process` rotates
+# each one each frame to face the camera, with a designer-configured
+# X-axis tilt so the top leans toward the player.
+var _billboard_decorations: Array[Node3D] = []
 var _object_sprites: Dictionary = {}  # Vector2i -> Sprite3D (for cheap per-move repositioning)
 var drop_target: DungeonDropTarget
 
@@ -357,6 +361,7 @@ func _door_y_rotation_deg(door: DoorInstance) -> float:
 	return 0.0
 
 func _build_wall_decorations() -> void:
+	_billboard_decorations.clear()
 	for child in _decorations_root.get_children():
 		child.queue_free()
 	if generator == null:
@@ -368,32 +373,51 @@ func _build_wall_decorations() -> void:
 		if node != null:
 			_decorations_root.add_child(node)
 
+func _process(_delta: float) -> void:
+	_update_billboard_decorations()
+
+func _update_billboard_decorations() -> void:
+	# Per-frame Y-billboard with X-tilt for face_camera decorations.
+	# Each root sits at the BOTTOM of its sprite (anchored to the wall),
+	# so this basis rotates the sprite around the wall-attached base —
+	# the bottom never moves, only the top swings.
+	if camera == null or _billboard_decorations.is_empty():
+		return
+	var cam_pos: Vector3 = camera.global_position
+	for root in _billboard_decorations:
+		if not is_instance_valid(root):
+			continue
+		var dx: float = cam_pos.x - root.global_position.x
+		var dz: float = cam_pos.z - root.global_position.z
+		if dx * dx + dz * dz < 0.0001:
+			continue
+		var y_angle: float = atan2(dx, dz)
+		var x_tilt: float = root.get_meta("billboard_tilt", 0.0)
+		# Y rotation (face camera) THEN X tilt — composition order
+		# matters: applying X first puts the lean in the local frame
+		# after the Y face-camera rotation, so the top tilts toward
+		# the camera regardless of where the camera is.
+		root.basis = Basis(Vector3.UP, y_angle) * Basis(Vector3.RIGHT, x_tilt)
+
 func _make_wall_decoration_node(inst: WallDecorationInstance) -> Node3D:
 	var data: WallDecorationData = inst.data
-	var primary := _make_wall_decoration_sprite(data)
-	if primary == null:
+	var sprite := _make_wall_decoration_sprite(data)
+	if sprite == null:
 		return null
 
 	var root := Node3D.new()
 	root.position = _wall_decoration_position(inst)
-	root.rotation_degrees = Vector3(0.0, _wall_decoration_y_rotation_deg(inst), 0.0)
-	root.add_child(primary)
-
-	# Cross billboard: second sprite at 90° around local Y, sharing the
-	# same texture / frames so the player sees a "+" from above. Shifted
-	# forward by half its width so the back edge sits at the wall —
-	# otherwise the back half would bury into the wall and cut the
-	# torch visually in half when seen from the side. Both
-	# AnimatedSprite3Ds share the SpriteFrames + are added in the same
-	# frame, so their animations stay in sync.
-	if data.cross_billboard:
-		var perpendicular := _make_wall_decoration_sprite(data)
-		if perpendicular != null:
-			perpendicular.rotation_degrees = Vector3(0.0, 90.0, 0.0)
-			var tex_w: int = _decoration_texture_width(data)
-			var sprite_width: float = float(tex_w) * perpendicular.pixel_size
-			perpendicular.position = Vector3(0.0, 0.0, sprite_width * 0.5)
-			root.add_child(perpendicular)
+	if data.face_camera:
+		# Sprite extends UP from root (= bottom of decoration). Per-frame
+		# basis update in `_update_billboard_decorations` rotates the
+		# root to face the camera + tilt top toward camera. The bottom
+		# stays pinned to root (= wall surface) under any rotation.
+		sprite.position = Vector3(0.0, data.world_height * 0.5, 0.0)
+		root.set_meta("billboard_tilt", deg_to_rad(data.top_tilt_degrees))
+		_billboard_decorations.append(root)
+	else:
+		root.rotation_degrees = Vector3(0.0, _wall_decoration_y_rotation_deg(inst), 0.0)
+	root.add_child(sprite)
 
 	if data.light_energy > 0.0:
 		var light := OmniLight3D.new()
@@ -403,22 +427,6 @@ func _make_wall_decoration_node(inst: WallDecorationInstance) -> Node3D:
 		root.add_child(light)
 
 	return root
-
-func _decoration_texture_width(data: WallDecorationData) -> int:
-	# Texture pixel width — for animated decos uses the first frame.
-	# Used by the cross-billboard offset to size the perpendicular plane.
-	if data.is_animated() and data.frames != null:
-		var anim_name: String = data.default_animation
-		if anim_name == "" or not data.frames.has_animation(anim_name):
-			var names: PackedStringArray = data.frames.get_animation_names()
-			if names.size() == 0:
-				return 1
-			anim_name = names[0]
-		var f: Texture2D = data.frames.get_frame_texture(anim_name, 0)
-		return f.get_width() if f != null else 1
-	if data.texture != null:
-		return data.texture.get_width()
-	return 1
 
 func _make_wall_decoration_sprite(data: WallDecorationData) -> SpriteBase3D:
 	# Picks AnimatedSprite3D for animated decorations (torches), Sprite3D
@@ -458,14 +466,23 @@ func _wall_decoration_position(inst: WallDecorationInstance) -> Vector3:
 	# Cell centre, then shift by half a cell in `wall_dir` to land on the
 	# wall face, then pull back into the corridor by `depth_offset` so
 	# the sprite doesn't Z-fight the wall texture beneath.
+	#
+	# Y placement differs by mode. Flat: root sits at the visual centre
+	# of the decoration. Face-camera: root sits at the BOTTOM (so the
+	# X-axis tilt rotates around the wall-attached base). Both modes
+	# end up with the decoration's centre at the same height
+	# (wall_height/2 + y_offset), which keeps `y_offset` semantically
+	# stable when designers flip the flag.
 	var cx: float = inst.cell.x * CELL_SIZE + CELL_SIZE * 0.5
 	var cz: float = inst.cell.y * CELL_SIZE + CELL_SIZE * 0.5
 	var face_x: float = cx + float(inst.wall_dir.x) * CELL_SIZE * 0.5
 	var face_z: float = cz + float(inst.wall_dir.y) * CELL_SIZE * 0.5
 	var pulled_x: float = face_x - float(inst.wall_dir.x) * inst.data.depth_offset
 	var pulled_z: float = face_z - float(inst.wall_dir.y) * inst.data.depth_offset
-	var y: float = wall_height * 0.5 + inst.data.y_offset
-	return Vector3(pulled_x, y, pulled_z)
+	var y_centre: float = wall_height * 0.5 + inst.data.y_offset
+	if inst.data.face_camera:
+		return Vector3(pulled_x, y_centre - inst.data.world_height * 0.5, pulled_z)
+	return Vector3(pulled_x, y_centre, pulled_z)
 
 func _wall_decoration_y_rotation_deg(inst: WallDecorationInstance) -> float:
 	# Match the wall mesh's own y_rotation so the decoration sits flush
