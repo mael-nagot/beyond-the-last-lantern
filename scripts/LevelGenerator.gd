@@ -635,12 +635,15 @@ func _try_place_linked_cluster(spawn: LinkedObjectSpawn) -> void:
 	var levers_per: int = max(1, spawn.levers_per_cluster)
 
 	# Bounded outer attempts — fresh shuffles let us recover from a
-	# door combo that lever placement / must_gate rejected, or from
-	# an unlucky shuffle that happened to put adjacent edges first.
-	# 8 is enough to find a working layout in practice (most clusters
-	# commit on attempt 1); larger values just burn time on hostile
-	# configs that won't ever satisfy the constraints.
-	var max_attempts: int = 8
+	# door combo that lever placement / must_gate rejected. Tight
+	# AND-cluster configs (multiple levers in a narrow distance band
+	# from a single door, plus must_gate) genuinely need many random
+	# door positions to find one where the chain check passes for
+	# every cluster lever — 25 is enough headroom for those cases
+	# without burning forever on truly impossible configs. Per-
+	# attempt cost is now low thanks to the object-position
+	# snapshot in `_eligible_lever_cells`.
+	var max_attempts: int = 25
 	var attempt: int = 0
 	while attempt < max_attempts:
 		attempt += 1
@@ -672,15 +675,16 @@ func _try_place_linked_cluster(spawn: LinkedObjectSpawn) -> void:
 			doors_in_cluster.append(door)
 
 		if not doors_succeeded:
-			# Rollback partials. Insufficient eligible edges given the
-			# spacing constraint — retrying with a new shuffle won't
-			# help, so bail.
+			# Rollback partials and try another shuffle. A different
+			# random door_1 yields a different candidate pool for
+			# door_2 (since `_candidate_edges_for_door_object`
+			# filters by distance to placed siblings), so retrying
+			# CAN help. We only give up after `max_attempts` outer
+			# loops via the loop's natural exit.
 			for d in doors_in_cluster:
 				doors.erase(d)
 				_doors_by_edge.erase(DoorInstance.edge_key(d.cell_a, d.cell_b))
-			push_warning("LevelGenerator: could not place %d cluster doors with min_distance=%d (lever='%s', door='%s')" %
-				[doors_per, spawn.door_min_distance_to_other_object, _obj_label(spawn.lever_object), _obj_label(spawn.door_object)])
-			return
+			continue
 
 		var levers_in_cluster: Array = _try_place_levers_for_cluster(spawn, doors_in_cluster, pre_chain, levers_per)
 		if levers_in_cluster.is_empty():
