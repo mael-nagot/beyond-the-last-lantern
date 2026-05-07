@@ -225,16 +225,11 @@ func _refresh_slot(index: int) -> void:
 	var label: Label       = _slots[index]["label"]
 	if inst == null or inst.data == null:
 		btn.texture_normal = null
-		# Reset modulate so a previously-tinted slot doesn't bleed
-		# into the next item that lands here.
-		btn.modulate = Color.WHITE
 		label.text = ""
 		return
-	btn.texture_normal = inst.data.icon
-	# Per-instance tint (Color.WHITE = identity). KeyDoorSpawn uses
-	# this so visually-identical keys for different locks read as
-	# slightly different shades.
-	btn.modulate = inst.tint
+	# Per-instance hue-rotated icon when the placer baked one
+	# (KeyDoorSpawn pair >= 1); falls back to data.icon otherwise.
+	btn.texture_normal = inst.get_icon()
 	if inst.data.stackable and inst.stack_count > 1:
 		label.text = str(inst.stack_count)
 	else:

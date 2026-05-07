@@ -220,12 +220,12 @@ The renderer-level meaning of `ObjectData.interactable` shifted: instead of "ski
 4. ✅ Localization: `object.door_forest.locked`
 
 #### Task 2c follow-up — Per-pair key tint (visual differentiation) ✅
-Multiple key-locked pairs in the same biome shared the same `key_*.tres`, so all keys looked identical even though they unlocked different doors. Fixed by auto-tinting keys by global pair index — pair 0 keeps the original art, subsequent pairs get a subtle hue shift.
-1. ✅ `ItemInstance.tint: Color = Color.WHITE` — per-instance Color, applied as `modulate` in every renderer
-2. ✅ `LevelGenerator._tint_for_pair_index(i)` — pair 0 returns WHITE; pair ≥ 1 returns `Color.from_hsv(fmod(i * 0.618, 1.0), 0.22, 1.0)` (golden-ratio hue rotation, low saturation so it stays a "tint" not a recolor)
-3. ✅ `_try_place_key_door_pair` propagates the global counter as `pair_index` to floor + chest placement, which sets `key_inst.tint`
-4. ✅ Three renderer touch-ups: `ItemBar._refresh_slot` (TextureButton.modulate), `DungeonView._make_item_sprite` (Sprite3D.modulate, signature now takes ItemInstance), `LootPopup` (slot button modulate). `ItemBar` resets to `Color.WHITE` when a slot empties so previous tints don't bleed.
-5. ✅ Tests: `test_item_instance` extended (tint default + override); `test_keys_are_tinted_per_pair_index` (integration — pair 0 stays WHITE, others non-WHITE)
+Multiple key-locked pairs in the same biome shared the same `key_*.tres`, so all keys looked identical even though they unlocked different doors. Fixed by baking a per-pair hue-rotated copy of the key's icon + dungeon sprite at level-gen time. The first attempt used multiplicative `modulate` Color tinting, which only produced brightness variations on a strongly-coloured base sprite (yellow key + blue tint = darker yellow, not blue). Replaced with a real per-pixel hue rotation that's independent of the base sprite's colour.
+1. ✅ `ItemInstance.hue_shift: float = 0.0` plus cached `_tinted_icon` / `_tinted_dungeon_sprite` (private). `apply_hue_shift(shift)` bakes the recoloured textures via a per-pixel HSV rotation pass (preserves saturation, value, alpha). `get_icon()` / `get_dungeon_sprite()` return the baked textures when present, else fall back to `data.*`.
+2. ✅ `LevelGenerator._hue_shift_for_pair_index(i)` — pair 0 returns 0.0 (no shift); pair ≥ 1 returns `fmod(i * 0.618, 1.0)` (golden-ratio steps for good colour-wheel separation even with small N).
+3. ✅ `_try_place_key_door_pair` propagates the global counter as `pair_index` to floor + chest placement, which calls `key_inst.apply_hue_shift(...)` after creating the instance.
+4. ✅ Renderers updated to call `inst.get_icon()` / `inst.get_dungeon_sprite()`: `ItemBar._refresh_slot` (TextureButton.texture_normal), `DungeonView._make_item_sprite` (Sprite3D.texture, signature now takes ItemInstance), `LootPopup` (slot button texture).
+5. ✅ Tests: `test_item_instance` extended (`hue_shift` default; `apply_hue_shift` clears cache when shift is 0; baked pixels actually rotate hue); `test_keys_are_hue_shifted_per_pair_index` (integration — pair 0 falls through to data.icon, pair ≥ 1 has non-zero shift and a distinct baked icon).
 
 #### Task 2b follow-up — Enforce `door_must_gate_content` on LinkedObjectSpawn
 The flag exists on `LinkedObjectSpawn` (since 2a) but is RESERVED — placement of lever-locked doors does NOT reject useless gates. Only `KeyDoorSpawn` enforces the rule today. Easy extension: call the existing `_door_gates_content(door)` after `_try_place_lever_for_door` succeeds, roll back the pair (lever + door) if it returns false. Same chain v2 simulation, same content set (chest, lever, key, exit). One inspector field stops being a no-op.

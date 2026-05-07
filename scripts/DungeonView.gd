@@ -370,17 +370,17 @@ func _build_items() -> void:
 
 func _make_item_sprite(inst: ItemInstance) -> Sprite3D:
 	var data: ItemData = inst.data
+	# Per-instance hue-rotated dungeon sprite when the placer baked
+	# one (KeyDoorSpawn pair >= 1); falls back to data.dungeon_sprite
+	# otherwise.
+	var tex: Texture2D = inst.get_dungeon_sprite()
 	var sprite := Sprite3D.new()
-	sprite.texture = data.dungeon_sprite
-	var tex_h: int = max(1, data.dungeon_sprite.get_height())
+	sprite.texture = tex
+	var tex_h: int = max(1, tex.get_height())
 	sprite.pixel_size = data.dungeon_sprite_world_height / float(tex_h)
 	sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
-	# Per-instance tint (Color.WHITE = identity / no visible tint).
-	# Used by KeyDoorSpawn to give each pair's key a slightly
-	# different hue while sharing the same source asset.
-	sprite.modulate = inst.tint
 	return sprite
 
 func _make_material(albedo_set: Array, normal_set: Array = []) -> StandardMaterial3D:

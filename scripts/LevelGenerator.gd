@@ -890,7 +890,7 @@ func _try_place_key_on_floor(spawn: KeyDoorSpawn, paired_door: DoorInstance, loc
 		for candidate in pool:
 			var key_inst := ItemInstance.create(spawn.key_item, 1)
 			key_inst.key_id = lock_id
-			key_inst.tint = _tint_for_pair_index(pair_index)
+			key_inst.apply_hue_shift(_hue_shift_for_pair_index(pair_index))
 			grid[candidate.x][candidate.y].items.append(key_inst)
 			var post_chain: Dictionary = _chain_reachable_from_entrance()
 			if _chain_preserved_after_key(pre_chain, post_chain, paired_door):
@@ -927,7 +927,7 @@ func _try_place_key_in_chest(spawn: KeyDoorSpawn, paired_door: DoorInstance, loc
 		var chest: ObjectInstance = grid[chest_pos.x][chest_pos.y].object
 		var key_inst := ItemInstance.create(spawn.key_item, 1)
 		key_inst.key_id = lock_id
-		key_inst.tint = _tint_for_pair_index(pair_index)
+		key_inst.apply_hue_shift(_hue_shift_for_pair_index(pair_index))
 		chest.items.append(key_inst)
 		var post_chain: Dictionary = _chain_reachable_from_entrance()
 		if _chain_preserved_after_key(pre_chain, post_chain, paired_door):
@@ -947,19 +947,18 @@ func _chain_preserved_after_key(before: Dictionary, after: Dictionary, paired_do
 			return false
 	return after.has(paired_door.cell_a) and after.has(paired_door.cell_b)
 
-func _tint_for_pair_index(index: int) -> Color:
-	# Per-pair key tint. Pair 0 = identity (WHITE) so the first key
-	# looks like the original asset. Pair >= 1 gets an HSV hue
-	# rotated by the golden ratio (good separation even with small
-	# N), at saturation 0.55 — the modulate is multiplicative, so on
-	# a strongly-coloured base sprite (e.g. a yellow key) lower
-	# saturation just reads as "darker yellow" rather than a hue
-	# shift. 0.55 is high enough to push the hue through but still
-	# leaves the icon recognisable as the same key shape.
+func _hue_shift_for_pair_index(index: int) -> float:
+	# Per-pair key hue rotation in [0, 1). Pair 0 returns 0.0 (no
+	# shift — original art preserved). Pair >= 1 gets a hue rotation
+	# stepped by the golden ratio so even small N spreads well
+	# across the colour wheel. The shift is applied per-pixel to a
+	# baked texture in ItemInstance.apply_hue_shift, NOT as a
+	# multiplicative modulate — that distinction matters because
+	# multiplicative tinting on a strongly-coloured base (e.g. a
+	# yellow key) reads as brightness variation, not hue.
 	if index <= 0:
-		return Color.WHITE
-	var hue: float = fmod(float(index) * 0.61803398875, 1.0)
-	return Color.from_hsv(hue, 0.55, 1.0)
+		return 0.0
+	return fmod(float(index) * 0.61803398875, 1.0)
 
 func _chest_holds_a_key(chest: ObjectInstance) -> bool:
 	if chest == null:
