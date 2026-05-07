@@ -52,6 +52,22 @@ const KEY_LOCATION_DEFAULT := KEY_LOCATION_FLOOR
 
 @export_group("Key spawn location")
 @export_flags("Floor", "Chest", "Enemy Drop") var key_spawn_locations: int = KEY_LOCATION_DEFAULT
+# Weighted ordering for the per-pair location lottery. When multiple
+# flags are enabled, the placement picks an ordering by weighted
+# random — the first pick is "primary" (tried first), the rest are
+# fallbacks in case the primary has no eligible candidate. Higher
+# weight = more likely to be picked first. Setting a weight to 0
+# disables that location even if its flag is on. Defaults make all
+# enabled locations equally likely (the original behaviour).
+@export var floor_weight: int = 1
+@export var chest_weight: int = 1
+@export var enemy_drop_weight: int = 1
+# When true, a single chest may host multiple keys (from this spawn
+# OR earlier ones). When false (the default), a chest already
+# holding ANY key is skipped and the placement falls through to the
+# next candidate chest — prevents the "two keys in one chest" feel
+# that makes one chest unusually rich and dilutes the puzzle.
+@export var allow_multiple_keys_per_chest: bool = false
 
 @export_group("Floor placement (when KEY_LOCATION_FLOOR is enabled)")
 # Where the key can land when spawned on the floor — chest-style

@@ -801,18 +801,12 @@ func _try_place_key_door_pair(spawn: KeyDoorSpawn, lock_id: String) -> void:
 		[_obj_label(spawn.door_object), _item_label(spawn.key_item), lock_id])
 
 func _try_place_key_for_door(spawn: KeyDoorSpawn, paired_door: DoorInstance, lock_id: String, pre_chain: Dictionary) -> bool:
-	# Build the list of enabled spawn locations and try them in
-	# random order. Falls back to the next location on failure.
-	var locations: Array = []
-	if spawn.allows_location(KeyDoorSpawn.KEY_LOCATION_FLOOR):
-		locations.append(KeyDoorSpawn.KEY_LOCATION_FLOOR)
-	if spawn.allows_location(KeyDoorSpawn.KEY_LOCATION_CHEST):
-		locations.append(KeyDoorSpawn.KEY_LOCATION_CHEST)
-	if spawn.allows_location(KeyDoorSpawn.KEY_LOCATION_ENEMY_DROP):
-		locations.append(KeyDoorSpawn.KEY_LOCATION_ENEMY_DROP)
+	# Build a weighted ordering of enabled spawn locations. The first
+	# pick is "primary" (tried first); on failure, fall through to
+	# the rest in (weighted-)random order.
+	var locations: Array = _ordered_key_locations(spawn)
 	if locations.is_empty():
 		locations = [KeyDoorSpawn.KEY_LOCATION_FLOOR]
-	locations.shuffle()
 	for location in locations:
 		match location:
 			KeyDoorSpawn.KEY_LOCATION_FLOOR:
@@ -824,6 +818,42 @@ func _try_place_key_for_door(spawn: KeyDoorSpawn, paired_door: DoorInstance, loc
 			KeyDoorSpawn.KEY_LOCATION_ENEMY_DROP:
 				push_warning("LevelGenerator: KEY_LOCATION_ENEMY_DROP not yet supported (Phase 10) — falling back to next enabled location")
 	return false
+
+func _ordered_key_locations(spawn: KeyDoorSpawn) -> Array:
+	# Returns the spawn's enabled key locations in weighted-random
+	# order. Each pick is removed from the pool, so the resulting
+	# array has each enabled location exactly once.
+	var entries: Array = []  # of {"loc": int, "weight": int}
+	if spawn.allows_location(KeyDoorSpawn.KEY_LOCATION_FLOOR) and spawn.floor_weight > 0:
+		entries.append({"loc": KeyDoorSpawn.KEY_LOCATION_FLOOR, "weight": spawn.floor_weight})
+	if spawn.allows_location(KeyDoorSpawn.KEY_LOCATION_CHEST) and spawn.chest_weight > 0:
+		entries.append({"loc": KeyDoorSpawn.KEY_LOCATION_CHEST, "weight": spawn.chest_weight})
+	if spawn.allows_location(KeyDoorSpawn.KEY_LOCATION_ENEMY_DROP) and spawn.enemy_drop_weight > 0:
+		entries.append({"loc": KeyDoorSpawn.KEY_LOCATION_ENEMY_DROP, "weight": spawn.enemy_drop_weight})
+	var ordered: Array = []
+	while not entries.is_empty():
+		var idx: int = _pick_weighted_index(entries)
+		if idx < 0:
+			break
+		ordered.append(entries[idx]["loc"])
+		entries.remove_at(idx)
+	return ordered
+
+func _pick_weighted_index(entries: Array) -> int:
+	# Picks an index into `entries` proportional to its "weight" key.
+	# Returns -1 if total weight is non-positive.
+	var total: int = 0
+	for e in entries:
+		total += max(0, int(e.get("weight", 0)))
+	if total <= 0:
+		return -1
+	var roll: int = randi() % total
+	for i in range(entries.size()):
+		var w: int = max(0, int(entries[i].get("weight", 0)))
+		if roll < w:
+			return i
+		roll -= w
+	return entries.size() - 1
 
 func _try_place_key_on_floor(spawn: KeyDoorSpawn, paired_door: DoorInstance, lock_id: String, pre_chain: Dictionary) -> bool:
 	var cells_by_type: Dictionary = _classify_floor_cells()
@@ -877,6 +907,11 @@ func _try_place_key_in_chest(spawn: KeyDoorSpawn, paired_door: DoorInstance, loc
 			var cell: GridCell = grid[x][y]
 			if cell.object == null or not cell.object.is_chest():
 				continue
+			# When the spawn forbids stacking keys in one chest,
+			# skip chests that already hold ANY key (from this
+			# spawn or earlier ones).
+			if not spawn.allow_multiple_keys_per_chest and _chest_holds_a_key(cell.object):
+				continue
 			var pos := Vector2i(x, y)
 			if not _has_reachable_neighbour(pos, pre_chain):
 				continue
@@ -908,6 +943,14 @@ func _chain_preserved_after_key(before: Dictionary, after: Dictionary, paired_do
 		if not after.has(cell_pos):
 			return false
 	return after.has(paired_door.cell_a) and after.has(paired_door.cell_b)
+
+func _chest_holds_a_key(chest: ObjectInstance) -> bool:
+	if chest == null:
+		return false
+	for item in chest.items:
+		if item != null and item.get_key_id() != "":
+			return true
+	return false
 
 func _within_key_to_door_range(key_pos: Vector2i, paired_door: DoorInstance, spawn: KeyDoorSpawn) -> bool:
 	var min_d: int = max(0, spawn.key_to_door_min_distance)

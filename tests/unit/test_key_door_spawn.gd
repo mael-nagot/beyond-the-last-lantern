@@ -15,6 +15,11 @@ func test_defaults() -> void:
 	assert_eq(spawn.door_min_distance_to_other_object, 0)
 	assert_eq(spawn.key_to_door_min_distance, 0)
 	assert_eq(spawn.key_to_door_max_distance, -1)
+	assert_eq(spawn.floor_weight, 1, "default location weight is even (1 each)")
+	assert_eq(spawn.chest_weight, 1)
+	assert_eq(spawn.enemy_drop_weight, 1)
+	assert_false(spawn.allow_multiple_keys_per_chest,
+		"defaults to false — a chest hosts at most one key")
 
 func test_allows_location_for_single_flag() -> void:
 	var spawn := KeyDoorSpawn.new()

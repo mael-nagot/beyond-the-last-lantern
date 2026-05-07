@@ -219,6 +219,9 @@ The renderer-level meaning of `ObjectData.interactable` shifted: instead of "ski
 3. ✅ Every Game.gd click dispatch (chest / door / lever) short-circuits to `_play_locked_feedback` when `instance.data.interactable` is false
 4. ✅ Localization: `object.door_forest.locked`
 
+#### Task 2b follow-up — Enforce `door_must_gate_content` on LinkedObjectSpawn
+The flag exists on `LinkedObjectSpawn` (since 2a) but is RESERVED — placement of lever-locked doors does NOT reject useless gates. Only `KeyDoorSpawn` enforces the rule today. Easy extension: call the existing `_door_gates_content(door)` after `_try_place_lever_for_door` succeeds, roll back the pair (lever + door) if it returns false. Same chain v2 simulation, same content set (chest, lever, key, exit). One inspector field stops being a no-op.
+
 #### Task 2b follow-up — Richer lever ↔ door pairing
 1. Allow one lever to toggle multiple doors (lever's `linked_doors` already an Array)
 2. Allow one door to be toggled by multiple levers (door's `linked_levers` already an Array; lever sprite already uses "any door open" — confirm or revisit semantics for many-to-many)
@@ -241,7 +244,10 @@ A door tagged with a `lock_id` requires a matching key item (`ItemData` with `ke
 12. ✅ Tests:
     - Unit: `test_door_instance` extended (lock_id default, is_key_locked, sticky unlock); `test_item_data` extended (KEY enum, key_id default); `test_item_instance` extended (per-instance override, no-stacking with mismatched ids); new `test_key_door_spawn`
     - Integration: locked doors get auto-generated lock_ids; floor keys 1-to-1 with locked doors; key chain-reachable before its door; chain v2 unlocks via collected keys; must_gate_content rejects useless locks; KEY_LOCATION_CHEST plants the key inside a chest
-13. ⏳ Manual asset work (developer): `res://assets/objects/door_forest_locked.tres` (same sprites as `door_forest.tres`, set `locked_sound` + `locked_message_key = "object.door_forest_locked.locked"`), `res://assets/items/key_forest.tres` (icon + dungeon sprite + `Category = KEY`), add a `KeyDoorSpawn` entry to `forest.tres`
+13. ✅ Manual asset work (developer): `res://assets/objects/door_forest_locked.tres`, `res://assets/items/key_forest.tres` + textures + sounds, `KeyDoorSpawn` entry in `forest.tres`
+14. ✅ Polish — weighted location lottery + no-duplicate-keys-per-chest:
+    - `KeyDoorSpawn.floor_weight` / `chest_weight` / `enemy_drop_weight` (default 1 each = even). The per-pair location is picked weighted-random; setting `chest_weight = 3` biases pairs toward chest spawns, etc.
+    - `KeyDoorSpawn.allow_multiple_keys_per_chest: bool = false` — skips chests already holding any key when placing a new one, so keys spread across multiple chests instead of stacking.
 
 #### Task 3 — Traps
 - Spike trap (periodic up/down)

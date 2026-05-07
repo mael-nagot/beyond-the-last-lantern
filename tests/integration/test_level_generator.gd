@@ -1077,6 +1077,61 @@ func _chain_with_excluded_door(gen: LevelGenerator, excluded_door: DoorInstance)
 			return reachable
 	return {}
 
+func test_chests_hold_at_most_one_key_by_default() -> void:
+	# allow_multiple_keys_per_chest defaults to false. Even with 4
+	# locked-door pairs forced into chests, no chest should hold
+	# two keys.
+	var spawn := _make_key_door_spawn(_make_key_item(), _make_locked_door(), 4, 4)
+	spawn.key_spawn_locations = KeyDoorSpawn.KEY_LOCATION_CHEST
+	var biome := _make_biome()
+	# Lots of chests so chest placement has room — otherwise pairs
+	# would just fail to place rather than stack on a chest.
+	biome.objects = [_make_object_spawn(_make_chest(), 6, 6, ObjectSpawn.PLACEMENT_ANY)]
+	biome.key_door_spawns = [spawn]
+	var gen := _make_generator(biome, 12121)
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			var cell: GridCell = gen.grid[x][y]
+			if cell.object == null or not cell.object.is_chest():
+				continue
+			var key_count := 0
+			for item in cell.object.items:
+				if item != null and item.get_key_id() != "":
+					key_count += 1
+			assert_lte(key_count, 1,
+				"chest at (%d,%d) holds %d keys with allow_multiple_keys_per_chest=false" %
+				[x, y, key_count])
+
+func test_chest_can_hold_multiple_keys_when_flag_is_true() -> void:
+	# With the flag on, the placement may stack keys into one chest.
+	# Hard to assert "exactly N in one chest" because of randomness;
+	# we just verify the flag doesn't break placement (locked doors
+	# still land with their keys somewhere).
+	var spawn := _make_key_door_spawn(_make_key_item(), _make_locked_door(), 3, 3)
+	spawn.key_spawn_locations = KeyDoorSpawn.KEY_LOCATION_CHEST
+	spawn.allow_multiple_keys_per_chest = true
+	var biome := _make_biome()
+	biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
+	biome.key_door_spawns = [spawn]
+	var gen := _make_generator(biome, 34321)
+	# Sanity: any locked door we did place must have its key in some chest.
+	for door in _all_locked_doors(gen):
+		var found := false
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				var cell: GridCell = gen.grid[x][y]
+				if cell.object == null or not cell.object.is_chest():
+					continue
+				for item in cell.object.items:
+					if item != null and item.get_key_id() == door.lock_id:
+						found = true
+						break
+				if found:
+					break
+			if found:
+				break
+		assert_true(found, "key for %s not found in any chest" % door.lock_id)
+
 func test_chest_spawned_key_lands_inside_a_chest() -> void:
 	var spawn := _make_key_door_spawn(_make_key_item(), _make_locked_door(), 1, 1)
 	spawn.key_spawn_locations = KeyDoorSpawn.KEY_LOCATION_CHEST
