@@ -219,10 +219,23 @@ The renderer-level meaning of `ObjectData.interactable` shifted: instead of "ski
 3. Decide AND/OR semantics if needed (e.g. door opens only when ALL levers pulled vs. ANY lever pulled). Today the model is "each pull flips each linked door", which is consistent for 1:1 and degrades reasonably for many.
 4. Update `LinkedObjectSpawn` shape to express N:M pairing rules (probably `lever_count_per_pair`, `door_count_per_pair`, or a more declarative pairing graph)
 
-#### Task 2c — Locked doors + gating placement
-1. `ObjectSpawn.must_gate_content` placement check: closing this door (alone, others treated as open) must cut off at least one chest cell or the exit
-2. Once-only locks (key / lever / quest trigger) — once unlocked, never re-locks
-3. Atmospheric pre-opened doors via `ObjectSpawn.starts_open`
+#### Task 2c — Locked doors + gating placement ✅ (code; awaits manual asset/biome wiring)
+A door tagged with a `lock_id` requires a matching key item (`ItemData` with `key_id == lock_id`). On click without the key: locked feedback (sound + toast). On click with the key: one count of the key is consumed from the bar, the door unlocks PERMANENTLY, and toggles open. Future clicks behave normally.
+1. ✅ `ItemData`: added `KEY` to the `Category` enum, plus `key_id: String` (per-data default; usually empty so per-placement override on `ItemInstance` carries the auto-generated lock id)
+2. ✅ `ItemInstance`: added `key_id: String` (per-instance override) and `get_key_id()` helper. Two keys with different ids never stack even when sharing an `ItemData`.
+3. ✅ `DoorInstance`: added `lock_id: String`, `unlocked: bool`, and `is_key_locked()`. The `unlocked` flag is sticky — once true, the door behaves like a normal interactable door.
+4. ✅ `KeyDoorSpawn.gd` Resource (biome-level pair entry): door_object, key_item, count_min/max, lock_id_prefix (auto-generates `<prefix>_<index>` ids when blank), door_must_gate_content (default TRUE), `key_spawn_locations` flag-set (Floor / Chest / Enemy Drop), `key_floor_placement`, all distance fields mirroring LinkedObjectSpawn
+5. ✅ `BiomeData.key_door_spawns: Array[KeyDoorSpawn]` — placed AFTER linked_objects
+6. ✅ `LevelGenerator._place_key_doors()` — for each pair: pick a corridor edge for the door, pick a key location per the spawn's flags (random with fallback when multiple are checked), validate via chain reachability v2. Failures roll back the door + the key (no orphan halves).
+7. ✅ Chain reachability v2: extends the iterative fixed-point to also COLLECT keys (floor + chest contents) and UNLOCK matching doors. Permits progressive gating across keys and levers; rejects cycles.
+8. ✅ `must_gate_content` enforcement: simulates "this door permanently closed" and rejects the placement if no chest, lever, key, or exit becomes unreachable. Captures the "lever counts as gated content" nuance.
+9. ✅ Enemy Drop: reserved (Phase 10). Flag exists; placement falls back to the next enabled location with a `push_warning` if Enemy Drop is the only one set.
+10. ✅ `Game._toggle_door`: key-locked branch consumes a matching key from the bar, sets `unlocked = true`, and falls through to the normal toggle. No matching key → locked-feedback path with the door's per-data message ("It's locked. You need the right key.").
+11. ✅ Localization: `object.door_forest_locked.{name,description,locked}`, `item.key_forest.{name,description}`
+12. ✅ Tests:
+    - Unit: `test_door_instance` extended (lock_id default, is_key_locked, sticky unlock); `test_item_data` extended (KEY enum, key_id default); `test_item_instance` extended (per-instance override, no-stacking with mismatched ids); new `test_key_door_spawn`
+    - Integration: locked doors get auto-generated lock_ids; floor keys 1-to-1 with locked doors; key chain-reachable before its door; chain v2 unlocks via collected keys; must_gate_content rejects useless locks; KEY_LOCATION_CHEST plants the key inside a chest
+13. ⏳ Manual asset work (developer): `res://assets/objects/door_forest_locked.tres` (same sprites as `door_forest.tres`, set `locked_sound` + `locked_message_key = "object.door_forest_locked.locked"`), `res://assets/items/key_forest.tres` (icon + dungeon sprite + `Category = KEY`), add a `KeyDoorSpawn` entry to `forest.tres`
 
 #### Task 3 — Traps
 - Spike trap (periodic up/down)

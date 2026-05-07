@@ -68,3 +68,45 @@ func test_remaining_capacity_is_zero_for_non_stackable() -> void:
 func test_remaining_capacity_is_zero_with_null_data() -> void:
 	var inst := ItemInstance.new()
 	assert_eq(inst.remaining_capacity(), 0)
+
+# -------------------------------------------------------
+# Key id (Phase 8 Task 2c) — per-instance override of data.key_id
+# so a single key .tres can serve auto-generated lock_ids across
+# multiple doors in the same biome.
+# -------------------------------------------------------
+
+func test_get_key_id_defaults_empty() -> void:
+	var inst := ItemInstance.create(_make_data(), 1)
+	assert_eq(inst.get_key_id(), "")
+
+func test_get_key_id_falls_back_to_data() -> void:
+	var data := _make_data()
+	data.key_id = "static_lock"
+	var inst := ItemInstance.create(data, 1)
+	assert_eq(inst.get_key_id(), "static_lock")
+
+func test_get_key_id_instance_override_beats_data() -> void:
+	var data := _make_data()
+	data.key_id = "data_lock"
+	var inst := ItemInstance.create(data, 1)
+	inst.key_id = "instance_lock"
+	assert_eq(inst.get_key_id(), "instance_lock")
+
+func test_keys_with_different_ids_do_not_stack() -> void:
+	# Two ItemInstances built from the same ItemData but with
+	# different per-placement key_ids unlock different doors —
+	# stacking them would lose information.
+	var data := _make_data()
+	var a := ItemInstance.create(data, 1)
+	a.key_id = "lock_0"
+	var b := ItemInstance.create(data, 1)
+	b.key_id = "lock_1"
+	assert_false(a.can_stack_with(b))
+
+func test_keys_with_same_id_stack() -> void:
+	var data := _make_data()
+	var a := ItemInstance.create(data, 1)
+	a.key_id = "lock_0"
+	var b := ItemInstance.create(data, 1)
+	b.key_id = "lock_0"
+	assert_true(a.can_stack_with(b))

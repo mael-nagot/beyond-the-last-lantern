@@ -16,5 +16,10 @@ object.door_forest.description,A weathered wooden door blocking the path.
 object.door_forest.locked,It won't budge. A lever must control it.
 object.lever_forest.name,Forest Lever
 object.lever_forest.description,A wooden lever — pulling it operates a linked door.
+object.door_forest_locked.name,Locked Forest Door
+object.door_forest_locked.description,A heavy door bound with iron — it needs a key.
+object.door_forest_locked.locked,It's locked. You need the right key.
+item.key_forest.name,Forest Key
+item.key_forest.description,An iron key found in the forest depths.
 ui.loot.title_chest,Chest
 ui.loot.take_all,Take All

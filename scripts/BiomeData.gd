@@ -68,6 +68,13 @@ extends Resource
 # pairs; the lever is guaranteed reachable from the entrance even
 # when its linked door is closed.
 @export var linked_objects: Array[LinkedObjectSpawn] = []
+# Key ↔ locked-door pairs (Phase 8 Task 2c). Placed AFTER linked
+# objects. Each entry produces count_min..count_max pairs; the key
+# is guaranteed reachable from the entrance WITHOUT crossing its own
+# door first. Chain reachability v2 also tracks key collection so
+# levers / keys / chests / exits behind locked doors are reachable
+# in a sequential order the player can actually walk.
+@export var key_door_spawns: Array[KeyDoorSpawn] = []
 
 @export_group("Sound")
 # One sound is picked at random per step (forward/back/strafe). Empty

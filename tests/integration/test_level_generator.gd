@@ -692,18 +692,49 @@ func test_linked_door_is_not_decorative() -> void:
 
 func _simulate_chain_reachable_from_entrance(gen: LevelGenerator) -> Dictionary:
 	# Independent reimplementation of the chain reachability the
-	# generator uses internally. Iterates: BFS with currently-open
-	# doors → mark new doors openable via reachable levers → repeat.
+	# generator uses internally (chain v2 — also tracks collected
+	# keys and unlocks matching doors). Iterates: BFS with currently-
+	# open doors → collect reachable keys → mark new doors openable
+	# (via reachable levers and via collected keys) → repeat.
 	var open_keys: Dictionary = {}
+	var collected_keys: Dictionary = {}
 	for door in gen.doors:
-		# Decorative (interactable) doors are openable from the start
-		# because the player can click them directly.
-		if door.data != null and door.data.interactable:
+		# Decorative (interactable) doors that aren't key-locked are
+		# openable from the start.
+		if door.data != null and door.data.interactable and not door.is_key_locked():
 			open_keys[DoorInstance.edge_key(door.cell_a, door.cell_b)] = true
 	var reachable: Dictionary = {}
 	while true:
 		reachable = _bfs_with_open_keys(gen, open_keys)
 		var progressed := false
+		# Collect floor + chest keys.
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				var cell: GridCell = gen.grid[x][y]
+				var pos := Vector2i(x, y)
+				if not cell.items.is_empty() and reachable.has(pos):
+					for item in cell.items:
+						if item == null:
+							continue
+						var kid: String = item.get_key_id()
+						if kid != "" and not collected_keys.has(kid):
+							collected_keys[kid] = true
+							progressed = true
+				if cell.object != null and cell.object.is_chest():
+					var has_neighbour := false
+					for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+						if reachable.has(pos + d):
+							has_neighbour = true
+							break
+					if has_neighbour:
+						for item in cell.object.items:
+							if item == null:
+								continue
+							var kid2: String = item.get_key_id()
+							if kid2 != "" and not collected_keys.has(kid2):
+								collected_keys[kid2] = true
+								progressed = true
+		# Pull reachable levers.
 		for x in range(gen.grid_width):
 			for y in range(gen.grid_height):
 				var cell: GridCell = gen.grid[x][y]
@@ -724,6 +755,16 @@ func _simulate_chain_reachable_from_entrance(gen: LevelGenerator) -> Dictionary:
 					if not open_keys.has(key):
 						open_keys[key] = true
 						progressed = true
+		# Unlock locked doors whose key is collected.
+		for door in gen.doors:
+			if door.lock_id == "":
+				continue
+			if not collected_keys.has(door.lock_id):
+				continue
+			var key2 := DoorInstance.edge_key(door.cell_a, door.cell_b)
+			if not open_keys.has(key2):
+				open_keys[key2] = true
+				progressed = true
 		if not progressed:
 			return reachable
 	return {}
@@ -791,3 +832,275 @@ func test_exit_remains_chain_reachable_with_linked_pairs() -> void:
 		var chain: Dictionary = _simulate_chain_reachable_from_entrance(gen)
 		assert_true(chain.has(gen.exit_pos),
 			"seed %d: exit %s not chain-reachable" % [s, gen.exit_pos])
+
+# -------------------------------------------------------
+# Key-locked doors (Phase 8 Task 2c)
+# -------------------------------------------------------
+
+func _make_key_item(key_id: String = "") -> ItemData:
+	var data := ItemData.new()
+	data.item_name = "test.key"
+	data.category = ItemData.Category.KEY
+	data.key_id = key_id
+	data.stackable = true
+	return data
+
+func _make_locked_door() -> ObjectData:
+	var data := ObjectData.new()
+	data.category = ObjectData.Category.DOOR
+	data.blocks_movement = true
+	data.interactable = false  # locked doors give feedback on bare click
+	data.name_key = "test.locked_door"
+	return data
+
+func _make_key_door_spawn(key_data: ItemData, door_data: ObjectData, count_min: int, count_max: int) -> KeyDoorSpawn:
+	var spawn := KeyDoorSpawn.new()
+	spawn.key_item = key_data
+	spawn.door_object = door_data
+	spawn.count_min = count_min
+	spawn.count_max = count_max
+	# Default to FLOOR location for these tests so they're
+	# deterministic; chest tests override explicitly.
+	spawn.key_spawn_locations = KeyDoorSpawn.KEY_LOCATION_FLOOR
+	spawn.key_floor_placement = ObjectSpawn.PLACEMENT_ANY
+	# Tests want pairs to actually land — disable the gate-content
+	# check unless a specific test asserts on it.
+	spawn.door_must_gate_content = false
+	return spawn
+
+func _all_locked_doors(gen: LevelGenerator) -> Array:
+	var result: Array = []
+	for door in gen.doors:
+		if door.lock_id != "":
+			result.append(door)
+	return result
+
+func _all_key_items_on_floor(gen: LevelGenerator) -> Array:
+	var result: Array = []
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			for item in gen.grid[x][y].items:
+				if item != null and item.get_key_id() != "":
+					result.append({"pos": Vector2i(x, y), "item": item})
+	return result
+
+func test_key_door_spawn_creates_locked_door_with_lock_id() -> void:
+	var biome := _make_biome()
+	biome.key_door_spawns = [_make_key_door_spawn(_make_key_item(), _make_locked_door(), 2, 2)]
+	var gen := _make_generator(biome)
+	var locked: Array = _all_locked_doors(gen)
+	# Generation is best-effort — assert at most count_max, but every
+	# placed locked door must have a non-empty lock_id.
+	assert_lte(locked.size(), 2)
+	for door in locked:
+		assert_ne(door.lock_id, "", "locked door must have non-empty lock_id")
+		assert_false(door.unlocked, "locked door starts locked")
+
+func test_each_locked_door_has_a_matching_floor_key() -> void:
+	var biome := _make_biome()
+	biome.key_door_spawns = [_make_key_door_spawn(_make_key_item(), _make_locked_door(), 2, 2)]
+	var gen := _make_generator(biome)
+	var locked: Array = _all_locked_doors(gen)
+	var floor_keys: Array = _all_key_items_on_floor(gen)
+	# Every placed locked door has exactly one floor-key pair.
+	assert_eq(floor_keys.size(), locked.size(),
+		"floor key count (%d) must match locked door count (%d)" %
+		[floor_keys.size(), locked.size()])
+	# Cross-check: each lock_id appears once among the floor keys.
+	for door in locked:
+		var matches := 0
+		for entry in floor_keys:
+			if (entry["item"] as ItemInstance).get_key_id() == door.lock_id:
+				matches += 1
+		assert_eq(matches, 1,
+			"lock_id %s must have exactly one matching floor key (found %d)" %
+			[door.lock_id, matches])
+
+func test_floor_key_is_chain_reachable_before_its_door() -> void:
+	# Key must be reachable from entrance WITHOUT crossing its
+	# corresponding locked door. Chain v2 takes care of this — but
+	# we verify by simulating reachability with the linked door
+	# permanently closed AND the key uncollected, and asserting the
+	# key cell is still reachable.
+	var biome := _make_biome()
+	biome.key_door_spawns = [_make_key_door_spawn(_make_key_item(), _make_locked_door(), 2, 2)]
+	var gen := _make_generator(biome)
+	for door in _all_locked_doors(gen):
+		# Find the key for this lock.
+		var key_pos: Vector2i = Vector2i(-1, -1)
+		for entry in _all_key_items_on_floor(gen):
+			if (entry["item"] as ItemInstance).get_key_id() == door.lock_id:
+				key_pos = entry["pos"]
+				break
+		assert_ne(key_pos, Vector2i(-1, -1), "key for %s not found" % door.lock_id)
+		# Hide this door's lock_id so the simulator doesn't unlock
+		# it via the matching key during the test.
+		var saved_lock := door.lock_id
+		door.lock_id = "__test_unreachable__"  # never collected
+		# Also clear the key from the items so the simulator can't
+		# auto-collect it. We'll just BFS without door open.
+		var saved_items: Array = gen.grid[key_pos.x][key_pos.y].items.duplicate()
+		gen.grid[key_pos.x][key_pos.y].items.clear()
+		var chain: Dictionary = _simulate_chain_reachable_from_entrance(gen)
+		# Restore.
+		door.lock_id = saved_lock
+		gen.grid[key_pos.x][key_pos.y].items = saved_items
+		assert_true(chain.has(key_pos),
+			"key for %s at %s is not reachable with the door closed" %
+			[saved_lock, key_pos])
+
+func test_chain_v2_unlocks_doors_via_collected_keys() -> void:
+	# After collecting the key, the door is openable, and the cells
+	# past the door should be in chain reachable.
+	var biome := _make_biome()
+	biome.key_door_spawns = [_make_key_door_spawn(_make_key_item(), _make_locked_door(), 1, 1)]
+	var gen := _make_generator(biome)
+	if gen.doors.is_empty():
+		return  # seed couldn't fit — skip
+	var chain: Dictionary = _simulate_chain_reachable_from_entrance(gen)
+	for door in _all_locked_doors(gen):
+		# Both sides of the door must end up reachable via the chain.
+		assert_true(chain.has(door.cell_a),
+			"door cell_a %s not in chain after key collection" % door.cell_a)
+		assert_true(chain.has(door.cell_b),
+			"door cell_b %s not in chain after key collection" % door.cell_b)
+
+func test_must_gate_content_rejects_useless_locks() -> void:
+	# With must_gate_content=true, every placed door must actually
+	# gate something (a chest, lever, key, or the exit).
+	var spawn := _make_key_door_spawn(_make_key_item(), _make_locked_door(), 3, 3)
+	spawn.door_must_gate_content = true
+	var biome := _make_biome()
+	# Add a chest pool so there's something interesting to gate.
+	biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
+	biome.key_door_spawns = [spawn]
+	var gen := _make_generator(biome)
+	# Defensive: every placed locked door must gate at least one
+	# content cell. We re-derive this by running chain with that one
+	# door closed and confirming SOMETHING content-bearing is missing.
+	for door in _all_locked_doors(gen):
+		var excluded_chain: Dictionary = _chain_with_excluded_door(gen, door)
+		var some_content_unreachable := false
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				var cell: GridCell = gen.grid[x][y]
+				var pos := Vector2i(x, y)
+				if cell.cell_type == GridCell.CellType.EXIT and not excluded_chain.has(pos):
+					some_content_unreachable = true
+					break
+				if cell.object != null and (cell.object.is_chest() or cell.object is LeverInstance):
+					var ok := false
+					for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+						if excluded_chain.has(pos + d):
+							ok = true
+							break
+					if not ok:
+						some_content_unreachable = true
+						break
+			if some_content_unreachable:
+				break
+		assert_true(some_content_unreachable,
+			"locked door %s—%s gates nothing — must_gate_content should have rejected it" %
+			[door.cell_a, door.cell_b])
+
+func _chain_with_excluded_door(gen: LevelGenerator, excluded_door: DoorInstance) -> Dictionary:
+	# Like _simulate_chain_reachable_from_entrance but treats one
+	# specific door as permanently closed regardless of locks/levers.
+	var excluded_key := DoorInstance.edge_key(excluded_door.cell_a, excluded_door.cell_b)
+	var open_keys: Dictionary = {}
+	var collected_keys: Dictionary = {}
+	for door in gen.doors:
+		var k0 := DoorInstance.edge_key(door.cell_a, door.cell_b)
+		if k0 == excluded_key:
+			continue
+		if door.data != null and door.data.interactable and not door.is_key_locked():
+			open_keys[k0] = true
+	var reachable: Dictionary = {}
+	while true:
+		reachable = _bfs_with_open_keys(gen, open_keys)
+		var progressed := false
+		# Keys
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				var cell: GridCell = gen.grid[x][y]
+				var pos := Vector2i(x, y)
+				if not cell.items.is_empty() and reachable.has(pos):
+					for item in cell.items:
+						if item != null and item.get_key_id() != "" and not collected_keys.has(item.get_key_id()):
+							collected_keys[item.get_key_id()] = true
+							progressed = true
+				if cell.object != null and cell.object.is_chest():
+					var has_neighbour := false
+					for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+						if reachable.has(pos + d):
+							has_neighbour = true
+							break
+					if has_neighbour:
+						for item in cell.object.items:
+							if item != null and item.get_key_id() != "" and not collected_keys.has(item.get_key_id()):
+								collected_keys[item.get_key_id()] = true
+								progressed = true
+		# Levers
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				var cell: GridCell = gen.grid[x][y]
+				if not (cell.object is LeverInstance):
+					continue
+				var pos := Vector2i(x, y)
+				var has_neighbour := false
+				for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+					if reachable.has(pos + d):
+						has_neighbour = true
+						break
+				if not has_neighbour:
+					continue
+				for door in (cell.object as LeverInstance).linked_doors:
+					if door == null:
+						continue
+					var key := DoorInstance.edge_key(door.cell_a, door.cell_b)
+					if key == excluded_key:
+						continue
+					if not open_keys.has(key):
+						open_keys[key] = true
+						progressed = true
+		# Locked doors via collected keys
+		for door in gen.doors:
+			if door.lock_id == "" or not collected_keys.has(door.lock_id):
+				continue
+			var key2 := DoorInstance.edge_key(door.cell_a, door.cell_b)
+			if key2 == excluded_key:
+				continue
+			if not open_keys.has(key2):
+				open_keys[key2] = true
+				progressed = true
+		if not progressed:
+			return reachable
+	return {}
+
+func test_chest_spawned_key_lands_inside_a_chest() -> void:
+	var spawn := _make_key_door_spawn(_make_key_item(), _make_locked_door(), 1, 1)
+	spawn.key_spawn_locations = KeyDoorSpawn.KEY_LOCATION_CHEST
+	var biome := _make_biome()
+	biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
+	biome.key_door_spawns = [spawn]
+	var gen := _make_generator(biome, 7777)
+	# If a locked door was placed, its key MUST be inside a chest
+	# (no floor keys allowed when only CHEST is enabled).
+	var floor_keys: Array = _all_key_items_on_floor(gen)
+	assert_eq(floor_keys.size(), 0, "no floor keys allowed when KEY_LOCATION_CHEST is the only flag")
+	for door in _all_locked_doors(gen):
+		var found := false
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				var cell: GridCell = gen.grid[x][y]
+				if cell.object == null or not cell.object.is_chest():
+					continue
+				for item in cell.object.items:
+					if item != null and item.get_key_id() == door.lock_id:
+						found = true
+						break
+				if found:
+					break
+			if found:
+				break
+		assert_true(found, "key for lock %s not found inside any chest" % door.lock_id)
