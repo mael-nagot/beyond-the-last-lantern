@@ -833,6 +833,69 @@ func test_exit_remains_chain_reachable_with_linked_pairs() -> void:
 		assert_true(chain.has(gen.exit_pos),
 			"seed %d: exit %s not chain-reachable" % [s, gen.exit_pos])
 
+func test_linked_must_gate_content_rejects_useless_locks() -> void:
+	# With door_must_gate_content=true on a LinkedObjectSpawn, every
+	# placed lever-locked door must actually gate something (a chest,
+	# lever, key, or the exit) — otherwise the lock is pointless.
+	# Mirrors the KeyDoorSpawn must_gate test: re-derive content
+	# reachability with each placed door permanently closed and
+	# assert SOMETHING content-bearing becomes unreachable.
+	var spawn := _make_linked_spawn(_make_lever_data(), _make_door(), 3, 3)
+	spawn.door_must_gate_content = true
+	var biome := _make_biome()
+	biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
+	biome.linked_objects = [spawn]
+	var gen := _make_generator(biome)
+	var linked_doors: Array = []
+	for door in gen.doors:
+		if not door.linked_levers.is_empty():
+			linked_doors.append(door)
+	for door in linked_doors:
+		var excluded_chain: Dictionary = _chain_with_excluded_door(gen, door)
+		var some_content_unreachable := false
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				var cell: GridCell = gen.grid[x][y]
+				var pos := Vector2i(x, y)
+				if cell.cell_type == GridCell.CellType.EXIT and not excluded_chain.has(pos):
+					some_content_unreachable = true
+					break
+				if cell.object != null and (cell.object.is_chest() or cell.object is LeverInstance):
+					var ok := false
+					for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+						if excluded_chain.has(pos + d):
+							ok = true
+							break
+					if not ok:
+						some_content_unreachable = true
+						break
+			if some_content_unreachable:
+				break
+		assert_true(some_content_unreachable,
+			"lever-locked door %s—%s gates nothing — must_gate_content should have rejected it" %
+			[door.cell_a, door.cell_b])
+
+func test_linked_pair_rollback_clears_lever_cell_when_must_gate_rejects() -> void:
+	# Internal-state guard: if must_gate_content rejects a placement,
+	# the rollback must clear the tentatively-placed lever cell along
+	# with the door. Otherwise we ship orphan levers wired to no
+	# door. We assert the invariant directly: every lever cell
+	# resolves to a door still in the doors list.
+	var spawn := _make_linked_spawn(_make_lever_data(), _make_door(), 3, 3)
+	spawn.door_must_gate_content = true
+	var biome := _make_biome()
+	biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
+	biome.linked_objects = [spawn]
+	for s in [111, 222, 333, 444, 555]:
+		var gen := _make_generator(biome, s)
+		for cell_pos in _all_lever_cells(gen):
+			var lever: LeverInstance = gen.grid[cell_pos.x][cell_pos.y].object
+			assert_eq(lever.linked_doors.size(), 1,
+				"seed %d: lever at %s should still link to 1 door after must-gate filtering" % [s, cell_pos])
+			var paired_door: DoorInstance = lever.linked_doors[0]
+			assert_true(gen.doors.has(paired_door),
+				"seed %d: lever at %s links to a door not in the doors list (rollback bug)" % [s, cell_pos])
+
 # -------------------------------------------------------
 # Key-locked doors (Phase 8 Task 2c)
 # -------------------------------------------------------
