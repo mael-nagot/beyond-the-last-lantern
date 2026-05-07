@@ -227,7 +227,9 @@ func _refresh_slot(index: int) -> void:
 		btn.texture_normal = null
 		label.text = ""
 		return
-	btn.texture_normal = inst.data.icon
+	# Per-instance hue-rotated icon when the placer baked one
+	# (KeyDoorSpawn pair >= 1); falls back to data.icon otherwise.
+	btn.texture_normal = inst.get_icon()
 	if inst.data.stackable and inst.stack_count > 1:
 		label.text = str(inst.stack_count)
 	else:

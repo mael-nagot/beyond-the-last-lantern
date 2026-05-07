@@ -1077,6 +1077,52 @@ func _chain_with_excluded_door(gen: LevelGenerator, excluded_door: DoorInstance)
 			return reachable
 	return {}
 
+func test_keys_are_hue_shifted_per_pair_index() -> void:
+	# Pair 0's key has hue_shift=0 and renders the original
+	# textures (get_icon falls through to data.icon). Pair >= 1
+	# gets a non-zero shift and a per-instance baked texture so
+	# the player can tell visually-identical keys apart.
+	var key_data := _make_key_item()
+	# Give the key a tiny icon so apply_hue_shift has something to
+	# bake. The integration test's _make_key_item leaves it null.
+	var img := Image.create(2, 2, false, Image.FORMAT_RGBA8)
+	img.fill(Color(1, 0.8, 0.2))
+	key_data.icon = ImageTexture.create_from_image(img)
+	var spawn := _make_key_door_spawn(key_data, _make_locked_door(), 3, 3)
+	var biome := _make_biome()
+	biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
+	biome.key_door_spawns = [spawn]
+	var gen := _make_generator(biome, 4242)
+	# Map lock_id -> ItemInstance by inspecting placed keys.
+	var keys_by_lock: Dictionary = {}
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			var cell: GridCell = gen.grid[x][y]
+			for item in cell.items:
+				if item != null and item.get_key_id() != "":
+					keys_by_lock[item.get_key_id()] = item
+			if cell.object != null and cell.object.is_chest():
+				for item in cell.object.items:
+					if item != null and item.get_key_id() != "":
+						keys_by_lock[item.get_key_id()] = item
+	# Pair 0 is "lock_0" (empty prefix → "lock", first counter = 0).
+	if keys_by_lock.has("lock_0"):
+		var k0: ItemInstance = keys_by_lock["lock_0"]
+		assert_eq(k0.hue_shift, 0.0,
+			"first pair's key must have hue_shift = 0")
+		assert_eq(k0.get_icon(), key_data.icon,
+			"pair 0 must fall through to the original icon")
+	# Any other placed pair must have non-zero shift AND a baked
+	# icon distinct from the original.
+	for lock_id in keys_by_lock.keys():
+		if lock_id == "lock_0":
+			continue
+		var k: ItemInstance = keys_by_lock[lock_id]
+		assert_ne(k.hue_shift, 0.0,
+			"pair %s should have non-zero hue_shift" % lock_id)
+		assert_ne(k.get_icon(), key_data.icon,
+			"pair %s should render a baked icon, not the original" % lock_id)
+
 func test_chests_hold_at_most_one_key_by_default() -> void:
 	# allow_multiple_keys_per_chest defaults to false. Even with 4
 	# locked-door pairs forced into chests, no chest should hold

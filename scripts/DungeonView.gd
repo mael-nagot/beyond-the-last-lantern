@@ -362,16 +362,21 @@ func _build_items() -> void:
 				var inst: ItemInstance = cell.items[i]
 				if inst == null or inst.data == null or inst.data.dungeon_sprite == null:
 					continue
-				var sprite := _make_item_sprite(inst.data)
+				var sprite := _make_item_sprite(inst)
 				var offset: Vector3 = ITEM_STACK_OFFSETS[i]
 				var sprite_y: float = inst.data.dungeon_sprite_world_height * 0.5 + inst.data.dungeon_sprite_y_offset
 				sprite.position = Vector3(cx + offset.x, sprite_y, cz + offset.z)
 				_items_root.add_child(sprite)
 
-func _make_item_sprite(data: ItemData) -> Sprite3D:
+func _make_item_sprite(inst: ItemInstance) -> Sprite3D:
+	var data: ItemData = inst.data
+	# Per-instance hue-rotated dungeon sprite when the placer baked
+	# one (KeyDoorSpawn pair >= 1); falls back to data.dungeon_sprite
+	# otherwise.
+	var tex: Texture2D = inst.get_dungeon_sprite()
 	var sprite := Sprite3D.new()
-	sprite.texture = data.dungeon_sprite
-	var tex_h: int = max(1, data.dungeon_sprite.get_height())
+	sprite.texture = tex
+	var tex_h: int = max(1, tex.get_height())
 	sprite.pixel_size = data.dungeon_sprite_world_height / float(tex_h)
 	sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST

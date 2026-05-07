@@ -154,7 +154,9 @@ func _make_slot(inst: ItemInstance, slot_size: float, slot_index: int) -> Panel:
 	var btn := TextureButton.new()
 	btn.ignore_texture_size = true
 	btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
-	btn.texture_normal = inst.data.icon
+	# Per-instance hue-rotated icon (KeyDoorSpawn pair >= 1); falls
+	# back to data.icon when no shift was applied.
+	btn.texture_normal = inst.get_icon()
 	btn.mouse_filter = Control.MOUSE_FILTER_STOP
 	btn.pressed.connect(_on_slot_pressed.bind(slot_index))
 	slot.add_child(btn)

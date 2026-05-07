@@ -110,3 +110,63 @@ func test_keys_with_same_id_stack() -> void:
 	var b := ItemInstance.create(data, 1)
 	b.key_id = "lock_0"
 	assert_true(a.can_stack_with(b))
+
+# -------------------------------------------------------
+# Hue shift (Phase 8 Task 2c follow-up) — per-instance hue
+# rotation baked into a recoloured icon + dungeon sprite, so
+# visually-identical keys for different locks render in different
+# colours. Replaces the earlier multiplicative-tint approach (which
+# only produced brightness variations on strongly-coloured base
+# sprites like a yellow key).
+# -------------------------------------------------------
+
+func test_hue_shift_defaults_zero() -> void:
+	var inst := ItemInstance.create(_make_data(), 1)
+	assert_eq(inst.hue_shift, 0.0)
+
+func test_get_icon_falls_back_to_data_when_no_shift() -> void:
+	var data := _make_data()
+	# Create a tiny test icon so get_icon returns something non-null.
+	var img := Image.create(2, 2, false, Image.FORMAT_RGBA8)
+	img.fill(Color(1, 0.8, 0.2))
+	data.icon = ImageTexture.create_from_image(img)
+	var inst := ItemInstance.create(data, 1)
+	assert_eq(inst.get_icon(), data.icon,
+		"with no hue shift applied, get_icon must return the data's icon")
+
+func test_get_dungeon_sprite_falls_back_to_data_when_no_shift() -> void:
+	var data := _make_data()
+	var img := Image.create(2, 2, false, Image.FORMAT_RGBA8)
+	img.fill(Color(1, 0.8, 0.2))
+	data.dungeon_sprite = ImageTexture.create_from_image(img)
+	var inst := ItemInstance.create(data, 1)
+	assert_eq(inst.get_dungeon_sprite(), data.dungeon_sprite)
+
+func test_apply_hue_shift_zero_clears_cached_textures() -> void:
+	var data := _make_data()
+	var img := Image.create(2, 2, false, Image.FORMAT_RGBA8)
+	img.fill(Color(1, 0.8, 0.2))
+	data.icon = ImageTexture.create_from_image(img)
+	var inst := ItemInstance.create(data, 1)
+	inst.apply_hue_shift(0.5)
+	assert_ne(inst.get_icon(), data.icon, "non-zero shift should bake a new icon")
+	inst.apply_hue_shift(0.0)
+	assert_eq(inst.get_icon(), data.icon,
+		"shift back to 0.0 should fall through to the original icon")
+
+func test_apply_hue_shift_actually_rotates_pixel_hues() -> void:
+	# Bake a 1×1 yellow texture and rotate by 0.5 (180°) — should
+	# produce blue.
+	var data := _make_data()
+	var img := Image.create(1, 1, false, Image.FORMAT_RGBA8)
+	img.set_pixel(0, 0, Color(1, 1, 0))  # pure yellow, hue ~0.166
+	data.icon = ImageTexture.create_from_image(img)
+	var inst := ItemInstance.create(data, 1)
+	inst.apply_hue_shift(0.5)
+	var baked: Texture2D = inst.get_icon()
+	var baked_img: Image = baked.get_image()
+	var pixel: Color = baked_img.get_pixel(0, 0)
+	# Rotated yellow by 0.5 should be in the blue/violet range —
+	# hue near 0.666. Allow some float slop.
+	assert_almost_eq(pixel.h, 0.666, 0.05,
+		"yellow rotated by 0.5 should land near blue (hue ~0.666)")
