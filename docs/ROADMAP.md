@@ -61,6 +61,16 @@
 - Forest biome created with hand-drawn textures
 - Biome loaded and applied at level generation time
 
+#### Phase 4 polish — Per-placement texture selection
+Today's wall / floor / ceiling textures are picked uniformly across the whole grid. Designers should be able to author textures that ONLY appear in specific cell types — e.g. a moss-covered "dead-end wall", a vaulted "room ceiling", a worn-cobble "corridor floor". This makes the level read better and gives biomes a stronger sense of place.
+Sketch:
+- New `BiomeTextureEntry.gd` resource wrapping a single (albedo + normal) pair plus a placement flag-set (Corridor / Room / Dead End — same constants `LootEntry` and `ObjectSpawn` already use). Default: any.
+- `BiomeData` swaps `wall_albedo` / `wall_normal` (and floor / ceiling pairs) for `wall_textures: Array[BiomeTextureEntry]` etc. Keep backwards-compat: if the legacy flat arrays are non-empty, treat each texture as `placement = ANY`.
+- `DungeonView` (or a new helper) classifies each cell on biome apply (corridor / room / dead-end) using the same logic as `_classify_floor_cells`, then picks each surface's texture from the eligible pool. Cells with no matching texture fall back to the ANY pool (defensive).
+- Walls inherit their cell's classification from the cell they're attached to. (A wall between a corridor cell and a room cell counts as corridor for the corridor-side face, room for the room-side face — though in practice we render walls per-cell.)
+- Ceilings follow the same per-cell classification.
+- Tests: a small unit / integration test that classifies a known maze and asserts each surface's texture pool was filtered correctly.
+
 ### Phase 5 — UI / HUD ✅
 
 - Full responsive HUD adapting to portrait and landscape
@@ -287,6 +297,14 @@ A door tagged with a `lock_id` requires a matching key item (`ItemData` with `ke
 - Paintings, torches, lanterns
 - Sprite3D pinned to a wall face rather than floor
 - No interaction; pure ambiance
+
+#### Task 4b — Wall-mounted chests
+Lootable chests embedded in the wall instead of standing on the floor — e.g. a forest tree with a hollow that holds loot. Same chest contract as Task 1 (rolls loot on first interact, persists items, opens `LootPopup`); just placed and rendered against a wall face instead of on a `GridCell`.
+- Reuses Task 4's wall-anchoring renderer (Sprite3D pinned to a wall face rather than floor) and Task 1's `ObjectInstance` chest semantics
+- New placement path: pick a wall face adjacent to a 1-wide-corridor / room cell, anchor sprite to that face
+- A wall-chest cell is **not** blocked for movement (the wall already blocks the player); the click hitbox lives on the wall face
+- Per-biome opt-in via a new `BiomeData.wall_object_spawns` shape (or extends `objects` with a placement-axis flag — TBD when we get there)
+- Texture pair: closed (e.g. tree with intact trunk) + opened (tree with visible hollow + items spilling out)
 
 #### Task 5 — Campfires
 - Rest point (heal HP/MP, save?)
