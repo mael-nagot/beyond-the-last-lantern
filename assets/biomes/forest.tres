@@ -46,12 +46,11 @@ metadata/_custom_type_script = "uid://duxnh0exbhpst"
 script = ExtResource("7_fvx5y")
 lever_object = ExtResource("9_w7wxy")
 door_object = ExtResource("13_bq1p8")
-count_min = 3
-count_max = 3
-lever_min_distance_to_other_object = 3
+levers_per_cluster = 3
+lever_min_distance_to_other_object = 5
 door_min_distance_to_other_object = 4
-lever_to_door_min_distance = 2
-lever_to_door_max_distance = 5
+lever_to_door_min_distance = 5
+lever_to_door_max_distance = 8
 door_must_gate_content = true
 metadata/_custom_type_script = "uid://c716yxx8rccyt"
 
