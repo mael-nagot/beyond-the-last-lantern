@@ -637,7 +637,10 @@ func _try_place_linked_cluster(spawn: LinkedObjectSpawn) -> void:
 	# Bounded outer attempts — fresh shuffles let us recover from a
 	# door combo that lever placement / must_gate rejected, or from
 	# an unlucky shuffle that happened to put adjacent edges first.
-	var max_attempts: int = 30
+	# 8 is enough to find a working layout in practice (most clusters
+	# commit on attempt 1); larger values just burn time on hostile
+	# configs that won't ever satisfy the constraints.
+	var max_attempts: int = 8
 	var attempt: int = 0
 	while attempt < max_attempts:
 		attempt += 1
@@ -706,6 +709,31 @@ func _try_place_linked_cluster(spawn: LinkedObjectSpawn) -> void:
 	push_warning("LevelGenerator: could not place linked cluster after %d attempts (lever='%s', door='%s', %d×%d)" %
 		[max_attempts, _obj_label(spawn.lever_object), _obj_label(spawn.door_object), levers_per, doors_per])
 
+func _all_object_positions() -> Array:
+	# Snapshot of every cell currently holding an object. Used by
+	# `_eligible_lever_cells` so the per-candidate distance check
+	# (`_too_close_to_object_set`) iterates a small Array instead of
+	# walking the full W*H grid per candidate. Cluster sibling
+	# placement is the hot path — without this snapshot the
+	# placement loop becomes quadratic in grid size.
+	var positions: Array = []
+	for x in range(grid_width):
+		for y in range(grid_height):
+			if grid[x][y].object != null:
+				positions.append(Vector2i(x, y))
+	return positions
+
+func _too_close_to_object_set(pos: Vector2i, positions: Array, min_distance: int) -> bool:
+	# Manhattan-distance "any of `positions` within min_distance" check.
+	# Linear in `positions.size()`, vs. `_too_close_to_existing_object`
+	# which walks the whole grid.
+	if min_distance <= 0:
+		return false
+	for op: Vector2i in positions:
+		if absi(pos.x - op.x) + absi(pos.y - op.y) < min_distance:
+			return true
+	return false
+
 func _try_place_levers_for_cluster(spawn: LinkedObjectSpawn, doors_in_cluster: Array, pre_chain: Dictionary, levers_per: int) -> Array:
 	# Place `levers_per` lever cells, rebuilding the eligibility pool
 	# between each pick so `_too_close_to_existing_object` (which
@@ -724,6 +752,11 @@ func _try_place_levers_for_cluster(spawn: LinkedObjectSpawn, doors_in_cluster: A
 	# satisfiable but not strictly required by the eligibility filter.
 	# Without farthest-first, the algorithm degrades min_distance
 	# eagerly until even diagonally-adjacent siblings pass.
+	#
+	# Performance: classification is hoisted out of the per-pick
+	# loop because cells_by_type is invariant for this cluster's
+	# placement (cell types don't change as we shuffle objects).
+	var cells_by_type: Dictionary = _classify_floor_cells()
 	var distance: int = max(0, spawn.lever_min_distance_to_other_object)
 	while distance >= 0:
 		# Many random attempts at THIS distance before degrading —
@@ -739,7 +772,7 @@ func _try_place_levers_for_cluster(spawn: LinkedObjectSpawn, doors_in_cluster: A
 			var lever_cells: Array = []
 			var combo_succeeded := true
 			for i in range(levers_per):
-				var pool: Array = _eligible_lever_cells(spawn, doors_in_cluster, distance)
+				var pool: Array = _eligible_lever_cells(spawn, doors_in_cluster, distance, cells_by_type)
 				if pool.is_empty():
 					combo_succeeded = false
 					break
@@ -803,16 +836,16 @@ func _pick_farthest_from(pool: Array, existing: Array) -> Vector2i:
 			best = candidate
 	return best
 
-func _eligible_lever_cells(spawn: LinkedObjectSpawn, doors_in_cluster: Array, min_distance: int) -> Array:
-	# Build the lever-eligibility pool fresh — re-classifies cells
-	# (cheap), excludes anything already occupied, applies the
-	# placement-flag and lever-to-cluster-range filters, and degrades
-	# `min_distance` to other objects per the caller. Called once per
-	# lever within a cluster so the previous cluster siblings (now on
-	# the grid as `cell.object = lever`) are honoured by the
-	# `_too_close_to_existing_object` distance check.
-	var cells_by_type: Dictionary = _classify_floor_cells()
+func _eligible_lever_cells(spawn: LinkedObjectSpawn, doors_in_cluster: Array, min_distance: int, cells_by_type: Dictionary) -> Array:
+	# Build the lever-eligibility pool — excludes occupied cells,
+	# applies placement-flag and lever-to-cluster-range filters,
+	# and the spacing constraint against other objects. `cells_by_type`
+	# is passed in (invariant for the cluster's placement) so we
+	# don't re-classify per call. The object snapshot is built
+	# fresh so previously-placed cluster siblings appear in the
+	# spacing check.
 	var pool: Array = []
+	var object_positions: Array = _all_object_positions() if min_distance > 0 else []
 	for placement_bit in [ObjectSpawn.PLACEMENT_CORRIDOR, ObjectSpawn.PLACEMENT_ROOM, ObjectSpawn.PLACEMENT_DEAD_END]:
 		if (spawn.lever_placement & placement_bit) == 0:
 			continue
@@ -825,7 +858,7 @@ func _eligible_lever_cells(spawn: LinkedObjectSpawn, doors_in_cluster: Array, mi
 				continue
 			if not _within_lever_to_cluster_range(pos, doors_in_cluster, spawn):
 				continue
-			if min_distance > 0 and _too_close_to_existing_object(pos, min_distance):
+			if min_distance > 0 and _too_close_to_object_set(pos, object_positions, min_distance):
 				continue
 			pool.append(pos)
 	return pool
