@@ -35,3 +35,10 @@ func test_default_field_values() -> void:
 	assert_null(data.use_sound)
 	assert_eq(data.buy_price, 0)
 	assert_eq(data.sell_price, 0)
+	assert_eq(data.key_id, "", "key_id default must be empty (non-key items)")
+
+func test_key_category_exists_in_enum() -> void:
+	# Phase 8 Task 2c added KEY to the category enum.
+	var data := ItemData.new()
+	data.category = ItemData.Category.KEY
+	assert_eq(data.category, ItemData.Category.KEY)

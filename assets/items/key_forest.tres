@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="ItemData" format=3 uid="uid://dycnhx5qmylkc"]
+
+[ext_resource type="Texture2D" uid="uid://baf7c55t4u752" path="res://assets/textures/items/sprites/key01.png" id="1_4yk7y"]
+[ext_resource type="AudioStream" uid="uid://dqgugf64oslqd" path="res://assets/sounds/items/key_pickup_drop1.ogg" id="1_7q6jw"]
+[ext_resource type="Script" uid="uid://c8e2tmtuuuypx" path="res://scripts/ItemData.gd" id="1_m0byw"]
+[ext_resource type="Texture2D" uid="uid://c0jkgqef1e0y8" path="res://assets/textures/items/icons/key01.png" id="2_mpp5v"]
+[ext_resource type="AudioStream" uid="uid://b2pffaci0ywag" path="res://assets/sounds/items/key_use1.ogg" id="3_okp4i"]
+
+[resource]
+script = ExtResource("1_m0byw")
+item_name = "item.key_forest.name"
+description = "item.key_forest.description"
+category = 4
+icon = ExtResource("2_mpp5v")
+dungeon_sprite = ExtResource("1_4yk7y")
+dungeon_sprite_world_height = 0.8
+pickup_drop_sound = ExtResource("1_7q6jw")
+use_sound = ExtResource("3_okp4i")
+metadata/_custom_type_script = "uid://c8e2tmtuuuypx"

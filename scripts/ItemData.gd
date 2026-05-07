@@ -6,6 +6,7 @@ enum Category {
 	EQUIPMENT,
 	THROWABLE,
 	QUEST,
+	KEY,
 }
 
 enum EffectType {
@@ -49,6 +50,16 @@ enum EffectType {
 @export_group("Economy")
 @export var buy_price: int = 0
 @export var sell_price: int = 0
+
+@export_group("Lock")
+# Non-empty marks this item as a KEY that unlocks any DoorInstance
+# whose `lock_id` equals this string. Empty for non-key items.
+# LevelGenerator's KeyDoorSpawn placement picks / generates the
+# matching id at biome generation time, so designers usually leave
+# this blank on the .tres and let the spawn fill it in. Kept as a
+# .tres field too so static keys (handcrafted levels later) can hard-
+# code the id.
+@export var key_id: String = ""
 
 func get_display_name() -> String:
 	return tr(item_name)

@@ -23,6 +23,18 @@ var cell_b: Vector2i
 # 2b ships at most 1 entry; richer pairing extends naturally.
 var linked_levers: Array = []  # Array[LeverInstance] — untyped to avoid cyclic typed-array trouble
 
+# Phase 8 Task 2c — key-locked doors. Non-empty `lock_id` means the
+# door requires an `ItemInstance` whose `get_key_id()` matches before
+# it can be opened from a direct click. `unlocked` flips true the
+# first time the player applies the key and stays true forever
+# ("once unlocked, never re-locks"); subsequent clicks behave like
+# a normal toggle. Set by LevelGenerator at placement time — for
+# 2c, KeyDoorSpawn auto-generates per-pair lock_ids unless the
+# spawn's lock_id_prefix is set, in which case ids share that
+# prefix so one key can open many doors.
+var lock_id: String = ""
+var unlocked: bool = false
+
 static func canonical_pair(a: Vector2i, b: Vector2i) -> Array:
 	if a.x < b.x or (a.x == b.x and a.y < b.y):
 		return [a, b]
@@ -56,3 +68,9 @@ func is_edge_blocked() -> bool:
 
 func is_door() -> bool:
 	return true
+
+# True when the door currently demands a key. Once `unlocked` flips
+# true, this returns false even if `lock_id` is still set — the
+# unlock is sticky.
+func is_key_locked() -> bool:
+	return lock_id != "" and not unlocked

@@ -10,10 +10,13 @@
 [ext_resource type="Texture2D" uid="uid://eaqrrmrm74gy" path="res://assets/textures/biomes/forest/walls/forest_wall_01_albedo.jpg" id="7_bq1p8"]
 [ext_resource type="Script" uid="uid://c716yxx8rccyt" path="res://scripts/LinkedObjectSpawn.gd" id="7_fvx5y"]
 [ext_resource type="AudioStream" uid="uid://demirrr5g78xj" path="res://assets/sounds/biomes/forest/move/step_01.ogg" id="7_sstbg"]
+[ext_resource type="Script" uid="uid://duxnh0exbhpst" path="res://scripts/KeyDoorSpawn.gd" id="7_w7wxy"]
 [ext_resource type="AudioStream" uid="uid://ci0f4ivs6tis6" path="res://assets/sounds/biomes/forest/move/step_02.ogg" id="8_0wobd"]
+[ext_resource type="Resource" uid="uid://ddnj3qteby4ip" path="res://assets/objects/door_forest_locked.tres" id="8_qtcl7"]
 [ext_resource type="Texture2D" uid="uid://cipdynsyi30nw" path="res://assets/textures/biomes/forest/walls/forest_wall_01_normal.png" id="9_fvx5y"]
 [ext_resource type="AudioStream" uid="uid://bavnebmwmtudp" path="res://assets/sounds/biomes/forest/move/step_03.ogg" id="9_nhtug"]
 [ext_resource type="Resource" uid="uid://cqso31osmprq3" path="res://assets/objects/lever_forest.tres" id="9_w7wxy"]
+[ext_resource type="Resource" uid="uid://dycnhx5qmylkc" path="res://assets/items/key_forest.tres" id="9_xwfpp"]
 [ext_resource type="Script" uid="uid://q2yc7peloed8" path="res://scripts/ObjectSpawn.gd" id="10_nhtug"]
 [ext_resource type="Resource" uid="uid://d01cmd6cq5v2o" path="res://assets/objects/chest_wooden.tres" id="11_00k5e"]
 [ext_resource type="Resource" uid="uid://mtigjawa2y3e" path="res://assets/loot_tables/forest_chest_1.tres" id="11_bq1p8"]
@@ -25,16 +28,30 @@ item = ExtResource("5_plw3j")
 min_distance_to_other_item = 5
 metadata/_custom_type_script = "uid://dwvpkpfjm8dyn"
 
+[sub_resource type="Resource" id="Resource_evnw4"]
+script = ExtResource("7_w7wxy")
+door_object = ExtResource("8_qtcl7")
+key_item = ExtResource("9_xwfpp")
+count_min = 3
+count_max = 3
+key_spawn_locations = 2
+key_min_distance_to_other_object = 4
+door_min_distance_to_other_object = 4
+key_to_door_min_distance = 3
+key_to_door_max_distance = 6
+metadata/_custom_type_script = "uid://duxnh0exbhpst"
+
 [sub_resource type="Resource" id="Resource_ivfat"]
 script = ExtResource("7_fvx5y")
 lever_object = ExtResource("9_w7wxy")
 door_object = ExtResource("13_bq1p8")
-count_min = 4
-count_max = 4
+count_min = 0
+count_max = 0
 lever_min_distance_to_other_object = 3
 door_min_distance_to_other_object = 4
 lever_to_door_min_distance = 2
 lever_to_door_max_distance = 5
+door_must_gate_content = true
 metadata/_custom_type_script = "uid://c716yxx8rccyt"
 
 [sub_resource type="Resource" id="Resource_bq1p8"]
@@ -72,4 +89,5 @@ floor_items_min = 8
 floor_items_max = 12
 objects = Array[ExtResource("10_nhtug")]([SubResource("Resource_bq1p8"), SubResource("Resource_5n6tb")])
 linked_objects = Array[ExtResource("7_fvx5y")]([SubResource("Resource_ivfat")])
+key_door_spawns = Array[ExtResource("7_w7wxy")]([SubResource("Resource_evnw4")])
 move_sounds = Array[AudioStream]([ExtResource("7_sstbg"), ExtResource("8_0wobd"), ExtResource("9_nhtug")])

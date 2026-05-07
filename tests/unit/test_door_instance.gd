@@ -111,3 +111,28 @@ func test_door_is_chest_returns_false() -> void:
 func test_door_is_door_returns_true() -> void:
 	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
 	assert_true(inst.is_door())
+
+# -------------------------------------------------------
+# Key locks (Phase 8 Task 2c)
+# -------------------------------------------------------
+
+func test_door_defaults_unlocked_when_no_lock_id() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	assert_eq(inst.lock_id, "")
+	assert_false(inst.unlocked)
+	assert_false(inst.is_key_locked())
+
+func test_door_with_lock_id_is_key_locked_until_unlocked() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	inst.lock_id = "copper_0"
+	assert_true(inst.is_key_locked())
+
+func test_unlock_is_sticky() -> void:
+	# Once unlocked, never re-locks. is_key_locked() returns false
+	# even though lock_id is still set — that's by design (we keep
+	# the id around for save-load and future "lock state" UI).
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	inst.lock_id = "copper_0"
+	inst.unlocked = true
+	assert_false(inst.is_key_locked())
+	assert_eq(inst.lock_id, "copper_0", "lock_id must persist post-unlock")

@@ -34,6 +34,9 @@
 - Room placement with overlap prevention
 - Room-to-maze connection system
 
+#### Phase 1 polish — Connectorless room islands
+`_validate_path` only verifies entrance→exit reachability, not that EVERY floor cell is reachable. The Growing Tree + room-connection step occasionally produces a small floor area (typically a tiny detached room) that the entrance can't reach — visible as an unreachable square on the F3-revealed map. Existing object placement explicitly tolerates these "pre-existing isolated regions" (see comments in `_try_place_object`), but they're a level-generation polish gap. Two possible fixes: (a) in `_validate_path`, BFS every floor cell and regenerate if any are unreachable; (b) in `_connect_regions`, also connect orphan floor pockets back to the maze. Option (b) keeps more of the level intact; (a) is a brute-force safety net. Either qualifies.
+
 ### Phase 2 — 3D Dungeon View ✅
 
 - Flat quad rendering (walls, floors, ceilings) instead of box meshes
@@ -78,6 +81,9 @@
 - Player shown as blinking red directional arrow
 - Debug full reveal toggle
 - Map updates on every player movement
+
+#### Phase 6 polish — Map should pause input
+While the map popup is open, WASD / Q-E / movement-pad presses still drive the player forward, which is disorienting because the map is meant to be a planning view. Fix: gate `Game._input` and the movement-pad signals on `_hud.map_popup.is_open()` (already exists). Also gate the F-pickup hotkey and F1/F2/F3 debug keys for consistency. Re-enable on map close.
 
 ---
 
@@ -213,16 +219,48 @@ The renderer-level meaning of `ObjectData.interactable` shifted: instead of "ski
 3. ✅ Every Game.gd click dispatch (chest / door / lever) short-circuits to `_play_locked_feedback` when `instance.data.interactable` is false
 4. ✅ Localization: `object.door_forest.locked`
 
+#### Task 2c follow-up — Per-pair key tint (visual differentiation)
+Multiple key-locked pairs in the same biome share the same `key_*.tres`, so all keys look identical even though they unlock different doors. The player can't tell at a glance why one key won't fit a given lock. Fix: auto-tint keys by global pair index, keeping pair 0 untinted (original art) and applying a slight HSV hue shift on subsequent pairs.
+
+Sketch:
+- `ItemInstance.tint: Color = Color.WHITE` (per-instance override; default = identity multiplier)
+- `LevelGenerator._tint_for_pair_index(i: int) -> Color`: returns `Color.WHITE` for `i == 0`, otherwise `Color.from_hsv(fmod(i * 0.618, 1.0), 0.3, 1.0)` — golden-ratio hue rotation, low saturation so it reads as a "tint" not a recolor.
+- `_try_place_key_door_pair` accepts the index (counter), passes it to the key placement, which sets `key_inst.tint`.
+- Three renderer touch-ups (all just `modulate = inst.tint`):
+  - `ItemBar._refresh_slot` on the `TextureButton`
+  - `DungeonView._make_item_sprite` on the `Sprite3D`
+  - `LootPopup` on its slot icons
+- Tests: extend `test_item_instance` for the default + extend integration tests to confirm pair index 0 keeps `Color.WHITE` and pair index ≥ 1 has a non-WHITE tint.
+
+#### Task 2b follow-up — Enforce `door_must_gate_content` on LinkedObjectSpawn
+The flag exists on `LinkedObjectSpawn` (since 2a) but is RESERVED — placement of lever-locked doors does NOT reject useless gates. Only `KeyDoorSpawn` enforces the rule today. Easy extension: call the existing `_door_gates_content(door)` after `_try_place_lever_for_door` succeeds, roll back the pair (lever + door) if it returns false. Same chain v2 simulation, same content set (chest, lever, key, exit). One inspector field stops being a no-op.
+
 #### Task 2b follow-up — Richer lever ↔ door pairing
 1. Allow one lever to toggle multiple doors (lever's `linked_doors` already an Array)
 2. Allow one door to be toggled by multiple levers (door's `linked_levers` already an Array; lever sprite already uses "any door open" — confirm or revisit semantics for many-to-many)
 3. Decide AND/OR semantics if needed (e.g. door opens only when ALL levers pulled vs. ANY lever pulled). Today the model is "each pull flips each linked door", which is consistent for 1:1 and degrades reasonably for many.
 4. Update `LinkedObjectSpawn` shape to express N:M pairing rules (probably `lever_count_per_pair`, `door_count_per_pair`, or a more declarative pairing graph)
 
-#### Task 2c — Locked doors + gating placement
-1. `ObjectSpawn.must_gate_content` placement check: closing this door (alone, others treated as open) must cut off at least one chest cell or the exit
-2. Once-only locks (key / lever / quest trigger) — once unlocked, never re-locks
-3. Atmospheric pre-opened doors via `ObjectSpawn.starts_open`
+#### Task 2c — Locked doors + gating placement ✅ (code; awaits manual asset/biome wiring)
+A door tagged with a `lock_id` requires a matching key item (`ItemData` with `key_id == lock_id`). On click without the key: locked feedback (sound + toast). On click with the key: one count of the key is consumed from the bar, the door unlocks PERMANENTLY, and toggles open. Future clicks behave normally.
+1. ✅ `ItemData`: added `KEY` to the `Category` enum, plus `key_id: String` (per-data default; usually empty so per-placement override on `ItemInstance` carries the auto-generated lock id)
+2. ✅ `ItemInstance`: added `key_id: String` (per-instance override) and `get_key_id()` helper. Two keys with different ids never stack even when sharing an `ItemData`.
+3. ✅ `DoorInstance`: added `lock_id: String`, `unlocked: bool`, and `is_key_locked()`. The `unlocked` flag is sticky — once true, the door behaves like a normal interactable door.
+4. ✅ `KeyDoorSpawn.gd` Resource (biome-level pair entry): door_object, key_item, count_min/max, lock_id_prefix (auto-generates `<prefix>_<index>` ids when blank), door_must_gate_content (default TRUE), `key_spawn_locations` flag-set (Floor / Chest / Enemy Drop), `key_floor_placement`, all distance fields mirroring LinkedObjectSpawn
+5. ✅ `BiomeData.key_door_spawns: Array[KeyDoorSpawn]` — placed AFTER linked_objects
+6. ✅ `LevelGenerator._place_key_doors()` — for each pair: pick a corridor edge for the door, pick a key location per the spawn's flags (random with fallback when multiple are checked), validate via chain reachability v2. Failures roll back the door + the key (no orphan halves).
+7. ✅ Chain reachability v2: extends the iterative fixed-point to also COLLECT keys (floor + chest contents) and UNLOCK matching doors. Permits progressive gating across keys and levers; rejects cycles.
+8. ✅ `must_gate_content` enforcement: simulates "this door permanently closed" and rejects the placement if no chest, lever, key, or exit becomes unreachable. Captures the "lever counts as gated content" nuance.
+9. ✅ Enemy Drop: reserved (Phase 10). Flag exists; placement falls back to the next enabled location with a `push_warning` if Enemy Drop is the only one set.
+10. ✅ `Game._toggle_door`: key-locked branch consumes a matching key from the bar, sets `unlocked = true`, and falls through to the normal toggle. No matching key → locked-feedback path with the door's per-data message ("It's locked. You need the right key.").
+11. ✅ Localization: `object.door_forest_locked.{name,description,locked}`, `item.key_forest.{name,description}`
+12. ✅ Tests:
+    - Unit: `test_door_instance` extended (lock_id default, is_key_locked, sticky unlock); `test_item_data` extended (KEY enum, key_id default); `test_item_instance` extended (per-instance override, no-stacking with mismatched ids); new `test_key_door_spawn`
+    - Integration: locked doors get auto-generated lock_ids; floor keys 1-to-1 with locked doors; key chain-reachable before its door; chain v2 unlocks via collected keys; must_gate_content rejects useless locks; KEY_LOCATION_CHEST plants the key inside a chest
+13. ✅ Manual asset work (developer): `res://assets/objects/door_forest_locked.tres`, `res://assets/items/key_forest.tres` + textures + sounds, `KeyDoorSpawn` entry in `forest.tres`
+14. ✅ Polish — weighted location lottery + no-duplicate-keys-per-chest:
+    - `KeyDoorSpawn.floor_weight` / `chest_weight` / `enemy_drop_weight` (default 1 each = even). The per-pair location is picked weighted-random; setting `chest_weight = 3` biases pairs toward chest spawns, etc.
+    - `KeyDoorSpawn.allow_multiple_keys_per_chest: bool = false` — skips chests already holding any key when placing a new one, so keys spread across multiple chests instead of stacking.
 
 #### Task 3 — Traps
 - Spike trap (periodic up/down)

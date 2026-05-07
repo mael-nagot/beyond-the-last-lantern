@@ -19,6 +19,7 @@ var floor_items_min: int = 3
 var floor_items_max: int = 8
 var objects_pool: Array[ObjectSpawn] = []
 var linked_objects_pool: Array[LinkedObjectSpawn] = []
+var key_door_spawns_pool: Array[KeyDoorSpawn] = []
 
 var grid: Array = []
 var entrance_pos: Vector2i = Vector2i.ZERO
@@ -53,6 +54,7 @@ func configure(biome: BiomeData) -> void:
 	floor_items_max = biome.floor_items_max
 	objects_pool = biome.objects
 	linked_objects_pool = biome.linked_objects
+	key_door_spawns_pool = biome.key_door_spawns
 
 func generate() -> void:
 	_fill_with_walls()
@@ -70,6 +72,7 @@ func generate() -> void:
 	_place_objects()
 	_place_doors()
 	_place_linked_objects()
+	_place_key_doors()
 	_place_items()
 
 # -------------------------------------------------------
@@ -727,21 +730,359 @@ func _candidate_edges_for_door_object(door_data: ObjectData, min_distance: int) 
 	return result
 
 # -------------------------------------------------------
+# Key-locked doors (Phase 8 Task 2c — door + key pairs)
+#
+# For each KeyDoorSpawn we place count pairs. Each pair:
+#   1. Picks a 1-wide-corridor edge for the door (same eligibility
+#      as decorative / lever-locked doors). The door starts CLOSED
+#      with a generated lock_id.
+#   2. Picks a key spawn location per `key_spawn_locations` flags
+#      (Floor / Chest / Enemy Drop) — Enemy Drop is reserved for
+#      Phase 10 and falls through with a warning.
+#   3. Validates with chain reachability v2 (collects keys + opens
+#      locked doors during the simulation): the key must be
+#      reachable from entrance WITHOUT crossing this door, and after
+#      placement everything that was reachable before must still be.
+#   4. If `door_must_gate_content` is true, runs an extra check:
+#      simulating "this door permanently closed", at least one
+#      content cell (chest, lever, key, or exit) must become
+#      unreachable. A lock that gates nothing is rejected.
+# -------------------------------------------------------
+func _place_key_doors() -> void:
+	if key_door_spawns_pool.is_empty():
+		return
+	var counter := 0
+	for spawn in key_door_spawns_pool:
+		if spawn == null or spawn.door_object == null or spawn.key_item == null:
+			push_warning("LevelGenerator: key-door spawn missing door or key — skipping")
+			continue
+		var count := randi_range(max(0, spawn.count_min), max(spawn.count_min, spawn.count_max))
+		for _i in range(count):
+			var prefix := spawn.lock_id_prefix
+			if prefix == "":
+				prefix = "lock"
+			var lock_id := "%s_%d" % [prefix, counter]
+			counter += 1
+			_try_place_key_door_pair(spawn, lock_id)
+
+func _try_place_key_door_pair(spawn: KeyDoorSpawn, lock_id: String) -> void:
+	var pre_chain: Dictionary = _chain_reachable_from_entrance()
+	var edges: Array = _candidate_edges_for_door_object(spawn.door_object, spawn.door_min_distance_to_other_object)
+	edges.shuffle()
+	for edge in edges:
+		var pair: Array = edge as Array
+		var a: Vector2i = pair[0]
+		var b: Vector2i = pair[1]
+		if _doors_by_edge.has(DoorInstance.edge_key(a, b)):
+			continue
+
+		# Tentatively place the locked door.
+		var door := DoorInstance.create_door(spawn.door_object, a, b)
+		door.lock_id = lock_id
+		doors.append(door)
+		_doors_by_edge[DoorInstance.edge_key(a, b)] = door
+
+		if _try_place_key_for_door(spawn, door, lock_id, pre_chain):
+			# must_gate_content check — placement-time only. After we
+			# confirmed the world is solvable WITH the key collectable,
+			# verify the door actually GATES something when it stays
+			# closed. If not, the lock is meaningless — try another
+			# edge.
+			if spawn.door_must_gate_content and not _door_gates_content(door):
+				_rollback_key_door_pair(door)
+				continue
+			return
+		# No key cell preserved chain reachability — roll back the door
+		# and try a different edge.
+		doors.erase(door)
+		_doors_by_edge.erase(DoorInstance.edge_key(a, b))
+
+	push_warning("LevelGenerator: could not place key-door pair (door='%s', key='%s', lock='%s')" %
+		[_obj_label(spawn.door_object), _item_label(spawn.key_item), lock_id])
+
+func _try_place_key_for_door(spawn: KeyDoorSpawn, paired_door: DoorInstance, lock_id: String, pre_chain: Dictionary) -> bool:
+	# Build a weighted ordering of enabled spawn locations. The first
+	# pick is "primary" (tried first); on failure, fall through to
+	# the rest in (weighted-)random order.
+	var locations: Array = _ordered_key_locations(spawn)
+	if locations.is_empty():
+		locations = [KeyDoorSpawn.KEY_LOCATION_FLOOR]
+	for location in locations:
+		match location:
+			KeyDoorSpawn.KEY_LOCATION_FLOOR:
+				if _try_place_key_on_floor(spawn, paired_door, lock_id, pre_chain):
+					return true
+			KeyDoorSpawn.KEY_LOCATION_CHEST:
+				if _try_place_key_in_chest(spawn, paired_door, lock_id, pre_chain):
+					return true
+			KeyDoorSpawn.KEY_LOCATION_ENEMY_DROP:
+				push_warning("LevelGenerator: KEY_LOCATION_ENEMY_DROP not yet supported (Phase 10) — falling back to next enabled location")
+	return false
+
+func _ordered_key_locations(spawn: KeyDoorSpawn) -> Array:
+	# Returns the spawn's enabled key locations in weighted-random
+	# order. Each pick is removed from the pool, so the resulting
+	# array has each enabled location exactly once.
+	var entries: Array = []  # of {"loc": int, "weight": int}
+	if spawn.allows_location(KeyDoorSpawn.KEY_LOCATION_FLOOR) and spawn.floor_weight > 0:
+		entries.append({"loc": KeyDoorSpawn.KEY_LOCATION_FLOOR, "weight": spawn.floor_weight})
+	if spawn.allows_location(KeyDoorSpawn.KEY_LOCATION_CHEST) and spawn.chest_weight > 0:
+		entries.append({"loc": KeyDoorSpawn.KEY_LOCATION_CHEST, "weight": spawn.chest_weight})
+	if spawn.allows_location(KeyDoorSpawn.KEY_LOCATION_ENEMY_DROP) and spawn.enemy_drop_weight > 0:
+		entries.append({"loc": KeyDoorSpawn.KEY_LOCATION_ENEMY_DROP, "weight": spawn.enemy_drop_weight})
+	var ordered: Array = []
+	while not entries.is_empty():
+		var idx: int = _pick_weighted_index(entries)
+		if idx < 0:
+			break
+		ordered.append(entries[idx]["loc"])
+		entries.remove_at(idx)
+	return ordered
+
+func _pick_weighted_index(entries: Array) -> int:
+	# Picks an index into `entries` proportional to its "weight" key.
+	# Returns -1 if total weight is non-positive.
+	var total: int = 0
+	for e in entries:
+		total += max(0, int(e.get("weight", 0)))
+	if total <= 0:
+		return -1
+	var roll: int = randi() % total
+	for i in range(entries.size()):
+		var w: int = max(0, int(entries[i].get("weight", 0)))
+		if roll < w:
+			return i
+		roll -= w
+	return entries.size() - 1
+
+func _try_place_key_on_floor(spawn: KeyDoorSpawn, paired_door: DoorInstance, lock_id: String, pre_chain: Dictionary) -> bool:
+	var cells_by_type: Dictionary = _classify_floor_cells()
+	var raw_pool: Array = []
+	for placement_bit in [ObjectSpawn.PLACEMENT_CORRIDOR, ObjectSpawn.PLACEMENT_ROOM, ObjectSpawn.PLACEMENT_DEAD_END]:
+		if (spawn.key_floor_placement & placement_bit) == 0:
+			continue
+		for pos in cells_by_type[placement_bit]:
+			if pos == entrance_pos or pos == exit_pos:
+				continue
+			if grid[pos.x][pos.y].object != null:
+				continue
+			# Don't pile a key onto a cell that already holds items —
+			# the player should clearly see the key as the floor item
+			# at that tile.
+			if not grid[pos.x][pos.y].items.is_empty():
+				continue
+			if _is_any_door_endpoint(pos):
+				continue
+			if not _within_key_to_door_range(pos, paired_door, spawn):
+				continue
+			raw_pool.append(pos)
+	if raw_pool.is_empty():
+		return false
+	var distance: int = max(0, spawn.key_min_distance_to_other_object)
+	while distance >= 0:
+		var pool: Array = raw_pool.duplicate()
+		if distance > 0:
+			pool = pool.filter(
+				func(p): return not _too_close_to_existing_object(p, distance)
+			)
+		pool.shuffle()
+		for candidate in pool:
+			var key_inst := ItemInstance.create(spawn.key_item, 1)
+			key_inst.key_id = lock_id
+			grid[candidate.x][candidate.y].items.append(key_inst)
+			var post_chain: Dictionary = _chain_reachable_from_entrance()
+			if _chain_preserved_after_key(pre_chain, post_chain, paired_door):
+				return true
+			grid[candidate.x][candidate.y].items.erase(key_inst)
+		distance -= 1
+	return false
+
+func _try_place_key_in_chest(spawn: KeyDoorSpawn, paired_door: DoorInstance, lock_id: String, pre_chain: Dictionary) -> bool:
+	# Find chests whose neighbour is in pre_chain (i.e. reachable
+	# WITHOUT this lock). The chest's contents are pre-seeded with
+	# the key so when the player opens it they collect the key.
+	var candidates: Array = []
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var cell: GridCell = grid[x][y]
+			if cell.object == null or not cell.object.is_chest():
+				continue
+			# When the spawn forbids stacking keys in one chest,
+			# skip chests that already hold ANY key (from this
+			# spawn or earlier ones).
+			if not spawn.allow_multiple_keys_per_chest and _chest_holds_a_key(cell.object):
+				continue
+			var pos := Vector2i(x, y)
+			if not _has_reachable_neighbour(pos, pre_chain):
+				continue
+			if not _within_key_to_door_range(pos, paired_door, spawn):
+				continue
+			candidates.append(pos)
+	if candidates.is_empty():
+		return false
+	candidates.shuffle()
+	for chest_pos in candidates:
+		var chest: ObjectInstance = grid[chest_pos.x][chest_pos.y].object
+		var key_inst := ItemInstance.create(spawn.key_item, 1)
+		key_inst.key_id = lock_id
+		chest.items.append(key_inst)
+		var post_chain: Dictionary = _chain_reachable_from_entrance()
+		if _chain_preserved_after_key(pre_chain, post_chain, paired_door):
+			return true
+		chest.items.erase(key_inst)
+	return false
+
+func _chain_preserved_after_key(before: Dictionary, after: Dictionary, paired_door: DoorInstance) -> bool:
+	# For key placement we don't add a new blocking object (the key
+	# is just an item), so every cell in `before` must remain in
+	# `after` — no exception cell. The locked door's two endpoints
+	# must also be reachable in `after`, otherwise the door is dead
+	# weight (the key opens it, but the player can't reach the door
+	# itself).
+	for cell_pos in before:
+		if not after.has(cell_pos):
+			return false
+	return after.has(paired_door.cell_a) and after.has(paired_door.cell_b)
+
+func _chest_holds_a_key(chest: ObjectInstance) -> bool:
+	if chest == null:
+		return false
+	for item in chest.items:
+		if item != null and item.get_key_id() != "":
+			return true
+	return false
+
+func _within_key_to_door_range(key_pos: Vector2i, paired_door: DoorInstance, spawn: KeyDoorSpawn) -> bool:
+	var min_d: int = max(0, spawn.key_to_door_min_distance)
+	var max_d: int = spawn.key_to_door_max_distance
+	if min_d == 0 and max_d < 0:
+		return true
+	var dist: int = min(_manhattan(key_pos, paired_door.cell_a),
+		_manhattan(key_pos, paired_door.cell_b))
+	if dist < min_d:
+		return false
+	if max_d >= 0 and dist > max_d:
+		return false
+	return true
+
+func _door_gates_content(door: DoorInstance) -> bool:
+	# True iff closing this door (alone) cuts off at least one chest
+	# cell, lever cell, key cell, or the exit. Used by
+	# must_gate_content to reject locks that gate nothing meaningful.
+	var excluded: Dictionary = {DoorInstance.edge_key(door.cell_a, door.cell_b): true}
+	var restricted_chain: Dictionary = _chain_reachable_from_entrance(excluded)
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var cell: GridCell = grid[x][y]
+			var pos := Vector2i(x, y)
+			# Exit
+			if cell.cell_type == GridCell.CellType.EXIT:
+				if not restricted_chain.has(pos):
+					return true
+			# Chest / lever — reachable means at least one neighbour
+			if cell.object != null and (cell.object.is_chest() or cell.object is LeverInstance):
+				if not _has_reachable_neighbour(pos, restricted_chain):
+					return true
+			# Floor keys
+			for item in cell.items:
+				if item != null and item.get_key_id() != "":
+					if not restricted_chain.has(pos):
+						return true
+			# Chest keys (cell hosts a chest with a key inside)
+			if cell.object != null and cell.object.is_chest():
+				for item in cell.object.items:
+					if item != null and item.get_key_id() != "":
+						if not _has_reachable_neighbour(pos, restricted_chain):
+							return true
+	return false
+
+func _rollback_key_door_pair(door: DoorInstance) -> void:
+	# Remove the door from the doors list / index AND any items
+	# (floor or chest) we tentatively placed for this lock.
+	doors.erase(door)
+	_doors_by_edge.erase(DoorInstance.edge_key(door.cell_a, door.cell_b))
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var cell: GridCell = grid[x][y]
+			var floor_to_drop: Array = []
+			for item in cell.items:
+				if item != null and item.get_key_id() == door.lock_id:
+					floor_to_drop.append(item)
+			for k in floor_to_drop:
+				cell.items.erase(k)
+			if cell.object != null and cell.object.is_chest():
+				var chest_to_drop: Array = []
+				for item in cell.object.items:
+					if item != null and item.get_key_id() == door.lock_id:
+						chest_to_drop.append(item)
+				for k in chest_to_drop:
+					cell.object.items.erase(k)
+
+func _item_label(data: ItemData) -> String:
+	if data != null and data.item_name != "":
+		return data.item_name
+	return "<unnamed-item>"
+
+# -------------------------------------------------------
 # Chain reachability — the safety net for multi-pair lever placement
 # -------------------------------------------------------
-func _chain_reachable_from_entrance() -> Dictionary:
-	# Iterative fixed-point. Start with every directly-clickable door
-	# treated as open (the player can click them anytime). Then BFS,
-	# find every reachable lever, mark its linked doors as openable,
-	# BFS again. Repeat until no new doors open.
+func _chain_reachable_from_entrance(excluded_door_keys: Dictionary = {}) -> Dictionary:
+	# Chain reachability v2 — tracks both open doors AND collected
+	# keys. Iterative fixed-point:
+	#   1. Start with every directly-clickable door treated as open
+	#      (the player can click them anytime). No keys yet.
+	#   2. BFS from entrance using current open set.
+	#   3. Find every reachable lever — mark its linked doors as
+	#      openable. Find every reachable key (on the floor OR inside
+	#      a reachable chest) — add its key_id to collected. Find
+	#      every locked door whose lock_id is collected — mark it as
+	#      openable.
+	#   4. If any of step 3 changed the open set, re-BFS. Otherwise
+	#      we've reached the fixed point.
+	#
+	# `excluded_door_keys` (optional) is a set of edge_keys that are
+	# treated as PERMANENTLY CLOSED regardless of their normal
+	# openability rules. Used by the must_gate_content check to
+	# simulate "what's reachable if THIS door never opens?".
 	var open_door_keys: Dictionary = {}
+	var collected_keys: Dictionary = {}
 	for door in doors:
-		if door.data != null and door.data.interactable:
-			open_door_keys[DoorInstance.edge_key(door.cell_a, door.cell_b)] = true
+		var k0 := DoorInstance.edge_key(door.cell_a, door.cell_b)
+		if excluded_door_keys.has(k0):
+			continue
+		if door.data != null and door.data.interactable and not door.is_key_locked():
+			open_door_keys[k0] = true
 	var reachable: Dictionary = {}
 	while true:
 		reachable = _bfs_with_doors_state(entrance_pos, open_door_keys)
 		var progressed: bool = false
+		# Collect keys lying on the floor or inside reachable chests.
+		for x in range(grid_width):
+			for y in range(grid_height):
+				var cell: GridCell = grid[x][y]
+				var pos := Vector2i(x, y)
+				# Floor keys: any item in cell.items whose data is a KEY.
+				if not cell.items.is_empty() and reachable.has(pos):
+					for item in cell.items:
+						if item == null:
+							continue
+						var kid: String = item.get_key_id()
+						if kid != "" and not collected_keys.has(kid):
+							collected_keys[kid] = true
+							progressed = true
+				# Chest keys: items inside a chest whose neighbour is
+				# reachable. The player walks up and opens the chest.
+				if cell.object != null and cell.object.is_chest():
+					if not _has_reachable_neighbour(pos, reachable):
+						continue
+					for item in cell.object.items:
+						if item == null:
+							continue
+						var kid2: String = item.get_key_id()
+						if kid2 != "" and not collected_keys.has(kid2):
+							collected_keys[kid2] = true
+							progressed = true
+		# Pull every reachable lever — open its linked doors.
 		for x in range(grid_width):
 			for y in range(grid_height):
 				var cell: GridCell = grid[x][y]
@@ -755,9 +1096,23 @@ func _chain_reachable_from_entrance() -> Dictionary:
 					if door == null:
 						continue
 					var key := DoorInstance.edge_key(door.cell_a, door.cell_b)
+					if excluded_door_keys.has(key):
+						continue
 					if not open_door_keys.has(key):
 						open_door_keys[key] = true
 						progressed = true
+		# Unlock every locked door whose key is collected.
+		for door in doors:
+			if door.lock_id == "":
+				continue
+			if not collected_keys.has(door.lock_id):
+				continue
+			var key2 := DoorInstance.edge_key(door.cell_a, door.cell_b)
+			if excluded_door_keys.has(key2):
+				continue
+			if not open_door_keys.has(key2):
+				open_door_keys[key2] = true
+				progressed = true
 		if not progressed:
 			return reachable
 	return {}

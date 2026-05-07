@@ -102,10 +102,26 @@ func _on_object_clicked(instance: ObjectInstance, _grid_pos: Vector2i) -> void:
 		_open_chest(instance)
 
 func _toggle_door(door: DoorInstance) -> void:
-	# A non-interactable door (lever-only or key-required) gives the
-	# player audio + toast feedback instead of toggling. The Area3D
-	# is always built so the click registers either way.
-	if not door.data.interactable:
+	# Key-locked door: try to apply a matching key from the bar
+	# BEFORE the interactable=false feedback path. If the player
+	# holds the right key, consume one count, flip `unlocked`, and
+	# fall through to the normal toggle (which now opens the door).
+	# If they don't have it, the locked-feedback path fires per the
+	# door's own locked_message_key (configured to say "needs key"
+	# on key-locked door .tres files).
+	if door.is_key_locked():
+		var key_slot: int = _find_key_slot_for(door.lock_id)
+		if key_slot < 0:
+			_play_locked_feedback(door.data)
+			return
+		if _hud != null and _hud.item_bar != null:
+			_hud.item_bar.remove_one(key_slot)
+		door.unlocked = true
+		# Fall through to the normal toggle path — door is now open.
+	# A non-interactable door (lever-only) that ISN'T key-locked
+	# (or has been unlocked above) needs feedback rather than a
+	# toggle. The Area3D is always built so the click registers.
+	if not door.data.interactable and not door.unlocked:
 		_play_locked_feedback(door.data)
 		return
 	door.opened = not door.opened
@@ -117,6 +133,17 @@ func _toggle_door(door: DoorInstance) -> void:
 		# levers paired with this door swap their sprite too.
 		if not door.linked_levers.is_empty():
 			_dungeon_view.rebuild_objects()
+
+func _find_key_slot_for(lock_id: String) -> int:
+	# Scan the item bar for a slot holding an ItemInstance whose
+	# get_key_id() == lock_id. Returns the slot index, or -1.
+	if _hud == null or _hud.item_bar == null:
+		return -1
+	for i in range(ItemBar.SLOT_COUNT):
+		var inst: ItemInstance = _hud.item_bar.get_slot(i)
+		if inst != null and inst.get_key_id() == lock_id:
+			return i
+	return -1
 
 func _play_locked_feedback(data: ObjectData) -> void:
 	if data.locked_sound != null:
