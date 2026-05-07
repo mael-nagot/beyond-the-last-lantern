@@ -60,6 +60,13 @@ enum Category {
 # Translation key for the toast shown when a click is rejected
 # (`interactable = false`). Empty = no toast.
 @export var locked_message_key: String = ""
+# 2b follow-up: alternative toast when a closed lever-locked door is
+# clicked AND some (but not all) of its linked levers are already
+# pulled. Hints the player that progress has been made and more
+# levers exist. Empty = falls back to `locked_message_key`. Only
+# meaningful for door-category data backing AND-logic doors; OR-doors
+# never enter the partial state (one pull = open).
+@export var partial_locked_message_key: String = ""
 
 # Loot is configured per-placement on `ObjectSpawn.loot_table` (in the
 # biome) — see scripts/LootTable.gd. That keeps the chest's visual

@@ -15,13 +15,20 @@ extends ObjectInstance
 var cell_a: Vector2i
 var cell_b: Vector2i
 
+# 2b follow-up: AND vs OR semantics for multi-lever doors. AND means
+# "every linked lever must be pulled to open"; OR means "any one
+# lever pulled opens the door". Default AND because the puzzle case
+# (pull every lever in the room) is the more interesting one.
+# Single-lever doors trivially behave the same under both.
+enum LeverLogic { AND, OR }
+
 # Back-link to any levers that toggle this door. Populated by
 # LevelGenerator at placement time when this door is part of a
-# LinkedObjectSpawn. Empty for decorative doors. Used by the click
-# handler to refresh lever visuals after the door state changes
-# (lever sprite mirrors door state via LeverInstance.get_visual_opened).
-# 2b ships at most 1 entry; richer pairing extends naturally.
+# LinkedObjectSpawn. Empty for decorative doors. With M:N clusters
+# this can hold multiple levers, all evaluated under `lever_logic`
+# to decide whether the door is currently open.
 var linked_levers: Array = []  # Array[LeverInstance] — untyped to avoid cyclic typed-array trouble
+var lever_logic: int = LeverLogic.AND
 
 # Phase 8 Task 2c — key-locked doors. Non-empty `lock_id` means the
 # door requires an `ItemInstance` whose `get_key_id()` matches before
@@ -74,3 +81,64 @@ func is_door() -> bool:
 # unlock is sticky.
 func is_key_locked() -> bool:
 	return lock_id != "" and not unlocked
+
+# True when the door's open state derives from levers (vs. a direct
+# manual toggle). Drives Game.gd's click dispatch — lever-locked
+# doors can't be operated by clicking the door itself, only by
+# pulling the levers.
+func is_lever_locked() -> bool:
+	return not linked_levers.is_empty()
+
+# Counts of linked levers and how many are currently pulled. Drives
+# the partial-locked-feedback hint when the player clicks a closed
+# AND-door with some (but not all) levers already pulled.
+func total_lever_count() -> int:
+	var n := 0
+	for lever in linked_levers:
+		if lever != null:
+			n += 1
+	return n
+
+func pulled_lever_count() -> int:
+	var n := 0
+	for lever in linked_levers:
+		if lever != null and lever.pulled:
+			n += 1
+	return n
+
+# Recompute `opened` from linked_levers per `lever_logic`. Idempotent;
+# Game.gd calls this after every lever toggle so the door's stored
+# `opened` bool matches the lever state. For doors with no linked
+# levers (decorative / key-locked) this is a no-op so direct toggles
+# stay authoritative.
+func recompute_opened_from_levers() -> void:
+	if linked_levers.is_empty():
+		return
+	opened = _evaluate_lever_logic_with(_runtime_pulled_predicate)
+
+# Pure helper used by both runtime recompute AND the chain-reachability
+# simulator (which passes a Dictionary of "would be pulled" instead of
+# walking each lever's runtime `pulled` field). `pulled_pred` is a
+# Callable returning bool given a lever.
+func _evaluate_lever_logic_with(pulled_pred: Callable) -> bool:
+	var any_lever := false
+	match lever_logic:
+		LeverLogic.AND:
+			for lever in linked_levers:
+				if lever == null:
+					continue
+				any_lever = true
+				if not pulled_pred.call(lever):
+					return false
+			return any_lever
+		LeverLogic.OR:
+			for lever in linked_levers:
+				if lever == null:
+					continue
+				if pulled_pred.call(lever):
+					return true
+			return false
+	return false
+
+func _runtime_pulled_predicate(lever) -> bool:
+	return lever != null and lever.pulled

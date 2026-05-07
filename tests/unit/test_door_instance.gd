@@ -136,3 +136,81 @@ func test_unlock_is_sticky() -> void:
 	inst.unlocked = true
 	assert_false(inst.is_key_locked())
 	assert_eq(inst.lock_id, "copper_0", "lock_id must persist post-unlock")
+
+# -------------------------------------------------------
+# Lever logic (Phase 8 Task 2b follow-up — M:N clusters)
+# -------------------------------------------------------
+
+func _make_lever() -> LeverInstance:
+	var data := ObjectData.new()
+	data.category = ObjectData.Category.LEVER
+	return LeverInstance.create_lever(data)
+
+func test_door_default_lever_logic_is_and() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	assert_eq(inst.lever_logic, DoorInstance.LeverLogic.AND,
+		"AND is the default — single-lever doors degenerate to it cleanly, multi-lever doors get the puzzle behaviour")
+
+func test_is_lever_locked_tracks_linked_levers() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	assert_false(inst.is_lever_locked())
+	inst.linked_levers = [_make_lever()]
+	assert_true(inst.is_lever_locked())
+
+func test_pulled_and_total_lever_counts() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	var l1 := _make_lever()
+	var l2 := _make_lever()
+	var l3 := _make_lever()
+	inst.linked_levers = [l1, l2, l3]
+	assert_eq(inst.total_lever_count(), 3)
+	assert_eq(inst.pulled_lever_count(), 0)
+	l2.toggle()
+	assert_eq(inst.pulled_lever_count(), 1)
+	l1.toggle()
+	l3.toggle()
+	assert_eq(inst.pulled_lever_count(), 3)
+
+func test_recompute_and_logic_requires_all_levers() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	inst.lever_logic = DoorInstance.LeverLogic.AND
+	var l1 := _make_lever()
+	var l2 := _make_lever()
+	inst.linked_levers = [l1, l2]
+	inst.recompute_opened_from_levers()
+	assert_false(inst.opened)
+	l1.toggle()
+	inst.recompute_opened_from_levers()
+	assert_false(inst.opened, "AND: one of two levers pulled — door stays closed")
+	l2.toggle()
+	inst.recompute_opened_from_levers()
+	assert_true(inst.opened, "AND: both levers pulled — door opens")
+	l1.toggle()
+	inst.recompute_opened_from_levers()
+	assert_false(inst.opened, "AND: un-pulling one closes the door again")
+
+func test_recompute_or_logic_requires_any_lever() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	inst.lever_logic = DoorInstance.LeverLogic.OR
+	var l1 := _make_lever()
+	var l2 := _make_lever()
+	inst.linked_levers = [l1, l2]
+	inst.recompute_opened_from_levers()
+	assert_false(inst.opened)
+	l2.toggle()
+	inst.recompute_opened_from_levers()
+	assert_true(inst.opened, "OR: any one lever pulled — door opens")
+	l2.toggle()
+	inst.recompute_opened_from_levers()
+	assert_false(inst.opened, "OR: no levers pulled — door closes")
+
+func test_recompute_is_noop_when_no_linked_levers() -> void:
+	# Decorative / key-locked doors with no levers should keep their
+	# stored opened bool untouched — recompute is a noop for them.
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	inst.opened = true
+	inst.recompute_opened_from_levers()
+	assert_true(inst.opened)
+	inst.opened = false
+	inst.recompute_opened_from_levers()
+	assert_false(inst.opened)

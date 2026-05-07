@@ -15,17 +15,28 @@ extends Resource
 # If either step fails, both are rolled back so we never ship orphan
 # half-pairs.
 #
-# 2b ships with one-to-one pairing. The data shape uses ObjectData
-# refs (not Arrays) for clarity at this scale; richer pairing
-# (1 lever ↔ many doors and many levers ↔ 1 door) is a 2b follow-up
-# tracked in ROADMAP and will extend LeverInstance.linked_doors and
-# DoorInstance.linked_levers (which already use Arrays internally).
+# 2b follow-up: M:N clusters. Each cluster places `levers_per_cluster`
+# levers and `doors_per_cluster` doors that all cross-link to each
+# other; the doors evaluate openness via `lever_logic` (AND or OR).
+# Default 1:1 / AND keeps existing biomes' single-lever single-door
+# behaviour (AND with one lever degenerates to "lever pulled =
+# door open", same as OR with one lever).
 
 @export var lever_object: ObjectData
 @export var door_object: ObjectData
 
+# Number of CLUSTERS (each producing levers_per_cluster + doors_per_cluster).
 @export var count_min: int = 1
 @export var count_max: int = 1
+
+@export_group("Cluster shape")
+# How many levers each cluster places. Every lever cross-links to
+# every door in its cluster; doors evaluate openness via lever_logic.
+@export var levers_per_cluster: int = 1
+@export var doors_per_cluster: int = 1
+# AND: every linked lever must be pulled to open the door (default —
+# the puzzle case). OR: any one lever opens the door (escape route).
+@export_enum("AND", "OR") var lever_logic: int = DoorInstance.LeverLogic.AND
 
 # Where the lever is allowed to spawn (chest-style flags).
 @export_flags("Corridor", "Room", "Dead End") var lever_placement: int = ObjectSpawn.PLACEMENT_DEFAULT

@@ -260,11 +260,17 @@ Multiple key-locked pairs in the same biome shared the same `key_*.tres`, so all
 2. ✅ Default stays `false` so existing biomes / tests keep their previous behaviour — designers opt in per spawn
 3. ✅ Tests: `test_linked_must_gate_content_rejects_useless_locks` (every placed lever-locked door gates a chest / lever / key / exit) and `test_linked_pair_rollback_clears_lever_cell_when_must_gate_rejects` (multi-seed: every lever cell still resolves to a door in `gen.doors`, no orphan levers shipped)
 
-#### Task 2b follow-up — Richer lever ↔ door pairing
-1. Allow one lever to toggle multiple doors (lever's `linked_doors` already an Array)
-2. Allow one door to be toggled by multiple levers (door's `linked_levers` already an Array; lever sprite already uses "any door open" — confirm or revisit semantics for many-to-many)
-3. Decide AND/OR semantics if needed (e.g. door opens only when ALL levers pulled vs. ANY lever pulled). Today the model is "each pull flips each linked door", which is consistent for 1:1 and degrades reasonably for many.
-4. Update `LinkedObjectSpawn` shape to express N:M pairing rules (probably `lever_count_per_pair`, `door_count_per_pair`, or a more declarative pairing graph)
+#### Task 2b follow-up — Richer lever ↔ door pairing ✅
+M:N clusters with AND / OR semantics, each lever tracking its own pulled state. 1:1 / AND remains the default so existing biomes are unaffected.
+1. ✅ `LeverInstance` now carries a real `pulled: bool` and a `toggle()` method; `get_visual_opened()` returns `pulled` instead of mirroring linked doors. Each lever in a cluster tracks its own state independently.
+2. ✅ `DoorInstance` adds a `LeverLogic` enum (AND default, OR opt-in) and `recompute_opened_from_levers()` — Game.gd calls this after each lever toggle so the door's `opened` re-derives from every linked lever's pulled state under the configured logic. `pulled_lever_count()` / `total_lever_count()` drive the partial-locked feedback.
+3. ✅ `LinkedObjectSpawn` adds `levers_per_cluster`, `doors_per_cluster`, and `lever_logic`. Default 1×1 / AND (no behaviour change for existing biomes). Each spawn now produces clusters where every lever cross-links to every door.
+4. ✅ `LevelGenerator` placement renamed to `_try_place_linked_cluster` + `_try_place_levers_for_cluster`. Greedy edge-window walk: pick `doors_per` candidate edges, try `levers_per` chain-reachable cells, cross-link, validate. AND clusters require EVERY lever chain-reachable; OR clusters require AT LEAST ONE — gated by `_chain_preserved_after_cluster`. `_rollback_linked_cluster` clears all halves on rejection.
+5. ✅ Chain reachability v2 extended to handle AND/OR: tracks `simulated_pulled` (the set of reachable levers) and asks each lever-locked door `_evaluate_lever_logic_with(...)` to decide if it should be marked openable.
+6. ✅ Game.gd door click dispatch: `_toggle_door` short-circuits for lever-locked doors — no direct toggling, only feedback. New `_play_door_locked_feedback` reads `partial_lever_count` and uses `partial_locked_message_key` (per-door `.tres` field) when 1+ but not all levers are pulled, falling back to the standard `locked_message_key` otherwise. `_pull_lever` now: `lever.toggle()` + `door.recompute_opened_from_levers()` for each linked door.
+7. ✅ `ObjectData` adds `partial_locked_message_key` (default empty, falls back to `locked_message_key`).
+8. ✅ Localization: new `object.door_forest.partial_locked` key. Forest door .tres needs a developer-side update to point at it (manual asset wiring).
+9. ✅ Tests: unit tests for `LeverInstance.toggle/pulled/get_visual_opened`, `DoorInstance` lever logic + counts; integration tests for 1:N and N:1 / AND clusters (cross-links, lever_logic propagation, AND chain reachability, OR chain reachability).
 
 #### Task 2c — Locked doors + gating placement ✅ (code; awaits manual asset/biome wiring)
 A door tagged with a `lock_id` requires a matching key item (`ItemData` with `key_id == lock_id`). On click without the key: locked feedback (sound + toast). On click with the key: one count of the key is consumed from the bar, the door unlocks PERMANENTLY, and toggles open. Future clicks behave normally.
