@@ -7,7 +7,7 @@ func _make_slot() -> CharacterSlot:
 	add_child_autofree(slot)
 	return slot
 
-func _make_potion(effect: int = ItemData.EffectType.HEAL_HP, value: int = 30) -> ItemData:
+func _make_potion(effect: ItemData.EffectType = ItemData.EffectType.HEAL_HP, value: int = 30) -> ItemData:
 	var data := ItemData.new()
 	data.item_name = "test.potion"
 	data.effect_type = effect

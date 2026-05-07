@@ -935,7 +935,7 @@ func test_floor_key_is_chain_reachable_before_its_door() -> void:
 		assert_ne(key_pos, Vector2i(-1, -1), "key for %s not found" % door.lock_id)
 		# Hide this door's lock_id so the simulator doesn't unlock
 		# it via the matching key during the test.
-		var saved_lock := door.lock_id
+		var saved_lock: String = door.lock_id
 		door.lock_id = "__test_unreachable__"  # never collected
 		# Also clear the key from the items so the simulator can't
 		# auto-collect it. We'll just BFS without door open.

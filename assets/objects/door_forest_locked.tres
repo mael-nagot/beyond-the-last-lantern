@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="ObjectData" format=3 uid="uid://ddnj3qteby4ip"]
+
+[ext_resource type="Texture2D" uid="uid://bg5ndgcy1a1ak" path="res://assets/textures/objects/door/door_forest_closed.png" id="1_ninnp"]
+[ext_resource type="AudioStream" uid="uid://dpbmbhb5jpjpn" path="res://assets/sounds/objects/door_forest_open.ogg" id="2_6n1j6"]
+[ext_resource type="AudioStream" uid="uid://d4f3tgybtgy6d" path="res://assets/sounds/objects/lever_forest_locked.ogg" id="3_uun77"]
+[ext_resource type="Texture2D" uid="uid://bbehxt2kcrym1" path="res://assets/textures/objects/door/door_forest_opened.png" id="4_bjc42"]
+[ext_resource type="Script" uid="uid://br4c1mxr8q1a" path="res://scripts/ObjectData.gd" id="5_y5f3a"]
+
+[resource]
+script = ExtResource("5_y5f3a")
+name_key = "object.door_forest.name"
+description_key = "object.door_forest_locked.description"
+category = 1
+closed_sprite = ExtResource("1_ninnp")
+opened_sprite = ExtResource("4_bjc42")
+world_height = 6.3
+world_width = 4.6
+interactable = false
+interact_sound = ExtResource("2_6n1j6")
+locked_sound = ExtResource("3_uun77")
+locked_message_key = "object.door_forest_locked.locked"
+metadata/_custom_type_script = "uid://br4c1mxr8q1a"
