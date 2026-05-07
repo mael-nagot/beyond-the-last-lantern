@@ -957,7 +957,7 @@ func _hue_shift_for_pair_index(index: int) -> float:
 	# from each other and from pair 0. Tweak the constant to taste.
 	if index <= 0:
 		return 0.0
-	const HUE_SHIFT_STRENGTH := 0.65
+	const HUE_SHIFT_STRENGTH := 0.4
 	var raw: float = fmod(float(index) * 0.61803398875, 1.0)
 	return raw * HUE_SHIFT_STRENGTH
 
