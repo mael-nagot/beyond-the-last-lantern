@@ -949,16 +949,17 @@ func _chain_preserved_after_key(before: Dictionary, after: Dictionary, paired_do
 
 func _hue_shift_for_pair_index(index: int) -> float:
 	# Per-pair key hue rotation in [0, 1). Pair 0 returns 0.0 (no
-	# shift — original art preserved). Pair >= 1 gets a hue rotation
-	# stepped by the golden ratio so even small N spreads well
-	# across the colour wheel. The shift is applied per-pixel to a
-	# baked texture in ItemInstance.apply_hue_shift, NOT as a
-	# multiplicative modulate — that distinction matters because
-	# multiplicative tinting on a strongly-coloured base (e.g. a
-	# yellow key) reads as brightness variation, not hue.
+	# shift — original art preserved). Pair >= 1 gets a golden-ratio-
+	# stepped hue rotation, scaled by HUE_SHIFT_STRENGTH to soften
+	# the difference between pairs. At 1.0 the shifts span the full
+	# colour wheel (very vivid distinctions); at 0.65 they stay
+	# closer to the original hue while remaining clearly different
+	# from each other and from pair 0. Tweak the constant to taste.
 	if index <= 0:
 		return 0.0
-	return fmod(float(index) * 0.61803398875, 1.0)
+	const HUE_SHIFT_STRENGTH := 0.65
+	var raw: float = fmod(float(index) * 0.61803398875, 1.0)
+	return raw * HUE_SHIFT_STRENGTH
 
 func _chest_holds_a_key(chest: ObjectInstance) -> bool:
 	if chest == null:
