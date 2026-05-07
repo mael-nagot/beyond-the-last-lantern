@@ -37,6 +37,7 @@ var generator: LevelGenerator
 var _items_root: Node3D
 var _objects_root: Node3D
 var _doors_root: Node3D
+var _decorations_root: Node3D
 var _object_sprites: Dictionary = {}  # Vector2i -> Sprite3D (for cheap per-move repositioning)
 var drop_target: DungeonDropTarget
 
@@ -45,11 +46,13 @@ func setup(gen: LevelGenerator) -> void:
 	_ensure_items_root()
 	_ensure_objects_root()
 	_ensure_doors_root()
+	_ensure_decorations_root()
 	_ensure_drop_target()
 	_build_mesh()
 	_build_objects()
 	_build_doors()
 	_build_items()
+	_build_wall_decorations()
 	_place_camera_at_entrance()
 	_apply_biome_environment()
 	_update_viewport_size()
@@ -75,6 +78,13 @@ func _ensure_doors_root() -> void:
 	_doors_root = Node3D.new()
 	_doors_root.name = "DoorsRoot"
 	sub_viewport.add_child(_doors_root)
+
+func _ensure_decorations_root() -> void:
+	if _decorations_root != null and is_instance_valid(_decorations_root):
+		return
+	_decorations_root = Node3D.new()
+	_decorations_root.name = "WallDecorationsRoot"
+	sub_viewport.add_child(_decorations_root)
 
 func _ensure_drop_target() -> void:
 	if drop_target != null and is_instance_valid(drop_target):
@@ -344,6 +354,92 @@ func _door_y_rotation_deg(door: DoorInstance) -> float:
 	#   axis (0,1) (N-S corridor) → door faces +/- Z → rotate 0°
 	if door.axis() == Vector2i(1, 0):
 		return 90.0
+	return 0.0
+
+func _build_wall_decorations() -> void:
+	for child in _decorations_root.get_children():
+		child.queue_free()
+	if generator == null:
+		return
+	for inst in generator.wall_decorations:
+		if inst == null or inst.data == null:
+			continue
+		var node := _make_wall_decoration_node(inst)
+		if node != null:
+			_decorations_root.add_child(node)
+
+func _make_wall_decoration_node(inst: WallDecorationInstance) -> Node3D:
+	var data: WallDecorationData = inst.data
+	# Picks AnimatedSprite3D for animated decorations (torches), Sprite3D
+	# for static ones (paintings). Same anchoring logic for both.
+	var sprite: SpriteBase3D = null
+	var tex_h: int = 0
+	if data.is_animated():
+		var animated := AnimatedSprite3D.new()
+		animated.sprite_frames = data.frames
+		var anim_name: String = data.default_animation
+		if anim_name == "" or not data.frames.has_animation(anim_name):
+			anim_name = data.frames.get_animation_names()[0] if data.frames.get_animation_names().size() > 0 else ""
+		if anim_name != "":
+			animated.animation = anim_name
+			animated.play(anim_name)
+			var first_frame: Texture2D = data.frames.get_frame_texture(anim_name, 0)
+			if first_frame != null:
+				tex_h = first_frame.get_height()
+		sprite = animated
+	else:
+		if data.texture == null:
+			return null
+		var s := Sprite3D.new()
+		s.texture = data.texture
+		tex_h = data.texture.get_height()
+		sprite = s
+	if tex_h <= 0:
+		tex_h = 1
+	sprite.pixel_size = data.world_height / float(tex_h)
+	sprite.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+
+	var root := Node3D.new()
+	root.position = _wall_decoration_position(inst)
+	root.rotation_degrees = Vector3(0.0, _wall_decoration_y_rotation_deg(inst), 0.0)
+	root.add_child(sprite)
+
+	if data.light_energy > 0.0:
+		var light := OmniLight3D.new()
+		light.light_color = data.light_color
+		light.light_energy = data.light_energy
+		light.omni_range = data.light_range
+		root.add_child(light)
+
+	return root
+
+func _wall_decoration_position(inst: WallDecorationInstance) -> Vector3:
+	# Cell centre, then shift by half a cell in `wall_dir` to land on the
+	# wall face, then pull back into the corridor by `depth_offset` so
+	# the sprite doesn't Z-fight the wall texture beneath.
+	var cx: float = inst.cell.x * CELL_SIZE + CELL_SIZE * 0.5
+	var cz: float = inst.cell.y * CELL_SIZE + CELL_SIZE * 0.5
+	var face_x: float = cx + float(inst.wall_dir.x) * CELL_SIZE * 0.5
+	var face_z: float = cz + float(inst.wall_dir.y) * CELL_SIZE * 0.5
+	var pulled_x: float = face_x - float(inst.wall_dir.x) * inst.data.depth_offset
+	var pulled_z: float = face_z - float(inst.wall_dir.y) * inst.data.depth_offset
+	var y: float = wall_height * 0.5 + inst.data.y_offset
+	return Vector3(pulled_x, y, pulled_z)
+
+func _wall_decoration_y_rotation_deg(inst: WallDecorationInstance) -> float:
+	# Match the wall mesh's own y_rotation so the decoration sits flush
+	# with the wall and faces the same way (visible side toward the
+	# corridor). Mapping mirrors `_build_mesh`'s wall_offsets table.
+	if inst.wall_dir == Vector2i(0, -1):  # north wall
+		return 0.0
+	if inst.wall_dir == Vector2i(0, 1):   # south wall
+		return 180.0
+	if inst.wall_dir == Vector2i(-1, 0):  # west wall
+		return 90.0
+	if inst.wall_dir == Vector2i(1, 0):   # east wall
+		return 270.0
 	return 0.0
 
 func _build_items() -> void:

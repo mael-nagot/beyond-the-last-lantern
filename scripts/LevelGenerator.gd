@@ -20,6 +20,7 @@ var floor_items_max: int = 8
 var objects_pool: Array[ObjectSpawn] = []
 var linked_objects_pool: Array[LinkedObjectSpawn] = []
 var key_door_spawns_pool: Array[KeyDoorSpawn] = []
+var wall_decorations_pool: Array[WallDecorationSpawn] = []
 
 var grid: Array = []
 var entrance_pos: Vector2i = Vector2i.ZERO
@@ -31,6 +32,13 @@ var _room_rects: Array = []
 # map iterate this); _doors_by_edge is just an O(1) lookup index.
 var doors: Array[DoorInstance] = []
 var _doors_by_edge: Dictionary = {}  # edge_key (String) -> DoorInstance
+
+# Wall-mounted decorations live on FACES (a side of a floor cell that
+# abuts a wall cell), not on cells. Authoritative list — DungeonView
+# iterates this and the placement code prevents two decos from sharing
+# the same face via _wall_faces_used.
+var wall_decorations: Array[WallDecorationInstance] = []
+var _wall_faces_used: Dictionary = {}  # face_key (String) -> true
 
 func configure(biome: BiomeData) -> void:
 	if biome == null:
@@ -55,11 +63,14 @@ func configure(biome: BiomeData) -> void:
 	objects_pool = biome.objects
 	linked_objects_pool = biome.linked_objects
 	key_door_spawns_pool = biome.key_door_spawns
+	wall_decorations_pool = biome.wall_decorations
 
 func generate() -> void:
 	_fill_with_walls()
 	doors.clear()
 	_doors_by_edge.clear()
+	wall_decorations.clear()
+	_wall_faces_used.clear()
 	if room_count > 0:
 		_place_rooms()
 	_grow_maze()
@@ -74,6 +85,7 @@ func generate() -> void:
 	_place_linked_objects()
 	_place_key_doors()
 	_place_items()
+	_place_wall_decorations()
 
 # -------------------------------------------------------
 # Fill
@@ -1367,6 +1379,74 @@ func _place_items() -> void:
 				grid[pos.x][pos.y].items.append(ItemInstance.create(entry.item, 1))
 				break
 			distance -= 1
+
+# -------------------------------------------------------
+# Wall decorations (paintings, torches, lanterns)
+# -------------------------------------------------------
+func _place_wall_decorations() -> void:
+	if wall_decorations_pool.is_empty():
+		return
+	var cells_by_type := _classify_floor_cells()
+	for spawn in wall_decorations_pool:
+		if spawn == null or spawn.decoration == null:
+			continue
+		var count := randi_range(max(0, spawn.count_min), max(spawn.count_min, spawn.count_max))
+		for _i in range(count):
+			_try_place_one_wall_decoration(spawn, cells_by_type)
+
+func _try_place_one_wall_decoration(spawn: WallDecorationSpawn, cells_by_type: Dictionary) -> void:
+	# Build a (cell, wall_dir) candidate pool from cells matching
+	# `placement` flags. A wall_dir is valid only if the neighbour in
+	# that direction is a WALL cell (otherwise there's no wall face to
+	# attach to). Doors live on FLOOR↔FLOOR edges so they can never
+	# coincide with the FLOOR↔WALL edges decorations occupy.
+	var base_candidates: Array = []
+	for placement_bit in [ObjectSpawn.PLACEMENT_CORRIDOR, ObjectSpawn.PLACEMENT_ROOM, ObjectSpawn.PLACEMENT_DEAD_END]:
+		if not spawn.allows(placement_bit):
+			continue
+		for pos in cells_by_type[placement_bit]:
+			for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				if not _is_decoratable_wall(pos, d):
+					continue
+				base_candidates.append([pos, d])
+	if base_candidates.is_empty():
+		return
+	# Graceful degrade on min_distance: same approach the items pool uses.
+	var distance: int = max(0, spawn.min_distance_to_other_decoration)
+	while distance >= 0:
+		var candidates: Array = base_candidates
+		if distance > 0:
+			candidates = base_candidates.filter(
+				func(c): return not _too_close_to_existing_decoration(c[0], distance)
+			)
+		if not candidates.is_empty():
+			var picked: Array = candidates[randi() % candidates.size()]
+			var inst := WallDecorationInstance.create(spawn.decoration, picked[0], picked[1])
+			wall_decorations.append(inst)
+			_wall_faces_used[inst.get_face_key()] = true
+			return
+		distance -= 1
+
+func _is_decoratable_wall(cell: Vector2i, wall_dir: Vector2i) -> bool:
+	# Wall-dir neighbour must be a WALL cell (in bounds). The face
+	# itself must not already hold a decoration.
+	var nx: int = cell.x + wall_dir.x
+	var ny: int = cell.y + wall_dir.y
+	if not _in_bounds(nx, ny):
+		return false
+	if grid[nx][ny].cell_type != GridCell.CellType.WALL:
+		return false
+	if _wall_faces_used.has(WallDecorationInstance.face_key(cell, wall_dir)):
+		return false
+	return true
+
+func _too_close_to_existing_decoration(pos: Vector2i, min_distance: int) -> bool:
+	if min_distance <= 0:
+		return false
+	for inst in wall_decorations:
+		if _manhattan(pos, inst.cell) < min_distance:
+			return true
+	return false
 
 func _too_close_to_existing_item(pos: Vector2i, min_distance: int) -> bool:
 	if min_distance <= 0:
