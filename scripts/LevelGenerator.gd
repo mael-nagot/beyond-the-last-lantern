@@ -585,27 +585,17 @@ func is_edge_blocked(a: Vector2i, b: Vector2i) -> bool:
 	return d.is_edge_blocked()
 
 # -------------------------------------------------------
-# Linked objects (Phase 8 Task 2b — lever ↔ door pairs)
-#
-# For each LinkedObjectSpawn entry we place count pairs. Each pair
-# is validated against CHAIN reachability — not just per-pair
-# reachability — so the player can never end up in a stuck state
-# where every lever is locked behind every door.
-#
-# Chain reachability simulates "starting at the entrance, opening
-# every directly-clickable door, and progressively pulling every
-# lever the player can reach". A pair is only accepted if, after
-# placement, every placed lever AND the exit AND every chest
-# remain in the chain-reachable set. This permits PROGRESSIVE
-# gating (lever_1 opens door_A, behind which is lever_2 — fine)
-# but rejects CYCLES (every lever locked behind every door).
-#
-# Cross-links are recorded on both sides:
-#   - LeverInstance.linked_doors = [door]
-#   - DoorInstance.linked_levers = [lever]
-# 1-to-1 today; the Array shape is what makes 1-to-many extension
-# straightforward when the roadmap reaches it.
+# Linked objects (Phase 8 Task 2b follow-up — M:N lever ↔ door
+# clusters). Each LinkedObjectSpawn produces N independent clusters.
+# A cluster contains levers_per_cluster levers and doors_per_cluster
+# doors, all cross-linked. A door's opened state is a function of
+# the pulled state of every lever in its cluster, evaluated under
+# the cluster's AND/OR rule.
 # -------------------------------------------------------
+
+const _CLUSTER_OUTER_ATTEMPTS := 30
+const _CLUSTER_INNER_ATTEMPTS := 30
+
 func _place_linked_objects() -> void:
 	if linked_objects_pool.is_empty():
 		return
@@ -617,56 +607,122 @@ func _place_linked_objects() -> void:
 			continue
 		var count := randi_range(max(0, spawn.count_min), max(spawn.count_min, spawn.count_max))
 		for _i in range(count):
-			_try_place_linked_pair(spawn)
+			_try_place_cluster(spawn)
 
-func _try_place_linked_pair(spawn: LinkedObjectSpawn) -> void:
-	# Snapshot chain reachability BEFORE the new pair lands. After
-	# placement we require post_chain ⊇ pre_chain ∖ {new_lever_cell}
-	# — i.e. nothing previously reachable becomes unreachable.
+func _try_place_cluster(spawn: LinkedObjectSpawn) -> void:
 	var pre_chain: Dictionary = _chain_reachable_from_entrance()
+	var n_doors: int = max(1, spawn.doors_per_cluster)
+	var n_levers: int = max(1, spawn.levers_per_cluster)
 
-	var edges: Array = _candidate_edges_for_door_object(spawn.door_object, spawn.door_min_distance_to_other_object)
-	edges.shuffle()
-	for edge in edges:
-		var pair: Array = edge as Array
-		var a: Vector2i = pair[0]
-		var b: Vector2i = pair[1]
-		if _doors_by_edge.has(DoorInstance.edge_key(a, b)):
+	for _outer in range(_CLUSTER_OUTER_ATTEMPTS):
+		var cluster_doors: Array = []
+		var cluster_levers: Array = []
+		var cluster_lever_positions: Array = []
+
+		# --- Phase 1: place doors ---
+		if not _try_place_cluster_doors(spawn, n_doors, cluster_doors):
+			_rollback_cluster(cluster_doors, cluster_lever_positions, cluster_levers)
 			continue
 
-		# Tentatively place the door (no lever links yet).
-		var door := DoorInstance.create_door(spawn.door_object, a, b)
-		doors.append(door)
-		_doors_by_edge[DoorInstance.edge_key(a, b)] = door
+		# --- Phase 2: place levers ---
+		if not _try_place_cluster_levers(spawn, n_levers, cluster_doors, cluster_levers, cluster_lever_positions, pre_chain):
+			_rollback_cluster(cluster_doors, cluster_lever_positions, cluster_levers)
+			continue
 
-		if _try_place_lever_for_door(spawn, door, pre_chain):
-			# must_gate_content check — placement-time only. After we
-			# confirmed the world is solvable WITH the lever pullable,
-			# verify the door actually GATES something when it stays
-			# closed. If not, the lock is meaningless — try another
-			# edge (rolling back BOTH lever and door so we never ship
-			# orphan halves). Same simulator + content set as the
-			# KeyDoorSpawn check, just against the lever-locked door.
-			if spawn.door_must_gate_content and not _door_gates_content(door):
-				_rollback_linked_pair(door)
+		# --- Phase 3: final validation ---
+		var post_chain: Dictionary = _chain_reachable_from_entrance()
+		if not _chain_preserved_after_cluster(pre_chain, post_chain, cluster_lever_positions):
+			_rollback_cluster(cluster_doors, cluster_lever_positions, cluster_levers)
+			continue
+
+		if spawn.door_must_gate_content:
+			var any_gates := false
+			for door in cluster_doors:
+				if _door_gates_content(door):
+					any_gates = true
+					break
+			if not any_gates:
+				_rollback_cluster(cluster_doors, cluster_lever_positions, cluster_levers)
 				continue
-			return  # both committed
 
-		# No lever cell preserved chain reachability — roll back the
-		# door and try a different edge. (Lever wasn't placed, just
-		# the door — no lever cleanup needed here.)
-		doors.erase(door)
-		_doors_by_edge.erase(DoorInstance.edge_key(a, b))
+		return  # cluster committed
 
-	push_warning("LevelGenerator: could not place linked pair (lever='%s', door='%s')" %
-		[_obj_label(spawn.lever_object), _obj_label(spawn.door_object)])
+	push_warning("LevelGenerator: could not place cluster (lever='%s', door='%s', %d×%d)" %
+		[_obj_label(spawn.lever_object), _obj_label(spawn.door_object), n_levers, n_doors])
 
-func _try_place_lever_for_door(spawn: LinkedObjectSpawn, paired_door: DoorInstance, pre_chain: Dictionary) -> bool:
-	# Chest-style cell classification, then a chain-reachability check
-	# per candidate. The candidate is tentatively placed (mutates the
-	# grid); on failure we roll back and try the next.
+func _try_place_cluster_doors(spawn: LinkedObjectSpawn, n_doors: int, cluster_doors: Array) -> bool:
+	var base_edges: Array = _candidate_edges_for_door_object(spawn.door_object, 0)
+	base_edges.shuffle()
+	for _door_i in range(n_doors):
+		var pool: Array = []
+		for edge in base_edges:
+			if _doors_by_edge.has(DoorInstance.edge_key(edge[0], edge[1])):
+				continue
+			if spawn.door_min_distance_to_other_object > 0:
+				if _too_close_to_existing_door(edge, spawn.door_min_distance_to_other_object):
+					continue
+			pool.append(edge)
+		if pool.is_empty():
+			return false
+		var edge: Array = pool[randi() % pool.size()]
+		var door := DoorInstance.create_door(spawn.door_object, edge[0], edge[1])
+		door.lever_logic = spawn.lever_logic
+		doors.append(door)
+		_doors_by_edge[DoorInstance.edge_key(edge[0], edge[1])] = door
+		cluster_doors.append(door)
+	return true
+
+func _try_place_cluster_levers(spawn: LinkedObjectSpawn, n_levers: int, cluster_doors: Array, cluster_levers: Array, cluster_lever_positions: Array, pre_chain: Dictionary) -> bool:
+	var and_reachable: Dictionary = {}
+	if spawn.lever_logic == DoorInstance.LeverLogic.AND:
+		var excluded: Dictionary = {}
+		for door in cluster_doors:
+			excluded[DoorInstance.edge_key(door.cell_a, door.cell_b)] = true
+		and_reachable = _chain_reachable_from_entrance(excluded)
+
+	for _lever_i in range(n_levers):
+		if not _try_place_one_cluster_lever(spawn, cluster_doors, cluster_levers, cluster_lever_positions, pre_chain, and_reachable):
+			return false
+	return true
+
+func _try_place_one_cluster_lever(spawn: LinkedObjectSpawn, cluster_doors: Array, cluster_levers: Array, cluster_lever_positions: Array, pre_chain: Dictionary, and_reachable: Dictionary) -> bool:
+	var distance: int = max(0, spawn.lever_min_distance_to_other_object)
+	while distance >= 0:
+		var obj_snapshot: Array = _snapshot_occupied_cells()
+		var pool: Array = _build_lever_candidate_pool(spawn, cluster_doors, cluster_lever_positions, distance, obj_snapshot, and_reachable)
+		var attempts := 0
+		while attempts < _CLUSTER_INNER_ATTEMPTS and not pool.is_empty():
+			var idx: int
+			if cluster_lever_positions.is_empty():
+				idx = randi() % pool.size()
+			else:
+				idx = _pick_farthest_from(pool, cluster_lever_positions)
+			var candidate: Vector2i = pool[idx]
+			pool.remove_at(idx)
+
+			var lever := LeverInstance.create_lever(spawn.lever_object)
+			grid[candidate.x][candidate.y].object = lever
+			lever.linked_doors = cluster_doors.duplicate()
+			for door in cluster_doors:
+				door.linked_levers.append(lever)
+
+			var post_chain: Dictionary = _chain_reachable_from_entrance()
+			if _chain_preserved_after_cluster(pre_chain, post_chain, cluster_lever_positions + [candidate]):
+				cluster_levers.append(lever)
+				cluster_lever_positions.append(candidate)
+				return true
+
+			grid[candidate.x][candidate.y].object = null
+			for door in cluster_doors:
+				door.linked_levers.erase(lever)
+			lever.linked_doors = []
+			attempts += 1
+		distance -= 1
+	return false
+
+func _build_lever_candidate_pool(spawn: LinkedObjectSpawn, cluster_doors: Array, cluster_lever_positions: Array, min_distance: int, obj_snapshot: Array, and_reachable: Dictionary) -> Array:
 	var cells_by_type: Dictionary = _classify_floor_cells()
-	var raw_pool: Array = []
+	var pool: Array = []
 	for placement_bit in [ObjectSpawn.PLACEMENT_CORRIDOR, ObjectSpawn.PLACEMENT_ROOM, ObjectSpawn.PLACEMENT_DEAD_END]:
 		if (spawn.lever_placement & placement_bit) == 0:
 			continue
@@ -677,38 +733,97 @@ func _try_place_lever_for_door(spawn: LinkedObjectSpawn, paired_door: DoorInstan
 				continue
 			if _is_any_door_endpoint(pos):
 				continue
-			if not _within_lever_to_door_range(pos, paired_door, spawn):
+			if not _within_lever_to_cluster_door_range(pos, cluster_doors, spawn):
 				continue
-			raw_pool.append(pos)
-	if raw_pool.is_empty():
+			if min_distance > 0 and _too_close_to_snapshot(pos, obj_snapshot, min_distance):
+				continue
+			if not and_reachable.is_empty() and not and_reachable.has(pos):
+				continue
+			if not _room_unique_for_cluster(pos, cluster_lever_positions):
+				continue
+			pool.append(pos)
+	return pool
+
+func _within_lever_to_cluster_door_range(lever_pos: Vector2i, cluster_doors: Array, spawn: LinkedObjectSpawn) -> bool:
+	var min_d: int = max(0, spawn.lever_to_door_min_distance)
+	var max_d: int = spawn.lever_to_door_max_distance
+	if min_d == 0 and max_d < 0:
+		return true
+	var nearest_dist := 999999
+	for door in cluster_doors:
+		nearest_dist = min(nearest_dist, min(_manhattan(lever_pos, door.cell_a), _manhattan(lever_pos, door.cell_b)))
+	if nearest_dist < min_d:
 		return false
-	# Graceful-degrade min_distance, matching chest behaviour.
-	var distance: int = max(0, spawn.lever_min_distance_to_other_object)
-	while distance >= 0:
-		var pool: Array = raw_pool.duplicate()
-		if distance > 0:
-			pool = pool.filter(
-				func(p): return not _too_close_to_existing_object(p, distance)
-			)
-		pool.shuffle()
-		for candidate in pool:
-			# Tentatively commit the lever + cross-links so the chain
-			# simulation can see them.
-			var lever := LeverInstance.create_lever(spawn.lever_object)
-			grid[candidate.x][candidate.y].object = lever
-			lever.linked_doors = [paired_door]
-			paired_door.linked_levers = [lever]
+	if max_d >= 0 and nearest_dist > max_d:
+		return false
+	return true
 
-			var post_chain: Dictionary = _chain_reachable_from_entrance()
-			if _chain_preserved_after_pair(pre_chain, post_chain, candidate):
-				return true  # leave mutations in place
+func _room_index_at(pos: Vector2i) -> int:
+	for i in range(_room_rects.size()):
+		if (_room_rects[i] as Rect2i).has_point(pos):
+			return i
+	return -1
 
-			# Roll back this candidate.
-			grid[candidate.x][candidate.y].object = null
-			lever.linked_doors = []
-			paired_door.linked_levers = []
-		distance -= 1
+func _room_unique_for_cluster(pos: Vector2i, existing_positions: Array) -> bool:
+	var my_room: int = _room_index_at(pos)
+	if my_room < 0:
+		return true
+	for lpos in existing_positions:
+		if _room_index_at(lpos) == my_room:
+			return false
+	return true
+
+func _snapshot_occupied_cells() -> Array:
+	var positions: Array = []
+	for x in range(grid_width):
+		for y in range(grid_height):
+			if grid[x][y].object != null:
+				positions.append(Vector2i(x, y))
+	return positions
+
+func _too_close_to_snapshot(pos: Vector2i, snapshot: Array, min_distance: int) -> bool:
+	for p in snapshot:
+		if _manhattan(pos, p) < min_distance:
+			return true
 	return false
+
+func _pick_farthest_from(pool: Array, siblings: Array) -> int:
+	var best_idx := 0
+	var best_dist := -1
+	for i in range(pool.size()):
+		var min_dist := 999999
+		for sib in siblings:
+			var d: int = _manhattan(pool[i], sib)
+			if d < min_dist:
+				min_dist = d
+		if min_dist > best_dist:
+			best_dist = min_dist
+			best_idx = i
+	return best_idx
+
+func _chain_preserved_after_cluster(before: Dictionary, after: Dictionary, lever_positions: Array) -> bool:
+	var blocked: Dictionary = {}
+	for lpos in lever_positions:
+		blocked[lpos] = true
+	for cell_pos in before:
+		if blocked.has(cell_pos):
+			continue
+		if not after.has(cell_pos):
+			return false
+	for lpos in lever_positions:
+		if not _has_reachable_neighbour(lpos, after):
+			return false
+	return true
+
+func _rollback_cluster(cluster_doors: Array, cluster_lever_positions: Array, cluster_levers: Array) -> void:
+	for pos in cluster_lever_positions:
+		grid[pos.x][pos.y].object = null
+	for lever in cluster_levers:
+		lever.linked_doors = []
+	for door in cluster_doors:
+		door.linked_levers = []
+		doors.erase(door)
+		_doors_by_edge.erase(DoorInstance.edge_key(door.cell_a, door.cell_b))
 
 func _candidate_edges_for_door_object(door_data: ObjectData, min_distance: int) -> Array:
 	# Mirrors `_candidate_edges_for_door` but takes raw ObjectData +
@@ -1024,23 +1139,6 @@ func _door_gates_content(door: DoorInstance) -> bool:
 							return true
 	return false
 
-func _rollback_linked_pair(door: DoorInstance) -> void:
-	# Mirror of _rollback_key_door_pair but for lever-locked doors.
-	# Removes the door from the doors list / index AND clears every
-	# cell holding a lever cross-linked to it. Used when
-	# door_must_gate_content rejects an otherwise-valid placement.
-	var levers_to_clear: Array = door.linked_levers.duplicate()
-	for x in range(grid_width):
-		for y in range(grid_height):
-			var cell: GridCell = grid[x][y]
-			if cell.object != null and cell.object in levers_to_clear:
-				cell.object = null
-	for lever in levers_to_clear:
-		if lever != null:
-			lever.linked_doors = []
-	door.linked_levers = []
-	doors.erase(door)
-	_doors_by_edge.erase(DoorInstance.edge_key(door.cell_a, door.cell_b))
 
 func _rollback_key_door_pair(door: DoorInstance) -> void:
 	# Remove the door from the doors list / index AND any items
@@ -1096,7 +1194,7 @@ func _chain_reachable_from_entrance(excluded_door_keys: Dictionary = {}) -> Dict
 		var k0 := DoorInstance.edge_key(door.cell_a, door.cell_b)
 		if excluded_door_keys.has(k0):
 			continue
-		if door.data != null and door.data.interactable and not door.is_key_locked():
+		if door.data != null and door.data.interactable and not door.is_key_locked() and door.linked_levers.is_empty():
 			open_door_keys[k0] = true
 	var reachable: Dictionary = {}
 	while true:
@@ -1128,7 +1226,9 @@ func _chain_reachable_from_entrance(excluded_door_keys: Dictionary = {}) -> Dict
 						if kid2 != "" and not collected_keys.has(kid2):
 							collected_keys[kid2] = true
 							progressed = true
-		# Pull every reachable lever — open its linked doors.
+		# Collect reachable levers, then evaluate each lever-locked door
+		# under its AND/OR logic.
+		var reachable_levers: Dictionary = {}
 		for x in range(grid_width):
 			for y in range(grid_height):
 				var cell: GridCell = grid[x][y]
@@ -1137,16 +1237,30 @@ func _chain_reachable_from_entrance(excluded_door_keys: Dictionary = {}) -> Dict
 				var pos := Vector2i(x, y)
 				if not _has_reachable_neighbour(pos, reachable):
 					continue
-				var lever: LeverInstance = cell.object
-				for door in lever.linked_doors:
-					if door == null:
-						continue
-					var key := DoorInstance.edge_key(door.cell_a, door.cell_b)
-					if excluded_door_keys.has(key):
-						continue
-					if not open_door_keys.has(key):
-						open_door_keys[key] = true
-						progressed = true
+				reachable_levers[cell.object] = true
+		for door in doors:
+			if door.linked_levers.is_empty():
+				continue
+			var key := DoorInstance.edge_key(door.cell_a, door.cell_b)
+			if excluded_door_keys.has(key):
+				continue
+			if open_door_keys.has(key):
+				continue
+			var should_open: bool = false
+			if door.lever_logic == DoorInstance.LeverLogic.AND:
+				should_open = true
+				for lever in door.linked_levers:
+					if lever == null or not reachable_levers.has(lever):
+						should_open = false
+						break
+			else:
+				for lever in door.linked_levers:
+					if lever != null and reachable_levers.has(lever):
+						should_open = true
+						break
+			if should_open:
+				open_door_keys[key] = true
+				progressed = true
 		# Unlock every locked door whose key is collected.
 		for door in doors:
 			if door.lock_id == "":
@@ -1179,19 +1293,6 @@ func _has_reachable_neighbour(pos: Vector2i, reachable: Dictionary) -> bool:
 			return true
 	return false
 
-func _chain_preserved_after_pair(before: Dictionary, after: Dictionary, new_lever_cell: Vector2i) -> bool:
-	# Every cell reachable BEFORE the new pair must still be reachable
-	# AFTER (modulo the new lever's own blocking cell), and the new
-	# lever must itself have a reachable neighbour. Implicit consequences:
-	#   - existing levers stay chain-reachable (their neighbours were in `before`)
-	#   - existing chests stay interactable (same reason)
-	#   - exit stays reachable (it was in `before`, post-`_validate_path`)
-	for cell_pos in before:
-		if cell_pos == new_lever_cell:
-			continue
-		if not after.has(cell_pos):
-			return false
-	return _has_reachable_neighbour(new_lever_cell, after)
 
 func _bfs_walkable_with_closed_edges(origin: Vector2i, closed_edges: Dictionary) -> Dictionary:
 	# Same as _bfs_walkable_from but treats the given edges as walls.
@@ -1233,21 +1334,6 @@ func _is_any_door_endpoint(pos: Vector2i) -> bool:
 			return true
 	return false
 
-func _within_lever_to_door_range(lever_pos: Vector2i, paired_door: DoorInstance, spawn: LinkedObjectSpawn) -> bool:
-	# Hard-constraint check: lever must be within [min, max] Manhattan
-	# tiles of its OWN paired door (nearest endpoint). max < 0 means
-	# unlimited. min == 0 means no minimum.
-	var min_d: int = max(0, spawn.lever_to_door_min_distance)
-	var max_d: int = spawn.lever_to_door_max_distance
-	if min_d == 0 and max_d < 0:
-		return true
-	var dist: int = min(_manhattan(lever_pos, paired_door.cell_a),
-		_manhattan(lever_pos, paired_door.cell_b))
-	if dist < min_d:
-		return false
-	if max_d >= 0 and dist > max_d:
-		return false
-	return true
 
 # -------------------------------------------------------
 # Items

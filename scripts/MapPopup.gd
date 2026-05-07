@@ -295,9 +295,7 @@ func _draw_object_marker(rect_pos: Vector2, rect_size: Vector2, cell_size: float
 		map_draw.draw_rect(marker_rect, border, false, w)
 
 func _draw_lever_marker(center: Vector2, cell_size: float, lever: LeverInstance) -> void:
-	# Small grey diamond, filled when the linked door is closed,
-	# outline-only when it's open (visually consistent with the door
-	# slab style on the same map).
+	# Small grey diamond, filled when un-pulled, outline-only when pulled.
 	var s: float = cell_size * 0.30
 	var diamond := PackedVector2Array([
 		center + Vector2(0, -s),
@@ -308,7 +306,7 @@ func _draw_lever_marker(center: Vector2, cell_size: float, lever: LeverInstance)
 	var color := Color(0.40, 0.42, 0.48)  # slate / iron tone
 	var line_width: float = max(cell_size * 0.08, 1.0)
 	if lever.get_visual_opened():
-		# Linked door is open — outline only.
+		# Lever pulled — outline only.
 		for i in range(4):
 			map_draw.draw_line(diamond[i], diamond[(i + 1) % 4], color, line_width)
 	else:

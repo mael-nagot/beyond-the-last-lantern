@@ -128,11 +128,81 @@ func test_door_with_lock_id_is_key_locked_until_unlocked() -> void:
 	assert_true(inst.is_key_locked())
 
 func test_unlock_is_sticky() -> void:
-	# Once unlocked, never re-locks. is_key_locked() returns false
-	# even though lock_id is still set — that's by design (we keep
-	# the id around for save-load and future "lock state" UI).
 	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
 	inst.lock_id = "copper_0"
 	inst.unlocked = true
 	assert_false(inst.is_key_locked())
 	assert_eq(inst.lock_id, "copper_0", "lock_id must persist post-unlock")
+
+# -------------------------------------------------------
+# Lever locks (Phase 8 Task 2b M:N)
+# -------------------------------------------------------
+
+func _make_lever(pulled: bool = false) -> LeverInstance:
+	var data := ObjectData.new()
+	data.category = ObjectData.Category.LEVER
+	var lever := LeverInstance.create_lever(data)
+	lever.pulled = pulled
+	return lever
+
+func test_door_without_levers_is_not_lever_locked() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	assert_false(inst.is_lever_locked())
+
+func test_door_with_levers_is_lever_locked() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	inst.linked_levers = [_make_lever()]
+	assert_true(inst.is_lever_locked())
+
+func test_lever_logic_defaults_to_and() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	assert_eq(inst.lever_logic, DoorInstance.LeverLogic.AND)
+
+func test_compute_lever_opened_no_levers_returns_opened_field() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	inst.opened = false
+	assert_false(inst.compute_lever_opened())
+	inst.opened = true
+	assert_true(inst.compute_lever_opened())
+
+func test_compute_lever_opened_and_all_pulled() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	inst.lever_logic = DoorInstance.LeverLogic.AND
+	inst.linked_levers = [_make_lever(true), _make_lever(true)]
+	assert_true(inst.compute_lever_opened())
+
+func test_compute_lever_opened_and_not_all_pulled() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	inst.lever_logic = DoorInstance.LeverLogic.AND
+	inst.linked_levers = [_make_lever(true), _make_lever(false)]
+	assert_false(inst.compute_lever_opened())
+
+func test_compute_lever_opened_and_none_pulled() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	inst.lever_logic = DoorInstance.LeverLogic.AND
+	inst.linked_levers = [_make_lever(false), _make_lever(false)]
+	assert_false(inst.compute_lever_opened())
+
+func test_compute_lever_opened_or_any_pulled() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	inst.lever_logic = DoorInstance.LeverLogic.OR
+	inst.linked_levers = [_make_lever(false), _make_lever(true)]
+	assert_true(inst.compute_lever_opened())
+
+func test_compute_lever_opened_or_none_pulled() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	inst.lever_logic = DoorInstance.LeverLogic.OR
+	inst.linked_levers = [_make_lever(false), _make_lever(false)]
+	assert_false(inst.compute_lever_opened())
+
+func test_compute_lever_opened_and_handles_null_lever() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	inst.lever_logic = DoorInstance.LeverLogic.AND
+	inst.linked_levers = [null, _make_lever(true)]
+	assert_false(inst.compute_lever_opened(), "null lever in AND chain blocks opening")
+
+func test_compute_lever_opened_or_skips_null_lever() -> void:
+	var inst := DoorInstance.create_door(_make_data(), Vector2i(0, 0), Vector2i(0, 1))
+	inst.lever_logic = DoorInstance.LeverLogic.OR
+	inst.linked_levers = [null, _make_lever(true)]
+	assert_true(inst.compute_lever_opened(), "null lever in OR chain doesn't block")

@@ -123,9 +123,12 @@ func _toggle_door(door: DoorInstance) -> void:
 			_hud.item_bar.remove_one(key_slot)
 		door.unlocked = true
 		# Fall through to the normal toggle path — door is now open.
-	# A non-interactable door (lever-only) that ISN'T key-locked
-	# (or has been unlocked above) needs feedback rather than a
-	# toggle. The Area3D is always built so the click registers.
+	# Lever-locked doors never toggle via click — the levers control them.
+	if door.is_lever_locked():
+		_play_lever_locked_feedback(door)
+		return
+	# A non-interactable door that ISN'T key-locked (or has been
+	# unlocked above) needs feedback rather than a toggle.
 	if not door.data.interactable and not door.unlocked:
 		_play_locked_feedback(door.data)
 		return
@@ -133,11 +136,6 @@ func _toggle_door(door: DoorInstance) -> void:
 	SoundManager.play(door.data.interact_sound)
 	if _dungeon_view != null:
 		_dungeon_view.rebuild_doors()
-		# Lever sprites mirror their linked door's state via
-		# get_visual_opened() — refresh cell-bound objects so any
-		# levers paired with this door swap their sprite too.
-		if not door.linked_levers.is_empty():
-			_dungeon_view.rebuild_objects()
 
 func _find_key_slot_for(lock_id: String) -> int:
 	# Scan the item bar for a slot holding an ItemInstance whose
@@ -155,24 +153,35 @@ func _play_locked_feedback(data: ObjectData) -> void:
 		SoundManager.play(data.locked_sound)
 	if _hud != null and data.locked_message_key != "":
 		_hud.show_toast(data.locked_message_key)
-	# Small camera jolt — softer than a wall bump, just enough to
-	# read as "you tried, it didn't budge".
+	if _dungeon_view != null:
+		_dungeon_view.shake_camera(0.4)
+
+func _play_lever_locked_feedback(door: DoorInstance) -> void:
+	if door.data.locked_sound != null:
+		SoundManager.play(door.data.locked_sound)
+	var msg_key: String = door.data.locked_message_key
+	if door.lever_logic == DoorInstance.LeverLogic.AND:
+		var any_pulled := false
+		for lever in door.linked_levers:
+			if lever != null and lever.pulled:
+				any_pulled = true
+				break
+		if any_pulled and door.data.partial_locked_message_key != "":
+			msg_key = door.data.partial_locked_message_key
+	if _hud != null and msg_key != "":
+		_hud.show_toast(msg_key)
 	if _dungeon_view != null:
 		_dungeon_view.shake_camera(0.4)
 
 func _pull_lever(lever: LeverInstance) -> void:
-	# A non-interactable lever (rusted shut, magically sealed, ...)
-	# gives feedback instead of pulling — same contract as doors.
 	if not lever.data.interactable:
 		_play_locked_feedback(lever.data)
 		return
-	# Pulling flips every linked door's state. The lever's own visual
-	# is derived (mirrors the doors), so we don't store its own bool.
-	# 2b ships with one linked door per lever; multi-door pairing
-	# falls out naturally when the list grows.
+	lever.toggle()
 	for door in lever.linked_doors:
-		if door != null:
-			door.opened = not door.opened
+		if door == null:
+			continue
+		door.opened = door.compute_lever_opened()
 	SoundManager.play(lever.data.interact_sound)
 	if _dungeon_view != null:
 		_dungeon_view.rebuild_doors()
