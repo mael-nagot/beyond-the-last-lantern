@@ -155,6 +155,10 @@ func _make_slot(inst: ItemInstance, slot_size: float, slot_index: int) -> Panel:
 	btn.ignore_texture_size = true
 	btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
 	btn.texture_normal = inst.data.icon
+	# Per-instance tint (Color.WHITE = no visible tint). Keys for
+	# different locks share a .tres but get slightly different
+	# tints so the player can tell them apart visually.
+	btn.modulate = inst.tint
 	btn.mouse_filter = Control.MOUSE_FILTER_STOP
 	btn.pressed.connect(_on_slot_pressed.bind(slot_index))
 	slot.add_child(btn)

@@ -219,18 +219,13 @@ The renderer-level meaning of `ObjectData.interactable` shifted: instead of "ski
 3. ✅ Every Game.gd click dispatch (chest / door / lever) short-circuits to `_play_locked_feedback` when `instance.data.interactable` is false
 4. ✅ Localization: `object.door_forest.locked`
 
-#### Task 2c follow-up — Per-pair key tint (visual differentiation)
-Multiple key-locked pairs in the same biome share the same `key_*.tres`, so all keys look identical even though they unlock different doors. The player can't tell at a glance why one key won't fit a given lock. Fix: auto-tint keys by global pair index, keeping pair 0 untinted (original art) and applying a slight HSV hue shift on subsequent pairs.
-
-Sketch:
-- `ItemInstance.tint: Color = Color.WHITE` (per-instance override; default = identity multiplier)
-- `LevelGenerator._tint_for_pair_index(i: int) -> Color`: returns `Color.WHITE` for `i == 0`, otherwise `Color.from_hsv(fmod(i * 0.618, 1.0), 0.3, 1.0)` — golden-ratio hue rotation, low saturation so it reads as a "tint" not a recolor.
-- `_try_place_key_door_pair` accepts the index (counter), passes it to the key placement, which sets `key_inst.tint`.
-- Three renderer touch-ups (all just `modulate = inst.tint`):
-  - `ItemBar._refresh_slot` on the `TextureButton`
-  - `DungeonView._make_item_sprite` on the `Sprite3D`
-  - `LootPopup` on its slot icons
-- Tests: extend `test_item_instance` for the default + extend integration tests to confirm pair index 0 keeps `Color.WHITE` and pair index ≥ 1 has a non-WHITE tint.
+#### Task 2c follow-up — Per-pair key tint (visual differentiation) ✅
+Multiple key-locked pairs in the same biome shared the same `key_*.tres`, so all keys looked identical even though they unlocked different doors. Fixed by auto-tinting keys by global pair index — pair 0 keeps the original art, subsequent pairs get a subtle hue shift.
+1. ✅ `ItemInstance.tint: Color = Color.WHITE` — per-instance Color, applied as `modulate` in every renderer
+2. ✅ `LevelGenerator._tint_for_pair_index(i)` — pair 0 returns WHITE; pair ≥ 1 returns `Color.from_hsv(fmod(i * 0.618, 1.0), 0.22, 1.0)` (golden-ratio hue rotation, low saturation so it stays a "tint" not a recolor)
+3. ✅ `_try_place_key_door_pair` propagates the global counter as `pair_index` to floor + chest placement, which sets `key_inst.tint`
+4. ✅ Three renderer touch-ups: `ItemBar._refresh_slot` (TextureButton.modulate), `DungeonView._make_item_sprite` (Sprite3D.modulate, signature now takes ItemInstance), `LootPopup` (slot button modulate). `ItemBar` resets to `Color.WHITE` when a slot empties so previous tints don't bleed.
+5. ✅ Tests: `test_item_instance` extended (tint default + override); `test_keys_are_tinted_per_pair_index` (integration — pair 0 stays WHITE, others non-WHITE)
 
 #### Task 2b follow-up — Enforce `door_must_gate_content` on LinkedObjectSpawn
 The flag exists on `LinkedObjectSpawn` (since 2a) but is RESERVED — placement of lever-locked doors does NOT reject useless gates. Only `KeyDoorSpawn` enforces the rule today. Easy extension: call the existing `_door_gates_content(door)` after `_try_place_lever_for_door` succeeds, roll back the pair (lever + door) if it returns false. Same chain v2 simulation, same content set (chest, lever, key, exit). One inspector field stops being a no-op.

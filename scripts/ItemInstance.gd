@@ -10,6 +10,13 @@ var durability: int = -1
 # Set by LevelGenerator's KeyDoorSpawn placement when the lock_id is
 # auto-generated; left empty for hand-authored static keys.
 var key_id: String = ""
+# Color modulate applied wherever the item is rendered (icon
+# button, dungeon floor sprite, loot popup slot). Default
+# Color.WHITE = identity multiplier, no visible tint. Used by
+# KeyDoorSpawn placement to give each pair's key a slightly
+# different hue so the player can tell visually-identical keys
+# apart at a glance.
+var tint: Color = Color.WHITE
 
 static func create(p_data: ItemData, p_count: int = 1) -> ItemInstance:
 	var inst := ItemInstance.new()

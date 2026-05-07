@@ -110,3 +110,19 @@ func test_keys_with_same_id_stack() -> void:
 	var b := ItemInstance.create(data, 1)
 	b.key_id = "lock_0"
 	assert_true(a.can_stack_with(b))
+
+# -------------------------------------------------------
+# Tint (Phase 8 Task 2c follow-up) — per-instance Color
+# multiplied wherever the item renders, so visually-identical
+# keys for different locks read as different shades.
+# -------------------------------------------------------
+
+func test_tint_defaults_white() -> void:
+	var inst := ItemInstance.create(_make_data(), 1)
+	assert_eq(inst.tint, Color.WHITE,
+		"default tint must be WHITE so untinted items render with identity modulate")
+
+func test_tint_can_be_overridden() -> void:
+	var inst := ItemInstance.create(_make_data(), 1)
+	inst.tint = Color(0.9, 0.85, 1.0)
+	assert_eq(inst.tint, Color(0.9, 0.85, 1.0))

@@ -362,13 +362,14 @@ func _build_items() -> void:
 				var inst: ItemInstance = cell.items[i]
 				if inst == null or inst.data == null or inst.data.dungeon_sprite == null:
 					continue
-				var sprite := _make_item_sprite(inst.data)
+				var sprite := _make_item_sprite(inst)
 				var offset: Vector3 = ITEM_STACK_OFFSETS[i]
 				var sprite_y: float = inst.data.dungeon_sprite_world_height * 0.5 + inst.data.dungeon_sprite_y_offset
 				sprite.position = Vector3(cx + offset.x, sprite_y, cz + offset.z)
 				_items_root.add_child(sprite)
 
-func _make_item_sprite(data: ItemData) -> Sprite3D:
+func _make_item_sprite(inst: ItemInstance) -> Sprite3D:
+	var data: ItemData = inst.data
 	var sprite := Sprite3D.new()
 	sprite.texture = data.dungeon_sprite
 	var tex_h: int = max(1, data.dungeon_sprite.get_height())
@@ -376,6 +377,10 @@ func _make_item_sprite(data: ItemData) -> Sprite3D:
 	sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+	# Per-instance tint (Color.WHITE = identity / no visible tint).
+	# Used by KeyDoorSpawn to give each pair's key a slightly
+	# different hue while sharing the same source asset.
+	sprite.modulate = inst.tint
 	return sprite
 
 func _make_material(albedo_set: Array, normal_set: Array = []) -> StandardMaterial3D:

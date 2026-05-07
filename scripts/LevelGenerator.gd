@@ -762,10 +762,11 @@ func _place_key_doors() -> void:
 			if prefix == "":
 				prefix = "lock"
 			var lock_id := "%s_%d" % [prefix, counter]
+			var pair_index := counter
 			counter += 1
-			_try_place_key_door_pair(spawn, lock_id)
+			_try_place_key_door_pair(spawn, lock_id, pair_index)
 
-func _try_place_key_door_pair(spawn: KeyDoorSpawn, lock_id: String) -> void:
+func _try_place_key_door_pair(spawn: KeyDoorSpawn, lock_id: String, pair_index: int) -> void:
 	var pre_chain: Dictionary = _chain_reachable_from_entrance()
 	var edges: Array = _candidate_edges_for_door_object(spawn.door_object, spawn.door_min_distance_to_other_object)
 	edges.shuffle()
@@ -782,7 +783,7 @@ func _try_place_key_door_pair(spawn: KeyDoorSpawn, lock_id: String) -> void:
 		doors.append(door)
 		_doors_by_edge[DoorInstance.edge_key(a, b)] = door
 
-		if _try_place_key_for_door(spawn, door, lock_id, pre_chain):
+		if _try_place_key_for_door(spawn, door, lock_id, pair_index, pre_chain):
 			# must_gate_content check — placement-time only. After we
 			# confirmed the world is solvable WITH the key collectable,
 			# verify the door actually GATES something when it stays
@@ -800,7 +801,7 @@ func _try_place_key_door_pair(spawn: KeyDoorSpawn, lock_id: String) -> void:
 	push_warning("LevelGenerator: could not place key-door pair (door='%s', key='%s', lock='%s')" %
 		[_obj_label(spawn.door_object), _item_label(spawn.key_item), lock_id])
 
-func _try_place_key_for_door(spawn: KeyDoorSpawn, paired_door: DoorInstance, lock_id: String, pre_chain: Dictionary) -> bool:
+func _try_place_key_for_door(spawn: KeyDoorSpawn, paired_door: DoorInstance, lock_id: String, pair_index: int, pre_chain: Dictionary) -> bool:
 	# Build a weighted ordering of enabled spawn locations. The first
 	# pick is "primary" (tried first); on failure, fall through to
 	# the rest in (weighted-)random order.
@@ -810,10 +811,10 @@ func _try_place_key_for_door(spawn: KeyDoorSpawn, paired_door: DoorInstance, loc
 	for location in locations:
 		match location:
 			KeyDoorSpawn.KEY_LOCATION_FLOOR:
-				if _try_place_key_on_floor(spawn, paired_door, lock_id, pre_chain):
+				if _try_place_key_on_floor(spawn, paired_door, lock_id, pair_index, pre_chain):
 					return true
 			KeyDoorSpawn.KEY_LOCATION_CHEST:
-				if _try_place_key_in_chest(spawn, paired_door, lock_id, pre_chain):
+				if _try_place_key_in_chest(spawn, paired_door, lock_id, pair_index, pre_chain):
 					return true
 			KeyDoorSpawn.KEY_LOCATION_ENEMY_DROP:
 				push_warning("LevelGenerator: KEY_LOCATION_ENEMY_DROP not yet supported (Phase 10) — falling back to next enabled location")
@@ -855,7 +856,7 @@ func _pick_weighted_index(entries: Array) -> int:
 		roll -= w
 	return entries.size() - 1
 
-func _try_place_key_on_floor(spawn: KeyDoorSpawn, paired_door: DoorInstance, lock_id: String, pre_chain: Dictionary) -> bool:
+func _try_place_key_on_floor(spawn: KeyDoorSpawn, paired_door: DoorInstance, lock_id: String, pair_index: int, pre_chain: Dictionary) -> bool:
 	var cells_by_type: Dictionary = _classify_floor_cells()
 	var raw_pool: Array = []
 	for placement_bit in [ObjectSpawn.PLACEMENT_CORRIDOR, ObjectSpawn.PLACEMENT_ROOM, ObjectSpawn.PLACEMENT_DEAD_END]:
@@ -889,6 +890,7 @@ func _try_place_key_on_floor(spawn: KeyDoorSpawn, paired_door: DoorInstance, loc
 		for candidate in pool:
 			var key_inst := ItemInstance.create(spawn.key_item, 1)
 			key_inst.key_id = lock_id
+			key_inst.tint = _tint_for_pair_index(pair_index)
 			grid[candidate.x][candidate.y].items.append(key_inst)
 			var post_chain: Dictionary = _chain_reachable_from_entrance()
 			if _chain_preserved_after_key(pre_chain, post_chain, paired_door):
@@ -897,7 +899,7 @@ func _try_place_key_on_floor(spawn: KeyDoorSpawn, paired_door: DoorInstance, loc
 		distance -= 1
 	return false
 
-func _try_place_key_in_chest(spawn: KeyDoorSpawn, paired_door: DoorInstance, lock_id: String, pre_chain: Dictionary) -> bool:
+func _try_place_key_in_chest(spawn: KeyDoorSpawn, paired_door: DoorInstance, lock_id: String, pair_index: int, pre_chain: Dictionary) -> bool:
 	# Find chests whose neighbour is in pre_chain (i.e. reachable
 	# WITHOUT this lock). The chest's contents are pre-seeded with
 	# the key so when the player opens it they collect the key.
@@ -925,6 +927,7 @@ func _try_place_key_in_chest(spawn: KeyDoorSpawn, paired_door: DoorInstance, loc
 		var chest: ObjectInstance = grid[chest_pos.x][chest_pos.y].object
 		var key_inst := ItemInstance.create(spawn.key_item, 1)
 		key_inst.key_id = lock_id
+		key_inst.tint = _tint_for_pair_index(pair_index)
 		chest.items.append(key_inst)
 		var post_chain: Dictionary = _chain_reachable_from_entrance()
 		if _chain_preserved_after_key(pre_chain, post_chain, paired_door):
@@ -943,6 +946,17 @@ func _chain_preserved_after_key(before: Dictionary, after: Dictionary, paired_do
 		if not after.has(cell_pos):
 			return false
 	return after.has(paired_door.cell_a) and after.has(paired_door.cell_b)
+
+func _tint_for_pair_index(index: int) -> Color:
+	# Per-pair key tint. Pair 0 = identity (WHITE) so the first key
+	# looks like the original asset. Pair >= 1 gets a low-saturation
+	# HSV hue rotated by the golden ratio for good visual separation
+	# even with small N. Sat 0.22 keeps the tint subtle — the key
+	# clearly looks like a key, just a different shade.
+	if index <= 0:
+		return Color.WHITE
+	var hue: float = fmod(float(index) * 0.61803398875, 1.0)
+	return Color.from_hsv(hue, 0.22, 1.0)
 
 func _chest_holds_a_key(chest: ObjectInstance) -> bool:
 	if chest == null:
