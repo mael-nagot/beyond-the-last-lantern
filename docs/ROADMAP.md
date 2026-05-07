@@ -82,8 +82,11 @@
 - Debug full reveal toggle
 - Map updates on every player movement
 
-#### Phase 6 polish — Map should pause input
-While the map popup is open, WASD / Q-E / movement-pad presses still drive the player forward, which is disorienting because the map is meant to be a planning view. Fix: gate `Game._input` and the movement-pad signals on `_hud.map_popup.is_open()` (already exists). Also gate the F-pickup hotkey and F1/F2/F3 debug keys for consistency. Re-enable on map close.
+#### Phase 6 polish — Map should pause input ✅
+1. ✅ Added `MapPopup.is_open()` (returns `visible`, true through the close-animation tail so a held W key can't leak through as the map fades out)
+2. ✅ `Game._on_move` (movement-pad signals) and `Game._input` (keyboard) both early-return via the new `_is_map_blocking_input()` helper while the map is open
+3. ✅ Same gate covers movement (WASD / Q-E / arrows), pickup (F), and debug keys (F1 / F2 / F3) — pure UI input that goes to gameplay, never the ✕ button which closes the map itself
+4. ✅ Tests: gating is UI behaviour rather than pure logic, and `MapPopup` is scene-driven (uses `@onready` refs to scene children), so a programmatic GUT test would fail to construct it cleanly. Covered by the manual test plan instead.
 
 ---
 

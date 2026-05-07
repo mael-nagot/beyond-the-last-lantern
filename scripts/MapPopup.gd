@@ -54,6 +54,15 @@ func close() -> void:
 	SoundManager.play_map_close()
 	_play_close_animation()
 
+func is_open() -> bool:
+	# True from open() until _finish_close flips visible to false
+	# (i.e. for the full close animation tail). Game.gd uses this to
+	# gate movement / pickup / debug input — we keep gating during
+	# the close tail because letting a held W key leak through right
+	# as the map fades out is more disorienting than holding for
+	# another ~0.2 s.
+	return visible
+
 func _play_open_animation() -> void:
 	# Anchor the page at the top-left so the unfurl reads as a left
 	# spine flipping the right-hand page open.

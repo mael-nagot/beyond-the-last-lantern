@@ -339,6 +339,11 @@ func _on_item_dropped_on_dungeon(slot_index: int, source_instance: ItemInstance)
 	_update_pickup_prompt()
 
 func _on_move(action: String) -> void:
+	# Map is a planning view — letting movement bleed through while
+	# it's open / fading out is disorienting. Same gate applies to
+	# the pad and to keyboard input below.
+	if _is_map_blocking_input():
+		return
 	match action:
 		"forward":     _player_controller.move_forward()
 		"backward":    _player_controller.move_backward()
@@ -348,6 +353,9 @@ func _on_move(action: String) -> void:
 		"strafe_right":_player_controller.strafe_right()
 	_update_map()
 	_update_pickup_prompt()
+
+func _is_map_blocking_input() -> bool:
+	return _hud != null and _hud.map_popup != null and _hud.map_popup.is_open()
 
 func _update_map() -> void:
 	if _hud and _player_controller:
@@ -396,6 +404,11 @@ func _input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed:
 		return
 	if event.is_echo():
+		return
+	# Map blocks every gameplay-affecting key (movement, pickup,
+	# debug spawns / damage). Map close is wired to the map's own ✕
+	# button, so we don't need an Escape-to-close shortcut here.
+	if _is_map_blocking_input():
 		return
 	match event.keycode:
 		KEY_W, KEY_UP:   _player_controller.move_forward()
