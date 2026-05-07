@@ -144,6 +144,15 @@ Future-friendly behaviours:
 - Drop on dungeon currently drops onto the current cell. The roadmap notes a future split: lower 1/3 of the dungeon view = drop on current cell; upper 2/3 = throw at enemies up to N tiles away (Phase 10 combat targeting).
 - `Character` is intentionally minimal — Phase 9 will replace it with a full `CharacterData` resource (stats, equipment, spells).
 
+#### Phase 7 polish — Item description popup
+Clicking (single click, not drag) an item slot in the bar should open a small popup showing the item's name + description (and any other relevant metadata — durability for equipment later, key id for keys, effect summary for consumables). Closing on click-outside or X. Useful in particular for the player who has multiple visually-similar keys (different `key_id`) and wants to know which lock each one opens, but generally good UX for any item.
+Sketch:
+- New `ItemInfoPopup.gd` scene/Control (or reuse the existing `Toast`/`LootPopup` patterns) — full or partial overlay with name + description block
+- Wire `ItemSlotButton.pressed` (currently used only for drag) to also fire an `info_requested(slot_index)` signal that opens the popup. Drag-start still cancels the click → no popup when dragging
+- Toggle behaviour: clicking the same slot again closes the popup; clicking a different slot swaps content
+- Localization: name + description already use `tr()` via `ItemData.get_display_name()` / `get_display_description()` — no new keys needed
+- Stretch: special section for keys showing the `lock_id` (for debug / "this key opens lock copper_2")
+
 #### Deferred (blocked by other phases)
 - Drag-to-equip (Phase 9 — character inventory)
 - Drag-to-throw / throwables (Phase 10 — combat targeting)
