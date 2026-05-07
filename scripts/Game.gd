@@ -297,7 +297,7 @@ func _on_item_slot_clicked(slot_index: int) -> void:
 		return
 	# Tapping the same slot while the popup is already showing it
 	# closes — feels like a toggle.
-	var popup := _hud.item_description_popup
+	var popup: ItemDescriptionPopup = _hud.item_description_popup
 	if popup.is_open() and popup.get_current_instance() == inst:
 		popup.close()
 		return
