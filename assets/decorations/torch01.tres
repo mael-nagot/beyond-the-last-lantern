@@ -11,5 +11,5 @@ face_camera = true
 light_color = Color(1, 0.85430586, 0.6651851, 1)
 light_energy = 1.5
 light_y_offset = 0.4
-light_flicker_amount = 0.2
+light_flicker_amount = 0.3
 metadata/_custom_type_script = "uid://d0vaqgopwsaml"
