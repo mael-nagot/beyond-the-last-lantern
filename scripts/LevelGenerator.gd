@@ -634,79 +634,144 @@ func _try_place_linked_cluster(spawn: LinkedObjectSpawn) -> void:
 	var doors_per: int = max(1, spawn.doors_per_cluster)
 	var levers_per: int = max(1, spawn.levers_per_cluster)
 
-	var edges: Array = _candidate_edges_for_door_object(spawn.door_object, spawn.door_min_distance_to_other_object)
-	edges.shuffle()
-	if edges.size() < doors_per:
-		push_warning("LevelGenerator: not enough candidate edges (%d) for cluster of %d doors" %
-			[edges.size(), doors_per])
-		return
+	# Bounded outer attempts — fresh shuffles let us recover from a
+	# door combo that lever placement / must_gate rejected, or from
+	# an unlucky shuffle that happened to put adjacent edges first.
+	var max_attempts: int = 30
+	var attempt: int = 0
+	while attempt < max_attempts:
+		attempt += 1
 
-	# Greedy walk through the candidate edges, picking `doors_per` at a
-	# time. On lever-placement / chain / must_gate failure, slide the
-	# window forward by 1 and retry. Bounded by the number of edges
-	# minus the cluster size.
-	var window_start: int = 0
-	while window_start + doors_per <= edges.size():
+		# Place doors_per doors with within-cluster spacing. The pool
+		# is rebuilt before each pick so `_too_close_to_existing_door`
+		# (which walks `doors`) sees previously-placed cluster
+		# siblings — that's how `door_min_distance_to_other_object`
+		# enforces spacing WITHIN the cluster, not just against
+		# pre-existing doors.
 		var doors_in_cluster: Array = []
-		var combo_failed := false
+		var doors_succeeded := true
 		for i in range(doors_per):
-			var edge: Array = edges[window_start + i]
-			var a: Vector2i = edge[0]
-			var b: Vector2i = edge[1]
-			if _doors_by_edge.has(DoorInstance.edge_key(a, b)):
-				combo_failed = true  # earlier cluster claimed this edge
+			var fresh: Array = _candidate_edges_for_door_object(spawn.door_object, spawn.door_min_distance_to_other_object)
+			fresh.shuffle()
+			var picked = null
+			for edge in fresh:
+				if _doors_by_edge.has(DoorInstance.edge_key(edge[0], edge[1])):
+					continue
+				picked = edge
 				break
-			var door := DoorInstance.create_door(spawn.door_object, a, b)
+			if picked == null:
+				doors_succeeded = false
+				break
+			var door := DoorInstance.create_door(spawn.door_object, picked[0], picked[1])
 			door.lever_logic = spawn.lever_logic
 			doors.append(door)
-			_doors_by_edge[DoorInstance.edge_key(a, b)] = door
+			_doors_by_edge[DoorInstance.edge_key(picked[0], picked[1])] = door
 			doors_in_cluster.append(door)
 
-		if combo_failed:
+		if not doors_succeeded:
+			# Rollback partials. Insufficient eligible edges given the
+			# spacing constraint — retrying with a new shuffle won't
+			# help, so bail.
 			for d in doors_in_cluster:
 				doors.erase(d)
 				_doors_by_edge.erase(DoorInstance.edge_key(d.cell_a, d.cell_b))
-			window_start += 1
-			continue
+			push_warning("LevelGenerator: could not place %d cluster doors with min_distance=%d (lever='%s', door='%s')" %
+				[doors_per, spawn.door_min_distance_to_other_object, _obj_label(spawn.lever_object), _obj_label(spawn.door_object)])
+			return
 
 		var levers_in_cluster: Array = _try_place_levers_for_cluster(spawn, doors_in_cluster, pre_chain, levers_per)
-		if not levers_in_cluster.is_empty():
-			# must_gate_content: at least one door in the cluster
-			# must gate something meaningful (chest / lever / key /
-			# exit becomes unreachable when that door stays closed).
-			# Multi-door clusters are typically redundant paths, so
-			# requiring ALL doors to gate would be too strict —
-			# requiring AT LEAST ONE keeps the cluster meaningful
-			# while allowing the others to be parallel routes.
-			if spawn.door_must_gate_content:
-				var any_gates := false
-				for d in doors_in_cluster:
-					if _door_gates_content(d):
-						any_gates = true
-						break
-				if not any_gates:
-					_rollback_linked_cluster(doors_in_cluster, levers_in_cluster)
-					window_start += 1
-					continue
-			return  # cluster committed
+		if levers_in_cluster.is_empty():
+			# Rollback doors and try a fresh combo.
+			for d in doors_in_cluster:
+				doors.erase(d)
+				_doors_by_edge.erase(DoorInstance.edge_key(d.cell_a, d.cell_b))
+			continue
 
-		# Lever placement failed — rollback doors and slide window.
-		for d in doors_in_cluster:
-			doors.erase(d)
-			_doors_by_edge.erase(DoorInstance.edge_key(d.cell_a, d.cell_b))
-		window_start += 1
+		# must_gate_content: at least one door in the cluster must
+		# gate something meaningful. Multi-door clusters are
+		# typically redundant paths, so requiring ALL doors to gate
+		# would be too strict — at-least-one keeps the cluster
+		# meaningful while allowing the others as parallel routes.
+		if spawn.door_must_gate_content:
+			var any_gates := false
+			for d in doors_in_cluster:
+				if _door_gates_content(d):
+					any_gates = true
+					break
+			if not any_gates:
+				_rollback_linked_cluster(doors_in_cluster, levers_in_cluster)
+				continue
+		return  # cluster committed
 
-	push_warning("LevelGenerator: could not place linked cluster (lever='%s', door='%s', %d×%d)" %
-		[_obj_label(spawn.lever_object), _obj_label(spawn.door_object), levers_per, doors_per])
+	push_warning("LevelGenerator: could not place linked cluster after %d attempts (lever='%s', door='%s', %d×%d)" %
+		[max_attempts, _obj_label(spawn.lever_object), _obj_label(spawn.door_object), levers_per, doors_per])
 
 func _try_place_levers_for_cluster(spawn: LinkedObjectSpawn, doors_in_cluster: Array, pre_chain: Dictionary, levers_per: int) -> Array:
-	# Chest-style cell classification, then a chain-reachability check
-	# after committing all M levers + N doors with cross-links. Returns
-	# the placed lever instances on success or an empty Array on
-	# failure. Caller is responsible for rolling back the doors when
-	# we return empty.
+	# Place `levers_per` lever cells, rebuilding the eligibility pool
+	# between each pick so `_too_close_to_existing_object` (which
+	# walks the grid for any cell.object) sees previously-placed
+	# cluster siblings — that's how `lever_min_distance_to_other_object`
+	# enforces spacing WITHIN the cluster, not just against
+	# pre-existing levers / chests. Returns the placed lever instances
+	# on success or an empty Array on failure (caller rolls back doors).
+	var distance: int = max(0, spawn.lever_min_distance_to_other_object)
+	while distance >= 0:
+		# A few attempts per distance — random shuffles can lock into
+		# an unrecoverable combo, so retrying with a fresh shuffle
+		# helps. Bounded so a hostile pool can't burn forever.
+		var attempts: int = 0
+		var max_combo_attempts: int = 6
+		while attempts < max_combo_attempts:
+			attempts += 1
+			var levers: Array = []
+			var lever_cells: Array = []
+			var combo_succeeded := true
+			for i in range(levers_per):
+				var pool: Array = _eligible_lever_cells(spawn, doors_in_cluster, distance)
+				if pool.is_empty():
+					combo_succeeded = false
+					break
+				pool.shuffle()
+				var cell_pos: Vector2i = pool[0]
+				var lever := LeverInstance.create_lever(spawn.lever_object)
+				grid[cell_pos.x][cell_pos.y].object = lever
+				levers.append(lever)
+				lever_cells.append(cell_pos)
+
+			if combo_succeeded:
+				# Cross-link: every lever sees every door, every door
+				# sees every lever. lever_logic was already set on each
+				# door at creation time.
+				for lever in levers:
+					lever.linked_doors = doors_in_cluster.duplicate()
+				for door in doors_in_cluster:
+					door.linked_levers = levers.duplicate()
+
+				var post_chain: Dictionary = _chain_reachable_from_entrance()
+				if _chain_preserved_after_cluster(pre_chain, post_chain, lever_cells, doors_in_cluster, spawn.lever_logic):
+					return levers  # leave mutations in place
+
+			# Rollback this combo (partial or fully placed but failed
+			# the chain check) and try a new shuffle.
+			for i in range(levers.size()):
+				var pos: Vector2i = lever_cells[i]
+				grid[pos.x][pos.y].object = null
+				levers[i].linked_doors = []
+			for door in doors_in_cluster:
+				door.linked_levers = []
+		distance -= 1
+	return []
+
+func _eligible_lever_cells(spawn: LinkedObjectSpawn, doors_in_cluster: Array, min_distance: int) -> Array:
+	# Build the lever-eligibility pool fresh — re-classifies cells
+	# (cheap), excludes anything already occupied, applies the
+	# placement-flag and lever-to-cluster-range filters, and degrades
+	# `min_distance` to other objects per the caller. Called once per
+	# lever within a cluster so the previous cluster siblings (now on
+	# the grid as `cell.object = lever`) are honoured by the
+	# `_too_close_to_existing_object` distance check.
 	var cells_by_type: Dictionary = _classify_floor_cells()
-	var raw_pool: Array = []
+	var pool: Array = []
 	for placement_bit in [ObjectSpawn.PLACEMENT_CORRIDOR, ObjectSpawn.PLACEMENT_ROOM, ObjectSpawn.PLACEMENT_DEAD_END]:
 		if (spawn.lever_placement & placement_bit) == 0:
 			continue
@@ -719,57 +784,10 @@ func _try_place_levers_for_cluster(spawn: LinkedObjectSpawn, doors_in_cluster: A
 				continue
 			if not _within_lever_to_cluster_range(pos, doors_in_cluster, spawn):
 				continue
-			raw_pool.append(pos)
-	if raw_pool.size() < levers_per:
-		return []
-
-	# Graceful-degrade min_distance, matching chest behaviour.
-	var distance: int = max(0, spawn.lever_min_distance_to_other_object)
-	while distance >= 0:
-		var pool: Array = raw_pool.duplicate()
-		if distance > 0:
-			pool = pool.filter(
-				func(p): return not _too_close_to_existing_object(p, distance)
-			)
-		if pool.size() < levers_per:
-			distance -= 1
-			continue
-		pool.shuffle()
-		# A few attempts per distance — pick `levers_per` cells, commit,
-		# check chain. If the random combo fails, reshuffle and retry.
-		# Bounded so a hostile pool can't burn forever.
-		var attempts: int = 0
-		var max_attempts: int = 6
-		while attempts < max_attempts and pool.size() >= levers_per:
-			attempts += 1
-			var cells: Array = pool.slice(0, levers_per)
-			var levers: Array = []
-			for cell_pos in cells:
-				var lever := LeverInstance.create_lever(spawn.lever_object)
-				grid[cell_pos.x][cell_pos.y].object = lever
-				levers.append(lever)
-			# Cross-link: every lever sees every door, every door sees
-			# every lever. lever_logic was already set on each door at
-			# creation time.
-			for lever in levers:
-				lever.linked_doors = doors_in_cluster.duplicate()
-			for door in doors_in_cluster:
-				door.linked_levers = levers.duplicate()
-
-			var post_chain: Dictionary = _chain_reachable_from_entrance()
-			if _chain_preserved_after_cluster(pre_chain, post_chain, cells, doors_in_cluster, spawn.lever_logic):
-				return levers  # leave mutations in place
-
-			# Rollback this combo and reshuffle for the next attempt.
-			for i in range(levers.size()):
-				var pos: Vector2i = cells[i]
-				grid[pos.x][pos.y].object = null
-				levers[i].linked_doors = []
-			for door in doors_in_cluster:
-				door.linked_levers = []
-			pool.shuffle()
-		distance -= 1
-	return []
+			if min_distance > 0 and _too_close_to_existing_object(pos, min_distance):
+				continue
+			pool.append(pos)
+	return pool
 
 func _candidate_edges_for_door_object(door_data: ObjectData, min_distance: int) -> Array:
 	# Mirrors `_candidate_edges_for_door` but takes raw ObjectData +

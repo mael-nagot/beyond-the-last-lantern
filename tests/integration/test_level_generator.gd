@@ -972,6 +972,71 @@ func test_and_cluster_levers_all_chain_reachable() -> void:
 			assert_true(has_neighbour,
 				"seed %d: AND-cluster lever at %s isn't chain-reachable" % [s, cell_pos])
 
+func test_cluster_doors_respect_min_distance_between_siblings() -> void:
+	# Regression: before the fix, the within-cluster spacing constraint
+	# was filtered ONCE before any cluster door was placed, so the
+	# 1st and 2nd cluster doors could land adjacent even with
+	# `door_min_distance_to_other_object` set high. Now the candidate
+	# pool is rebuilt per door so siblings see their predecessors.
+	var spawn := _make_linked_spawn(_make_lever_data(), _make_door(), 1, 1)
+	spawn.levers_per_cluster = 1
+	spawn.doors_per_cluster = 3
+	spawn.door_min_distance_to_other_object = 3
+	var biome := _make_biome()
+	biome.linked_objects = [spawn]
+	for s in [11, 22, 33, 44, 55, 66]:
+		var gen := _make_generator(biome, s)
+		var cluster_doors: Array = []
+		for door in gen.doors:
+			if not door.linked_levers.is_empty():
+				cluster_doors.append(door)
+		# Best-effort placement may fail for a hostile seed; only
+		# assert spacing on the seeds that produced the full cluster.
+		if cluster_doors.size() < 3:
+			continue
+		for i in range(cluster_doors.size()):
+			for j in range(i + 1, cluster_doors.size()):
+				var d1: DoorInstance = cluster_doors[i]
+				var d2: DoorInstance = cluster_doors[j]
+				var dist: int = min(
+					min(d1.cell_a.distance_to(d2.cell_a), d1.cell_a.distance_to(d2.cell_b)),
+					min(d1.cell_b.distance_to(d2.cell_a), d1.cell_b.distance_to(d2.cell_b))
+				)
+				assert_gte(dist, 3,
+					"seed %d: cluster doors %s—%s and %s—%s are %d apart, expected ≥3" %
+					[s, d1.cell_a, d1.cell_b, d2.cell_a, d2.cell_b, dist])
+
+func test_cluster_levers_respect_min_distance_between_siblings() -> void:
+	# Same regression coverage on the lever side. With
+	# `lever_min_distance_to_other_object = 4`, two levers in the same
+	# cluster shouldn't land adjacent. Lever spacing has graceful
+	# degrade (down to 0), so we assert the actual minimum holds at
+	# whatever distance the algorithm settled on — i.e. SOME
+	# spacing-aware placement happened, not the pre-fix "first M
+	# cells of the shuffled pool" behaviour.
+	var spawn := _make_linked_spawn(_make_lever_data(), _make_door(), 1, 1)
+	spawn.levers_per_cluster = 3
+	spawn.doors_per_cluster = 1
+	spawn.lever_min_distance_to_other_object = 4
+	var biome := _make_biome()
+	biome.linked_objects = [spawn]
+	for s in [11, 22, 33, 44, 55, 66]:
+		var gen := _make_generator(biome, s)
+		var lever_cells: Array = _all_lever_cells(gen)
+		if lever_cells.size() < 3:
+			continue
+		# Find the actual minimum pairwise distance among placed
+		# cluster levers. It should be > 1 (the pre-fix bug let
+		# adjacent cells through).
+		var min_pair: int = -1
+		for i in range(lever_cells.size()):
+			for j in range(i + 1, lever_cells.size()):
+				var d: int = absi(lever_cells[i].x - lever_cells[j].x) + absi(lever_cells[i].y - lever_cells[j].y)
+				if min_pair < 0 or d < min_pair:
+					min_pair = d
+		assert_gt(min_pair, 1,
+			"seed %d: cluster levers shouldn't be adjacent — got min pair distance %d" % [s, min_pair])
+
 func test_or_cluster_at_least_one_lever_chain_reachable() -> void:
 	# OR clusters only need ONE lever chain-reachable (any pull opens
 	# all doors; the rest can sit behind them as secondary levers).
