@@ -1,37 +1,14 @@
 class_name DoorInstance
 extends ObjectInstance
 
-# Runtime state for a door placed on the EDGE between two adjacent
-# floor cells. Doors are NEVER stored on a GridCell — they live
-# exclusively in LevelGenerator.doors. This is structural: it makes
-# it impossible for the cell-based renderer or movement code to see
-# a door, so the previous "sometimes in the middle / sometimes on
-# the edge" rendering bug cannot recur.
-#
-# cell_a and cell_b are stored canonically (smaller cell first under
-# lex ordering: lower x, then lower y) so any pair (a, b) and (b, a)
-# resolves to the same door.
+enum LeverLogic { AND = 0, OR = 1 }
 
 var cell_a: Vector2i
 var cell_b: Vector2i
 
-# Back-link to any levers that toggle this door. Populated by
-# LevelGenerator at placement time when this door is part of a
-# LinkedObjectSpawn. Empty for decorative doors. Used by the click
-# handler to refresh lever visuals after the door state changes
-# (lever sprite mirrors door state via LeverInstance.get_visual_opened).
-# 2b ships at most 1 entry; richer pairing extends naturally.
-var linked_levers: Array = []  # Array[LeverInstance] — untyped to avoid cyclic typed-array trouble
+var linked_levers: Array = []  # Array[LeverInstance]
+var lever_logic: int = LeverLogic.AND
 
-# Phase 8 Task 2c — key-locked doors. Non-empty `lock_id` means the
-# door requires an `ItemInstance` whose `get_key_id()` matches before
-# it can be opened from a direct click. `unlocked` flips true the
-# first time the player applies the key and stays true forever
-# ("once unlocked, never re-locks"); subsequent clicks behave like
-# a normal toggle. Set by LevelGenerator at placement time — for
-# 2c, KeyDoorSpawn auto-generates per-pair lock_ids unless the
-# spawn's lock_id_prefix is set, in which case ids share that
-# prefix so one key can open many doors.
 var lock_id: String = ""
 var unlocked: bool = false
 
@@ -74,3 +51,20 @@ func is_door() -> bool:
 # unlock is sticky.
 func is_key_locked() -> bool:
 	return lock_id != "" and not unlocked
+
+func is_lever_locked() -> bool:
+	return not linked_levers.is_empty()
+
+func compute_lever_opened() -> bool:
+	if linked_levers.is_empty():
+		return opened
+	if lever_logic == LeverLogic.AND:
+		for lever in linked_levers:
+			if lever == null or not lever.pulled:
+				return false
+		return true
+	else:
+		for lever in linked_levers:
+			if lever != null and lever.pulled:
+				return true
+		return false

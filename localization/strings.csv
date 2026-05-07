@@ -14,6 +14,7 @@ object.chest_iron.description,A reinforced iron chest.
 object.door_forest.name,Forest Door
 object.door_forest.description,A weathered wooden door blocking the path.
 object.door_forest.locked,It won't budge. A lever must control it.
+object.door_forest.partial_locked,Some levers pulled… but not all of them.
 object.lever_forest.name,Forest Lever
 object.lever_forest.description,A wooden lever — pulling it operates a linked door.
 object.door_forest_locked.name,Locked Forest Door

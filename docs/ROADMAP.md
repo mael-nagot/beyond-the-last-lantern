@@ -210,12 +210,12 @@ Doors live on the EDGE between two adjacent corridor cells, never on a `GridCell
 The lever lives on a `GridCell.object` (chest-style cell-bound object). The door lives on an edge (Task 2a). They cross-link at placement time so each remembers the other.
 1. ✅ `LinkedObjectSpawn.gd` Resource (biome-level pair entry: lever_object, door_object, count, lever_placement, lever_min_distance / door_min_distance for anti-clustering, lever_to_door_min_distance / lever_to_door_max_distance for puzzle spread, door_must_gate_content reserved for 2c)
 2. ✅ `BiomeData.linked_objects: Array[LinkedObjectSpawn]` (separate from `objects` so chests/decorative-doors keep their simple shape)
-3. ✅ `LeverInstance.gd` (RefCounted, extends `ObjectInstance`) — adds `linked_doors: Array`, overrides `get_visual_opened()` so the lever sprite mirrors "any linked door is open"
-4. ✅ `DoorInstance.linked_levers: Array` back-link populated at placement; used by `Game._toggle_door` to refresh lever sprites after a direct door click
+3. ✅ `LeverInstance.gd` (RefCounted, extends `ObjectInstance`) — `linked_doors: Array`, `pulled: bool`, `toggle()`, `get_visual_opened()` returns `pulled` directly
+4. ✅ `DoorInstance.linked_levers: Array` + `lever_logic` (AND/OR) + `compute_lever_opened()` + `is_lever_locked()`
 5. ✅ `ObjectInstance.get_visual_opened()` virtual method (default returns `opened`) — DungeonView reads it instead of `opened` for cell-bound rendering, so the chest contract stays unchanged
 6. ✅ `LevelGenerator._place_linked_objects()` runs after `_place_doors()`. For each pair: pick a 1-wide corridor edge for the door (reuse decorative-door eligibility), then pick a chest-style cell for the lever that's reachable from the entrance EVEN WITH the linked door treated as closed. Rolls back the door if no lever cell qualifies, so we never ship orphan halves.
-7. ✅ `Game._on_object_clicked` dispatches `LeverInstance` to a pull handler that flips every linked door's state, plays the lever's interact sound, and rebuilds both door and cell-object visuals
-8. ✅ `MapPopup` draws lever as a small slate diamond (filled when the linked door is closed; outline-only when open) so players can find their levers from the map
+7. ✅ `Game._on_object_clicked` dispatches `LeverInstance` to a pull handler that toggles `pulled`, recomputes each linked door's state via `compute_lever_opened()`, plays sound, and rebuilds both door and cell-object visuals. Lever-locked doors show locked/partial feedback on direct click.
+8. ✅ `MapPopup` draws lever as a small slate diamond (filled when un-pulled; outline-only when pulled) so players can find their levers from the map
 9. ✅ Localization: `object.lever_forest.name`, `object.lever_forest.description`
 10. ✅ Tests: `test_linked_object_spawn.gd`, `test_lever_instance.gd` (unit); linked-pair placement integration tests in `test_level_generator.gd`
 11. ⏳ Manual asset work (developer): `res://assets/objects/lever_forest.tres` (closed = lever down, opened = lever up sprites), lever sprites + interact sound, add a `LinkedObjectSpawn` entry to `res://assets/biomes/forest.tres`
@@ -224,9 +224,9 @@ The lever lives on a `GridCell.object` (chest-style cell-bound object). The door
 **Bug:** With multiple `LinkedObjectSpawn` pairs the placement check was per-pair only — already-placed sibling doors weren't taken into account. Two doors could land with both levers behind both doors, hard-stucking the player at game start.
 
 **Fix:** Replaced the single-edge check with a **chain-reachability** simulation in `LevelGenerator`:
-1. ✅ `_chain_reachable_from_entrance()` — iterative fixed-point. Start with every directly-clickable door treated as open; BFS; mark every lever-reachable door as openable; BFS again until no progress.
-2. ✅ `_try_place_linked_pair()` snapshots `pre_chain` before each attempt; `_try_place_lever_for_door()` mutates the grid with each candidate, computes `post_chain`, and validates that `pre_chain ⊆ post_chain ∪ {new_lever_cell}` AND the new lever has a chain-reachable neighbour. Failures roll back lever + door together — no orphan halves.
-3. ✅ Permits progressive gating (lever_1 opens door_A, behind which is lever_2) but rejects cycles. Implicit consequences: existing levers stay reachable, existing chests stay interactable, exit stays reachable (all were in `pre_chain`).
+1. ✅ `_chain_reachable_from_entrance()` — iterative fixed-point. Lever-locked doors are excluded from initial open-set. Each iteration collects reachable levers, then evaluates each lever-locked door under its AND/OR logic. BFS again until no progress.
+2. ✅ `_try_place_cluster()` snapshots `pre_chain` before each attempt; places doors then levers; validates `pre_chain ⊆ post_chain ∪ {lever_cells}` AND all cluster levers have chain-reachable neighbours. Failures roll back entire cluster atomically.
+3. ✅ Permits progressive gating but rejects cycles. Implicit consequences: existing levers stay reachable, existing chests stay interactable, exit stays reachable (all were in `pre_chain`).
 4. ✅ Dropped the now-redundant `_lever_placement_preserves_reachability` and `_bfs_walkable_with_closed_edges_and_wall` helpers.
 5. ✅ Tests: `test_every_lever_chain_reachable_with_three_pairs` + `test_exit_remains_chain_reachable_with_linked_pairs` exercise the cycle case across multiple seeds.
 
@@ -250,11 +250,15 @@ Multiple key-locked pairs in the same biome shared the same `key_*.tres`, so all
 2. ✅ Default stays `false` so existing biomes / tests keep their previous behaviour — designers opt in per spawn
 3. ✅ Tests: `test_linked_must_gate_content_rejects_useless_locks` (every placed lever-locked door gates a chest / lever / key / exit) and `test_linked_pair_rollback_clears_lever_cell_when_must_gate_rejects` (multi-seed: every lever cell still resolves to a door in `gen.doors`, no orphan levers shipped)
 
-#### Task 2b follow-up — Richer lever ↔ door pairing
-1. Allow one lever to toggle multiple doors (lever's `linked_doors` already an Array)
-2. Allow one door to be toggled by multiple levers (door's `linked_levers` already an Array; lever sprite already uses "any door open" — confirm or revisit semantics for many-to-many)
-3. Decide AND/OR semantics if needed (e.g. door opens only when ALL levers pulled vs. ANY lever pulled). Today the model is "each pull flips each linked door", which is consistent for 1:1 and degrades reasonably for many.
-4. Update `LinkedObjectSpawn` shape to express N:M pairing rules (probably `lever_count_per_pair`, `door_count_per_pair`, or a more declarative pairing graph)
+#### Task 2b follow-up — M:N lever ↔ door clusters ✅
+Generalised from 1:1 pairs to M:N clusters. Each `LinkedObjectSpawn` produces N independent clusters, each containing `levers_per_cluster` levers and `doors_per_cluster` doors, all cross-linked. Doors evaluate their opened state under a per-cluster AND/OR rule (`lever_logic`).
+1. ✅ **Lever model:** `LeverInstance.pulled: bool` + `toggle()` — lever now has its own state. `get_visual_opened()` returns `pulled` directly (no longer derives from linked doors). `Game._pull_lever` toggles `pulled` and recomputes each linked door via `door.compute_lever_opened()`.
+2. ✅ **Door model:** `DoorInstance.LeverLogic` enum (AND/OR), `lever_logic` field, `is_lever_locked()`, `compute_lever_opened()`. AND: all levers must be pulled. OR: any one suffices. Lever-locked doors never toggle via direct click — `Game._toggle_door` shows locked/partial feedback instead.
+3. ✅ **Partial locked feedback:** `ObjectData.partial_locked_message_key` — shown for AND-logic doors when some (but not all) levers are pulled. Falls back to `locked_message_key` when empty.
+4. ✅ **LinkedObjectSpawn cluster shape:** `levers_per_cluster`, `doors_per_cluster`, `lever_logic` fields. Defaults (1, 1, AND) preserve backward compat with existing biome .tres files.
+5. ✅ **Placement:** `_try_place_cluster` places doors first, then levers via farthest-first heuristic with one-lever-per-room uniqueness. Distance constraints degrade gracefully (~30 attempts). Atomic rollback of entire cluster on failure.
+6. ✅ **Chain simulator fix:** Initial open-set now excludes lever-locked doors (regardless of `interactable`). Lever evaluation uses AND/OR logic: collects reachable levers into a set, then evaluates each door's `lever_logic` over its linked levers. Both production and test-side simulators updated.
+7. ✅ **Tests:** Unit tests for pulled/toggle/visual, LeverLogic/compute/is_lever_locked, cluster shape fields. Integration tests for 2:1, 1:2, 2:2 cross-linking, lever_logic propagation, chain reachability, atomic rollback.
 
 #### Task 2c — Locked doors + gating placement ✅ (code; awaits manual asset/biome wiring)
 A door tagged with a `lock_id` requires a matching key item (`ItemData` with `key_id == lock_id`). On click without the key: locked feedback (sound + toast). On click with the key: one count of the key is consumed from the bar, the door unlocks PERMANENTLY, and toggles open. Future clicks behave normally.

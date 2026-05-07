@@ -701,7 +701,7 @@ func _simulate_chain_reachable_from_entrance(gen: LevelGenerator) -> Dictionary:
 	for door in gen.doors:
 		# Decorative (interactable) doors that aren't key-locked are
 		# openable from the start.
-		if door.data != null and door.data.interactable and not door.is_key_locked():
+		if door.data != null and door.data.interactable and not door.is_key_locked() and door.linked_levers.is_empty():
 			open_keys[DoorInstance.edge_key(door.cell_a, door.cell_b)] = true
 	var reachable: Dictionary = {}
 	while true:
@@ -734,7 +734,8 @@ func _simulate_chain_reachable_from_entrance(gen: LevelGenerator) -> Dictionary:
 							if kid2 != "" and not collected_keys.has(kid2):
 								collected_keys[kid2] = true
 								progressed = true
-		# Pull reachable levers.
+		# Collect reachable levers, then evaluate lever-locked doors.
+		var reachable_levers: Dictionary = {}
 		for x in range(gen.grid_width):
 			for y in range(gen.grid_height):
 				var cell: GridCell = gen.grid[x][y]
@@ -746,15 +747,29 @@ func _simulate_chain_reachable_from_entrance(gen: LevelGenerator) -> Dictionary:
 					if reachable.has(pos + d):
 						has_neighbour = true
 						break
-				if not has_neighbour:
-					continue
-				for door in (cell.object as LeverInstance).linked_doors:
-					if door == null:
-						continue
-					var key := DoorInstance.edge_key(door.cell_a, door.cell_b)
-					if not open_keys.has(key):
-						open_keys[key] = true
-						progressed = true
+				if has_neighbour:
+					reachable_levers[cell.object] = true
+		for door in gen.doors:
+			if door.linked_levers.is_empty():
+				continue
+			var key := DoorInstance.edge_key(door.cell_a, door.cell_b)
+			if open_keys.has(key):
+				continue
+			var should_open: bool = false
+			if door.lever_logic == DoorInstance.LeverLogic.AND:
+				should_open = true
+				for lever in door.linked_levers:
+					if lever == null or not reachable_levers.has(lever):
+						should_open = false
+						break
+			else:
+				for lever in door.linked_levers:
+					if lever != null and reachable_levers.has(lever):
+						should_open = true
+						break
+			if should_open:
+				open_keys[key] = true
+				progressed = true
 		# Unlock locked doors whose key is collected.
 		for door in gen.doors:
 			if door.lock_id == "":
@@ -895,6 +910,110 @@ func test_linked_pair_rollback_clears_lever_cell_when_must_gate_rejects() -> voi
 			var paired_door: DoorInstance = lever.linked_doors[0]
 			assert_true(gen.doors.has(paired_door),
 				"seed %d: lever at %s links to a door not in the doors list (rollback bug)" % [s, cell_pos])
+
+# -------------------------------------------------------
+# M:N lever ↔ door clusters (Phase 8 Task 2b follow-up)
+# -------------------------------------------------------
+
+func _make_mn_cluster_spawn(n_levers: int, n_doors: int, logic: int = 0) -> LinkedObjectSpawn:
+	var spawn := _make_linked_spawn(_make_lever_data(), _make_door(), 1, 1)
+	spawn.levers_per_cluster = n_levers
+	spawn.doors_per_cluster = n_doors
+	spawn.lever_logic = logic
+	spawn.lever_placement = ObjectSpawn.PLACEMENT_ANY
+	return spawn
+
+func test_2_lever_1_door_cluster_cross_links_correctly() -> void:
+	var biome := _make_biome()
+	biome.linked_objects = [_make_mn_cluster_spawn(2, 1)]
+	var gen := _make_generator(biome)
+	var levers: Array = _all_lever_cells(gen)
+	var linked_doors: Array = []
+	for door in gen.doors:
+		if not door.linked_levers.is_empty():
+			linked_doors.append(door)
+	if linked_doors.is_empty():
+		return
+	assert_eq(levers.size(), 2, "cluster should produce 2 levers")
+	assert_eq(linked_doors.size(), 1, "cluster should produce 1 door")
+	var door: DoorInstance = linked_doors[0]
+	assert_eq(door.linked_levers.size(), 2, "door should link to both levers")
+	for cell_pos in levers:
+		var lever: LeverInstance = gen.grid[cell_pos.x][cell_pos.y].object
+		assert_eq(lever.linked_doors.size(), 1, "each lever links to 1 door")
+		assert_eq(lever.linked_doors[0], door)
+
+func test_1_lever_2_door_cluster_cross_links_correctly() -> void:
+	var biome := _make_biome()
+	biome.linked_objects = [_make_mn_cluster_spawn(1, 2)]
+	var gen := _make_generator(biome)
+	var levers: Array = _all_lever_cells(gen)
+	var linked_doors: Array = []
+	for door in gen.doors:
+		if not door.linked_levers.is_empty():
+			linked_doors.append(door)
+	if linked_doors.is_empty():
+		return
+	assert_eq(levers.size(), 1, "cluster should produce 1 lever")
+	assert_eq(linked_doors.size(), 2, "cluster should produce 2 doors")
+	var lever: LeverInstance = gen.grid[levers[0].x][levers[0].y].object
+	assert_eq(lever.linked_doors.size(), 2, "lever should link to both doors")
+	for door in linked_doors:
+		assert_true(door.linked_levers.has(lever), "each door links back to the lever")
+
+func test_cluster_lever_logic_propagates_to_doors() -> void:
+	var spawn := _make_mn_cluster_spawn(2, 1, 1)  # OR logic
+	var biome := _make_biome()
+	biome.linked_objects = [spawn]
+	var gen := _make_generator(biome)
+	for door in gen.doors:
+		if not door.linked_levers.is_empty():
+			assert_eq(door.lever_logic, DoorInstance.LeverLogic.OR,
+				"cluster door should inherit OR logic from spawn")
+
+func test_mn_cluster_chain_reachable() -> void:
+	var biome := _make_biome()
+	biome.linked_objects = [_make_mn_cluster_spawn(2, 2)]
+	for s in [101, 202, 303, 404, 505]:
+		var gen := _make_generator(biome, s)
+		if gen.doors.is_empty():
+			continue
+		var chain: Dictionary = _simulate_chain_reachable_from_entrance(gen)
+		for cell_pos in _all_lever_cells(gen):
+			var has_neighbour := false
+			for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				if chain.has(cell_pos + d):
+					has_neighbour = true
+					break
+			assert_true(has_neighbour,
+				"seed %d: lever at %s not chain-reachable in 2:2 cluster" % [s, cell_pos])
+		assert_true(chain.has(gen.exit_pos),
+			"seed %d: exit not chain-reachable with 2:2 cluster" % s)
+
+func test_mn_cluster_rollback_is_atomic() -> void:
+	var biome := _make_biome()
+	biome.linked_objects = [_make_mn_cluster_spawn(3, 2)]
+	for s in [111, 222, 333, 444, 555]:
+		var gen := _make_generator(biome, s)
+		for cell_pos in _all_lever_cells(gen):
+			var lever: LeverInstance = gen.grid[cell_pos.x][cell_pos.y].object
+			for door in lever.linked_doors:
+				assert_true(gen.doors.has(door),
+					"seed %d: lever at %s links to a door not in gen.doors (rollback leak)" % [s, cell_pos])
+		for door in gen.doors:
+			for lever in door.linked_levers:
+				if lever == null:
+					continue
+				var found := false
+				for x in range(gen.grid_width):
+					for y in range(gen.grid_height):
+						if gen.grid[x][y].object == lever:
+							found = true
+							break
+					if found:
+						break
+				assert_true(found,
+					"seed %d: door links to lever not on any grid cell (rollback leak)" % s)
 
 # -------------------------------------------------------
 # Key-locked doors (Phase 8 Task 2c)
@@ -1076,7 +1195,7 @@ func _chain_with_excluded_door(gen: LevelGenerator, excluded_door: DoorInstance)
 		var k0 := DoorInstance.edge_key(door.cell_a, door.cell_b)
 		if k0 == excluded_key:
 			continue
-		if door.data != null and door.data.interactable and not door.is_key_locked():
+		if door.data != null and door.data.interactable and not door.is_key_locked() and door.linked_levers.is_empty():
 			open_keys[k0] = true
 	var reachable: Dictionary = {}
 	while true:
@@ -1103,7 +1222,8 @@ func _chain_with_excluded_door(gen: LevelGenerator, excluded_door: DoorInstance)
 							if item != null and item.get_key_id() != "" and not collected_keys.has(item.get_key_id()):
 								collected_keys[item.get_key_id()] = true
 								progressed = true
-		# Levers
+		# Collect reachable levers, then evaluate lever-locked doors.
+		var reachable_levers2: Dictionary = {}
 		for x in range(gen.grid_width):
 			for y in range(gen.grid_height):
 				var cell: GridCell = gen.grid[x][y]
@@ -1115,17 +1235,31 @@ func _chain_with_excluded_door(gen: LevelGenerator, excluded_door: DoorInstance)
 					if reachable.has(pos + d):
 						has_neighbour = true
 						break
-				if not has_neighbour:
-					continue
-				for door in (cell.object as LeverInstance).linked_doors:
-					if door == null:
-						continue
-					var key := DoorInstance.edge_key(door.cell_a, door.cell_b)
-					if key == excluded_key:
-						continue
-					if not open_keys.has(key):
-						open_keys[key] = true
-						progressed = true
+				if has_neighbour:
+					reachable_levers2[cell.object] = true
+		for door in gen.doors:
+			if door.linked_levers.is_empty():
+				continue
+			var key := DoorInstance.edge_key(door.cell_a, door.cell_b)
+			if key == excluded_key:
+				continue
+			if open_keys.has(key):
+				continue
+			var should_open: bool = false
+			if door.lever_logic == DoorInstance.LeverLogic.AND:
+				should_open = true
+				for lever in door.linked_levers:
+					if lever == null or not reachable_levers2.has(lever):
+						should_open = false
+						break
+			else:
+				for lever in door.linked_levers:
+					if lever != null and reachable_levers2.has(lever):
+						should_open = true
+						break
+			if should_open:
+				open_keys[key] = true
+				progressed = true
 		# Locked doors via collected keys
 		for door in gen.doors:
 			if door.lock_id == "" or not collected_keys.has(door.lock_id):

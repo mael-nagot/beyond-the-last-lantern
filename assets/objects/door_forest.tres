@@ -19,4 +19,5 @@ interactable = false
 interact_sound = ExtResource("2_j37ck")
 locked_sound = ExtResource("3_dxj6f")
 locked_message_key = "object.door_forest.locked"
+partial_locked_message_key = "object.door_forest.partial_locked"
 metadata/_custom_type_script = "uid://br4c1mxr8q1a"
