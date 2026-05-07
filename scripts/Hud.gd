@@ -55,6 +55,17 @@ func _ready() -> void:
 	item_description_popup.name = "ItemDescriptionPopup"
 	hud_root.add_child(item_description_popup)
 
+	# MapPopup is defined in the scene as a child of HUDRoot, so it
+	# lands BEFORE the programmatic Toast / PickupPrompt / LootPopup
+	# / ItemDescriptionPopup we just added — which means transient
+	# overlays would render on TOP of the open map. Reorder it to be
+	# the last sibling so it always covers everything else inside
+	# HUDRoot. Other modals (LootPopup, ItemDescriptionPopup) are
+	# mutually exclusive with the map (you can't open the map while
+	# their backdrops cover the map button), so their order doesn't
+	# need the same treatment.
+	hud_root.move_child(map_popup, -1)
+
 	get_viewport().size_changed.connect(_on_viewport_resized)
 	_apply_layout()
 

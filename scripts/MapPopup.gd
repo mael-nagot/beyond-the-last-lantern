@@ -33,7 +33,7 @@ func _ready() -> void:
 	close_button.custom_minimum_size = Vector2(short_side * 0.08, short_side * 0.08)
 	close_button.add_theme_font_size_override("font_size", int(short_side * 0.04))
 
-	background.color = Color(0.85, 0.75, 0.55, 0.95)
+	background.color = Color(0.85, 0.75, 0.55, 1.0)
 
 func setup(gen: LevelGenerator, data: MapData) -> void:
 	generator = gen
