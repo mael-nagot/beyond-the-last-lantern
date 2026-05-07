@@ -34,6 +34,9 @@
 - Room placement with overlap prevention
 - Room-to-maze connection system
 
+#### Phase 1 polish — Connectorless room islands
+`_validate_path` only verifies entrance→exit reachability, not that EVERY floor cell is reachable. The Growing Tree + room-connection step occasionally produces a small floor area (typically a tiny detached room) that the entrance can't reach — visible as an unreachable square on the F3-revealed map. Existing object placement explicitly tolerates these "pre-existing isolated regions" (see comments in `_try_place_object`), but they're a level-generation polish gap. Two possible fixes: (a) in `_validate_path`, BFS every floor cell and regenerate if any are unreachable; (b) in `_connect_regions`, also connect orphan floor pockets back to the maze. Option (b) keeps more of the level intact; (a) is a brute-force safety net. Either qualifies.
+
 ### Phase 2 — 3D Dungeon View ✅
 
 - Flat quad rendering (walls, floors, ceilings) instead of box meshes
@@ -78,6 +81,9 @@
 - Player shown as blinking red directional arrow
 - Debug full reveal toggle
 - Map updates on every player movement
+
+#### Phase 6 polish — Map should pause input
+While the map popup is open, WASD / Q-E / movement-pad presses still drive the player forward, which is disorienting because the map is meant to be a planning view. Fix: gate `Game._input` and the movement-pad signals on `_hud.map_popup.is_open()` (already exists). Also gate the F-pickup hotkey and F1/F2/F3 debug keys for consistency. Re-enable on map close.
 
 ---
 
