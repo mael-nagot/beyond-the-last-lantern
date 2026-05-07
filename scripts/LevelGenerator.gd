@@ -949,14 +949,17 @@ func _chain_preserved_after_key(before: Dictionary, after: Dictionary, paired_do
 
 func _tint_for_pair_index(index: int) -> Color:
 	# Per-pair key tint. Pair 0 = identity (WHITE) so the first key
-	# looks like the original asset. Pair >= 1 gets a low-saturation
-	# HSV hue rotated by the golden ratio for good visual separation
-	# even with small N. Sat 0.22 keeps the tint subtle — the key
-	# clearly looks like a key, just a different shade.
+	# looks like the original asset. Pair >= 1 gets an HSV hue
+	# rotated by the golden ratio (good separation even with small
+	# N), at saturation 0.55 — the modulate is multiplicative, so on
+	# a strongly-coloured base sprite (e.g. a yellow key) lower
+	# saturation just reads as "darker yellow" rather than a hue
+	# shift. 0.55 is high enough to push the hue through but still
+	# leaves the icon recognisable as the same key shape.
 	if index <= 0:
 		return Color.WHITE
 	var hue: float = fmod(float(index) * 0.61803398875, 1.0)
-	return Color.from_hsv(hue, 0.22, 1.0)
+	return Color.from_hsv(hue, 0.55, 1.0)
 
 func _chest_holds_a_key(chest: ObjectInstance) -> bool:
 	if chest == null:
