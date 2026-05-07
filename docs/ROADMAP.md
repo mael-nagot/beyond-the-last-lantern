@@ -272,6 +272,9 @@ M:N clusters with AND / OR semantics, each lever tracking its own pulled state. 
 8. ✅ Localization: new `object.door_forest.partial_locked` key. Forest door .tres needs a developer-side update to point at it (manual asset wiring).
 9. ✅ Tests: unit tests for `LeverInstance.toggle/pulled/get_visual_opened`, `DoorInstance` lever logic + counts; integration tests for 1:N and N:1 / AND clusters (cross-links, lever_logic propagation, AND chain reachability, OR chain reachability).
 
+#### Task 2b follow-up — Rename `LinkedObjectSpawn` → `LeverDoorSpawn`
+Cosmetic-only rename to match `KeyDoorSpawn`'s pattern (the resource pairs levers and doors — that should be in the name). Touches every reference: the `.gd` class file, `BiomeData.linked_objects` field (probably → `lever_door_spawns`), all `.tres` files in `assets/biomes/` that reference the old class name, all script references in `LevelGenerator.gd` / `Game.gd`, all tests. No behaviour change. Defer until after the M:N PR lands so the diff stays clean.
+
 #### Task 2c — Locked doors + gating placement ✅ (code; awaits manual asset/biome wiring)
 A door tagged with a `lock_id` requires a matching key item (`ItemData` with `key_id == lock_id`). On click without the key: locked feedback (sound + toast). On click with the key: one count of the key is consumed from the bar, the door unlocks PERMANENTLY, and toggles open. Future clicks behave normally.
 1. ✅ `ItemData`: added `KEY` to the `Category` enum, plus `key_id: String` (per-data default; usually empty so per-placement override on `ItemInstance` carries the auto-generated lock id)
