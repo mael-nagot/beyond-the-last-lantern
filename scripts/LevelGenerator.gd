@@ -798,7 +798,7 @@ func _try_place_levers_for_cluster(spawn: LinkedObjectSpawn, doors_in_cluster: A
 			var lever_cells: Array = []
 			var combo_succeeded := true
 			for i in range(levers_per):
-				var pool: Array = _eligible_lever_cells(spawn, doors_in_cluster, distance, cells_by_type, entrance_side)
+				var pool: Array = _eligible_lever_cells(spawn, doors_in_cluster, distance, cells_by_type, entrance_side, lever_cells)
 				if pool.is_empty():
 					combo_succeeded = false
 					break
@@ -862,20 +862,32 @@ func _pick_farthest_from(pool: Array, existing: Array) -> Vector2i:
 			best = candidate
 	return best
 
-func _eligible_lever_cells(spawn: LinkedObjectSpawn, doors_in_cluster: Array, min_distance: int, cells_by_type: Dictionary, entrance_side: Dictionary) -> Array:
+func _eligible_lever_cells(spawn: LinkedObjectSpawn, doors_in_cluster: Array, min_distance: int, cells_by_type: Dictionary, entrance_side: Dictionary, existing_cluster_lever_cells: Array) -> Array:
 	# Build the lever-eligibility pool — excludes occupied cells,
 	# applies placement-flag and lever-to-cluster-range filters,
-	# the spacing constraint against other objects, and (for AND
-	# clusters only) the entrance-side pre-filter. `cells_by_type`
-	# is passed in (invariant for the cluster's placement) so we
-	# don't re-classify per call. The object snapshot is built
-	# fresh so previously-placed cluster siblings appear in the
-	# spacing check. `entrance_side` is empty for OR clusters
-	# (they tolerate gated-side levers) and the entrance-reachable
-	# set when cluster doors are closed for AND clusters.
+	# the spacing constraint against other objects, the entrance-
+	# side pre-filter (AND clusters only), and the one-lever-per-
+	# room rule. `cells_by_type` is passed in (invariant for the
+	# cluster's placement) so we don't re-classify per call. The
+	# object snapshot is built fresh so previously-placed cluster
+	# siblings appear in the spacing check. `entrance_side` is
+	# empty for OR clusters (they tolerate gated-side levers) and
+	# the entrance-reachable set when cluster doors are closed for
+	# AND clusters. `existing_cluster_lever_cells` is the list of
+	# cluster siblings already placed in THIS combo attempt — used
+	# to drive the room-uniqueness filter so two cluster levers
+	# never land in the same room (corridor cells are exempt).
 	var pool: Array = []
 	var object_positions: Array = _all_object_positions() if min_distance > 0 else []
 	var enforce_entrance_side: bool = not entrance_side.is_empty()
+	# Build the set of room indices already used by cluster siblings.
+	# A candidate cell in any of these rooms is rejected — that's
+	# how we keep cluster levers in distinct rooms.
+	var used_rooms: Dictionary = {}
+	for ec in existing_cluster_lever_cells:
+		var idx: int = _room_index_at(ec)
+		if idx >= 0:
+			used_rooms[idx] = true
 	for placement_bit in [ObjectSpawn.PLACEMENT_CORRIDOR, ObjectSpawn.PLACEMENT_ROOM, ObjectSpawn.PLACEMENT_DEAD_END]:
 		if (spawn.lever_placement & placement_bit) == 0:
 			continue
@@ -891,6 +903,12 @@ func _eligible_lever_cells(spawn: LinkedObjectSpawn, doors_in_cluster: Array, mi
 			if min_distance > 0 and _too_close_to_object_set(pos, object_positions, min_distance):
 				continue
 			if enforce_entrance_side and not _has_reachable_neighbour(pos, entrance_side):
+				continue
+			# One-lever-per-room: skip cells in a room that already
+			# holds a cluster sibling. Corridor cells (room idx == -1)
+			# don't have a room identity to share, so they're exempt.
+			var cand_room: int = _room_index_at(pos)
+			if cand_room >= 0 and used_rooms.has(cand_room):
 				continue
 			pool.append(pos)
 	return pool
@@ -1567,6 +1585,18 @@ func _is_in_room(pos: Vector2i) -> bool:
 		if (room as Rect2i).has_point(pos):
 			return true
 	return false
+
+func _room_index_at(pos: Vector2i) -> int:
+	# Returns the index into `_room_rects` for the room containing
+	# `pos`, or -1 if `pos` is in a corridor / dead-end (not in any
+	# room). Used by lever-cluster placement to enforce one-lever-
+	# per-room: two cluster levers should never land in the same
+	# placed room (corridor cells are exempt — they have no room
+	# identity to share).
+	for i in range(_room_rects.size()):
+		if (_room_rects[i] as Rect2i).has_point(pos):
+			return i
+	return -1
 
 func _pick_weighted_loot() -> LootEntry:
 	var total := 0

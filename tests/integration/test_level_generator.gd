@@ -1006,6 +1006,31 @@ func test_cluster_doors_respect_min_distance_between_siblings() -> void:
 					"seed %d: cluster doors %s—%s and %s—%s are %d apart, expected ≥3" %
 					[s, d1.cell_a, d1.cell_b, d2.cell_a, d2.cell_b, dist])
 
+func test_cluster_levers_land_in_distinct_rooms() -> void:
+	# One-lever-per-room rule: two cluster levers should never share
+	# the same placed room. Corridor / dead-end levers (room idx == -1)
+	# are exempt — they have no room identity to share.
+	var spawn := _make_linked_spawn(_make_lever_data(), _make_door(), 1, 1)
+	spawn.levers_per_cluster = 3
+	spawn.doors_per_cluster = 1
+	spawn.lever_min_distance_to_other_object = 4
+	var biome := _make_biome()
+	biome.linked_objects = [spawn]
+	for s in [11, 22, 33, 44, 55]:
+		var gen := _make_generator(biome, s)
+		var lever_cells: Array = _all_lever_cells(gen)
+		if lever_cells.size() < 2:
+			continue
+		var seen_rooms: Dictionary = {}
+		for cell_pos in lever_cells:
+			var idx: int = gen._room_index_at(cell_pos)
+			if idx < 0:
+				continue  # corridor lever — fine
+			assert_false(seen_rooms.has(idx),
+				"seed %d: two cluster levers landed in room %d (cell %s) — expected distinct rooms" %
+				[s, idx, cell_pos])
+			seen_rooms[idx] = true
+
 func test_cluster_levers_respect_min_distance_between_siblings() -> void:
 	# Regression coverage on the lever side. With farthest-first
 	# placement and 30 attempts before degrading, modest spacing
