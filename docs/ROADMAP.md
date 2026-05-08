@@ -263,6 +263,11 @@ Generalised from 1:1 pairs to M:N clusters. Each `LinkedObjectSpawn` produces N 
 6. ✅ **Chain simulator fix:** Initial open-set now excludes lever-locked doors (regardless of `interactable`). Lever evaluation uses AND/OR logic: collects reachable levers into a set, then evaluates each door's `lever_logic` over its linked levers. Both production and test-side simulators updated.
 7. ✅ **Tests:** Unit tests for pulled/toggle/visual, LeverLogic/compute/is_lever_locked, cluster shape fields. Integration tests for 2:1, 1:2, 2:2 cross-linking, lever_logic propagation, chain reachability, atomic rollback.
 
+#### Task 2b follow-up — Rename `LinkedObjectSpawn` → `LeverDoorSpawn`
+Cosmetic rename to mirror `KeyDoorSpawn`'s naming pattern. Touches the class file (`scripts/LinkedObjectSpawn.gd` → `LeverDoorSpawn.gd`), `BiomeData.linked_objects` field name (→ `lever_door_spawns`), every `.tres` referencing the old class (`forest.tres`), function names (`_place_linked_objects` → `_place_lever_doors`), pool variable (`linked_objects_pool` → `lever_door_spawns_pool`), and tests. No behaviour change.
+
+A first attempt (`claude/rename-lever-door-spawn`) ran into Godot import-cache errors at runtime — `forest.tres` parser still referenced `LinkedObjectSpawn.gd` after the file was renamed, despite the `.uid` companion being preserved. Diagnosis still pending; the abandoned branch is on remote for inspection. Re-attempt once we understand whether this needs a cleaner cache wipe or a different rename procedure (e.g. let the Godot editor do the rename so it can update all `.tres` references via UID resolution).
+
 #### Task 2c — Locked doors + gating placement ✅ (code; awaits manual asset/biome wiring)
 A door tagged with a `lock_id` requires a matching key item (`ItemData` with `key_id == lock_id`). On click without the key: locked feedback (sound + toast). On click with the key: one count of the key is consumed from the bar, the door unlocks PERMANENTLY, and toggles open. Future clicks behave normally.
 1. ✅ `ItemData`: added `KEY` to the `Category` enum, plus `key_id: String` (per-data default; usually empty so per-placement override on `ItemInstance` carries the auto-generated lock id)
