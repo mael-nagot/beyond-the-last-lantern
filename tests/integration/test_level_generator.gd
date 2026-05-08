@@ -486,6 +486,261 @@ func test_timed_traps_initialise_with_starting_state() -> void:
 		assert_eq(inst.state, TrapInstance.State.RETRACTED)
 
 # -------------------------------------------------------
+# Corridor segment detection + cluster placement (Phase 8 Task 3 — Subtask B1)
+# -------------------------------------------------------
+
+func _make_corridor_cluster_spawn(trap: TrapData, chance: float, run_min: int, run_max: int) -> TrapSpawn:
+	# Helper for cluster-only spawns: scattered count is zero so the
+	# only traps placed come from the corridor pass.
+	var spawn := _make_trap_spawn(trap, 0, 0, ObjectSpawn.PLACEMENT_CORRIDOR)
+	spawn.corridor_segment_chance = chance
+	spawn.corridor_traps_per_run_min = run_min
+	spawn.corridor_traps_per_run_max = run_max
+	return spawn
+
+func _is_corridor_neighbour_count(gen: LevelGenerator, pos: Vector2i) -> int:
+	var count := 0
+	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+		var n: Vector2i = pos + d
+		if n.x < 0 or n.x >= gen.grid_width or n.y < 0 or n.y >= gen.grid_height:
+			continue
+		var nc: GridCell = gen.grid[n.x][n.y]
+		if nc.cell_type != GridCell.CellType.FLOOR:
+			continue
+		if gen.classify_cell(n) == ObjectSpawn.PLACEMENT_CORRIDOR:
+			count += 1
+	return count
+
+func test_corridor_segments_only_contain_corridor_cells() -> void:
+	var gen := _make_generator(_make_biome())
+	var segments: Array = gen._detect_corridor_segments()
+	for segment in segments:
+		for pos in segment:
+			assert_eq(gen.classify_cell(pos), ObjectSpawn.PLACEMENT_CORRIDOR,
+				"segment cell %s should classify as CORRIDOR" % pos)
+
+func test_corridor_segments_exclude_junction_cells() -> void:
+	# Junctions (corridor cells with 3+ corridor neighbours) split
+	# segments — they must never appear inside one.
+	var gen := _make_generator(_make_biome())
+	var segments: Array = gen._detect_corridor_segments()
+	for segment in segments:
+		for pos in segment:
+			var n: int = _is_corridor_neighbour_count(gen, pos)
+			assert_lt(n, 3,
+				"segment cell %s has %d corridor neighbours (junctions should be excluded)" % [pos, n])
+
+func test_corridor_segments_are_disjoint() -> void:
+	var gen := _make_generator(_make_biome())
+	var segments: Array = gen._detect_corridor_segments()
+	var seen: Dictionary = {}
+	for segment in segments:
+		for pos in segment:
+			assert_false(seen.has(pos),
+				"segment cell %s appears in two segments" % pos)
+			seen[pos] = true
+
+func test_corridor_clusters_lay_consecutive_traps() -> void:
+	# With chance = 1.0 and a generous run size, every chosen segment
+	# produces a connected blob of trap cells. Verify that for each trap
+	# placed there is at least one neighbouring trap (or the trap is the
+	# only one in its segment).
+	var biome := _make_biome()
+	var spawn := _make_corridor_cluster_spawn(_make_trap_data(), 1.0, 3, 5)
+	biome.trap_spawns = [spawn]
+	var gen := _make_generator(biome)
+	if gen.traps.is_empty():
+		# Possible on tiny test maps — skip gracefully rather than fail.
+		return
+	# Bin traps by their segment via the segment list, then verify each
+	# bin is itself a connected component within the trap-cell set.
+	var trap_set: Dictionary = {}
+	for inst in gen.traps:
+		trap_set[inst.cell] = true
+	for inst in gen.traps:
+		var has_trap_neighbour: bool = false
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			if trap_set.has(inst.cell + d):
+				has_trap_neighbour = true
+				break
+		# The run min is 3, so every trap must have at least one trap
+		# neighbour (the cluster never has length 1 with run_min = 3).
+		assert_true(has_trap_neighbour,
+			"clustered trap at %s has no trap neighbour (cluster broken?)" % inst.cell)
+
+func test_corridor_clusters_only_in_corridors() -> void:
+	var biome := _make_biome()
+	biome.trap_spawns = [_make_corridor_cluster_spawn(_make_trap_data(), 1.0, 2, 4)]
+	var gen := _make_generator(biome)
+	for inst in gen.traps:
+		assert_eq(gen.classify_cell(inst.cell), ObjectSpawn.PLACEMENT_CORRIDOR,
+			"cluster trap at %s landed outside a corridor" % inst.cell)
+
+func test_corridor_clusters_zero_chance_places_nothing() -> void:
+	# Sanity: chance = 0 disables the corridor pass even with non-zero
+	# run sizes. count_min/max are also zero, so total trap count = 0.
+	var biome := _make_biome()
+	biome.trap_spawns = [_make_corridor_cluster_spawn(_make_trap_data(), 0.0, 2, 4)]
+	var gen := _make_generator(biome)
+	assert_eq(gen.traps.size(), 0)
+
+func test_corridor_cluster_run_size_within_max() -> void:
+	# No cluster may exceed `corridor_traps_per_run_max` cells. Run a
+	# few seeds so we exercise different segment topologies.
+	var max_run: int = 4
+	for seed_n in [101, 202, 303, 404]:
+		var biome := _make_biome()
+		biome.trap_spawns = [_make_corridor_cluster_spawn(_make_trap_data(), 1.0, 1, max_run)]
+		var gen := _make_generator(biome, seed_n)
+		# Group trap cells into connected components — each must be <= max_run.
+		var trap_set: Dictionary = {}
+		for inst in gen.traps:
+			trap_set[inst.cell] = true
+		var visited: Dictionary = {}
+		for inst in gen.traps:
+			if visited.has(inst.cell):
+				continue
+			var component_size := 0
+			var queue: Array = [inst.cell]
+			visited[inst.cell] = true
+			while not queue.is_empty():
+				var cur: Vector2i = queue.pop_front()
+				component_size += 1
+				for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+					var n: Vector2i = cur + d
+					if trap_set.has(n) and not visited.has(n):
+						visited[n] = true
+						queue.append(n)
+			assert_lte(component_size, max_run,
+				"seed %d: cluster of size %d exceeds max %d" % [seed_n, component_size, max_run])
+
+func test_scattered_traps_dont_neighbour_cluster_cells() -> void:
+	# Cluster + scattered on the same spawn. After placement, no
+	# scattered trap may sit 4-adjacent to a cluster cell — that's
+	# the rule that prevents a 5-cell segment with a 3-cell cluster
+	# from getting its 2 leftover cells filled by scattered, producing
+	# a 5-trap contiguous run.
+	for seed_n in [1234, 5678, 9012, 3456]:
+		var biome := _make_biome()
+		var spawn := _make_corridor_cluster_spawn(_make_trap_data(), 1.0, 3, 3)
+		# Add aggressive scattered placement — high count + corridor
+		# placement increases the chance the rule matters.
+		spawn.count_min = 12
+		spawn.count_max = 12
+		biome.trap_spawns = [spawn]
+		var gen := _make_generator(biome, seed_n)
+		for inst in gen.traps:
+			# Skip cluster cells themselves — they ARE adjacent to
+			# other cluster cells by construction.
+			if gen._cluster_cells.has(inst.cell):
+				continue
+			# This is a scattered trap; verify no 4-neighbour is a cluster cell.
+			for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				assert_false(gen._cluster_cells.has(inst.cell + d),
+					"seed %d: scattered trap at %s neighbours cluster cell at %s" % [seed_n, inst.cell, inst.cell + d])
+
+func test_corridor_clusters_skip_junction_adjacent_segments() -> void:
+	# A junction cell (corridor with 3+ corridor neighbours) bridges
+	# two segments. If both segments held clusters, the player would
+	# perceive: trapped run -> single safe junction tile -> trapped
+	# run, which forces back-to-back damage. Verify that for every
+	# junction in the generated level, at most ONE of the segments it
+	# bridges holds traps.
+	var biome := _make_biome()
+	biome.trap_spawns = [_make_corridor_cluster_spawn(_make_trap_data(), 1.0, 2, 3)]
+	var observed_junctions: int = 0
+	for seed_n in [9001, 9002, 9003, 9004, 9005, 9006]:
+		var gen := _make_generator(biome, seed_n)
+		var segments: Array = gen._detect_corridor_segments()
+		var cell_to_seg: Dictionary = {}
+		for i in range(segments.size()):
+			for pos in segments[i]:
+				cell_to_seg[pos] = i
+		# Walk every cell — find junctions, then count distinct trapped
+		# neighbour-segments per junction.
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				var jpos := Vector2i(x, y)
+				if gen.grid[x][y].cell_type != GridCell.CellType.FLOOR:
+					continue
+				if gen.classify_cell(jpos) != ObjectSpawn.PLACEMENT_CORRIDOR:
+					continue
+				var corridor_n: int = 0
+				var neighbour_segs: Dictionary = {}
+				for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+					var n: Vector2i = jpos + d
+					if n.x < 0 or n.x >= gen.grid_width or n.y < 0 or n.y >= gen.grid_height:
+						continue
+					if gen.grid[n.x][n.y].cell_type != GridCell.CellType.FLOOR:
+						continue
+					if gen.classify_cell(n) != ObjectSpawn.PLACEMENT_CORRIDOR:
+						continue
+					corridor_n += 1
+					if cell_to_seg.has(n):
+						neighbour_segs[cell_to_seg[n]] = true
+				if corridor_n < 3:
+					continue
+				observed_junctions += 1
+				var trapped_segs: int = 0
+				for seg_idx in neighbour_segs:
+					for pos in segments[seg_idx]:
+						if gen.grid[pos.x][pos.y].trap != null:
+							trapped_segs += 1
+							break
+				assert_lte(trapped_segs, 1,
+					"seed %d: junction at %s bridges %d trapped segments — should be <= 1" % [seed_n, jpos, trapped_segs])
+	# Sanity: must have exercised at least some junctions in the sweep.
+	assert_gt(observed_junctions, 0,
+		"no junctions found across seed sweep — junction-adjacency rule was never exercised")
+
+func test_corridor_clusters_skip_segments_with_existing_traps() -> void:
+	# Two spawns, both targeting corridors. The first should fill some
+	# segments; the second should skip every already-trapped segment.
+	# Therefore: NO segment hosts traps from BOTH spawns.
+	#
+	# Run multiple seeds so we exercise different topologies, and
+	# require at least one seed to produce a layout where both spawns
+	# land at least one trap (otherwise the disjoint check is vacuous).
+	var trap_a := _make_trap_data(TrapData.Trigger.STEP, 3)
+	var trap_b := _make_trap_data(TrapData.Trigger.TIMED, 3)
+	var observed_both: bool = false
+	for seed_n in [101, 202, 303, 404, 505, 606, 707, 808]:
+		var biome := _make_biome()
+		biome.trap_spawns = [
+			# 0.5 chance gives spawn #2 room to land in segments spawn #1
+			# rolled away from.
+			_make_corridor_cluster_spawn(trap_a, 0.5, 2, 3),
+			_make_corridor_cluster_spawn(trap_b, 1.0, 2, 3),
+		]
+		var gen := _make_generator(biome, seed_n)
+		var segments: Array = gen._detect_corridor_segments()
+		var cell_to_segment: Dictionary = {}
+		for i in range(segments.size()):
+			for pos in segments[i]:
+				cell_to_segment[pos] = i
+		var segments_with_a: Dictionary = {}
+		var segments_with_b: Dictionary = {}
+		for inst in gen.traps:
+			if not cell_to_segment.has(inst.cell):
+				continue  # junction or other edge case — ignore
+			var seg_idx: int = cell_to_segment[inst.cell]
+			if inst.data == trap_a:
+				segments_with_a[seg_idx] = true
+			else:
+				segments_with_b[seg_idx] = true
+		# Disjoint check — fails if any segment got both spawns' traps.
+		for seg_idx in segments_with_b:
+			assert_false(segments_with_a.has(seg_idx),
+				"seed %d: segment %d hosts both spawns — second should have skipped it" % [seed_n, seg_idx])
+		if not segments_with_a.is_empty() and not segments_with_b.is_empty():
+			observed_both = true
+	# Sanity: across the seed sweep we must have seen at least one
+	# layout that exercised the disjoint check (both spawns landed),
+	# otherwise the test is risky / vacuous.
+	assert_true(observed_both,
+		"no seed produced traps from both spawns — disjoint check was never exercised")
+
+# -------------------------------------------------------
 # Door placement (Phase 8 Task 2a)
 # -------------------------------------------------------
 

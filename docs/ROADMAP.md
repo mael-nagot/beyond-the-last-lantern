@@ -323,14 +323,32 @@ Split into two subtasks. Subtask A lands the core trap system (data, rendering, 
 12. ✅ Tests: `test_trap_data` (defaults, is_step / is_timed predicates, key resolution); `test_trap_instance` (state transitions for both triggers, cooldown gating, zero-cooldown immediate clear, timed phase-shift via initial_offset, null/zero-delta safety, damages_on_presence predicate); `test_trap_spawn` (defaults, placement allows matrix); `test_grid_cell` extended (default trap is null, trap doesn't block movement); integration tests in `test_level_generator` (count_min/max, no-spawn-on-entrance/exit, floor-only, classification respect, trap ↔ object cell exclusivity, items skip trap cells, min_distance graceful degrade, flat-list ↔ grid-slot consistency, timed initial state).
 13. ⏳ Manual asset work (developer): `res://assets/textures/objects/spike_hole.png` (single hole, top-down view, transparent background, ~64×64), `res://assets/textures/objects/spike_extended.png` (single spike, side view, transparent background, ~64×128). Two `.tres` files: `res://assets/objects/trap_spike_step.tres` (TrapData with STEP trigger) and `res://assets/objects/trap_spike_timed.tres` (TrapData with TIMED trigger). Sounds: `spike_activate.ogg`, `spike_deactivate.ogg`, `pain.ogg`. Add `TrapSpawn` entries to `forest.tres` and reference `pain_sound` in `audio_config.tres`.
 
-##### Subtask B — Advanced placement (deferred)
-- Corridor segment detection — group corridor cells into runs between branches/rooms/dead-ends
-- Per-segment placement: `corridor_segment_chance: float`, `corridor_traps_per_run_min/max: int` — N consecutive trap cells per chosen segment
+##### Subtask B — Advanced placement
+
+Split into three incremental sub-PRs so each one has something testable in-engine before merging.
+
+###### Subtask B1 — Corridor segment detection + cluster placement ✅ (code; awaits developer playtest)
+1. ✅ `_detect_corridor_segments()` on `LevelGenerator` — connected-components over corridor-classified cells, excluding "junctions" (corridor cells with 3+ corridor neighbours) so two corridors meeting at a T don't merge into one giant segment. Returns `Array[Array[Vector2i]]`.
+2. ✅ `TrapSpawn` extended with `corridor_segment_chance: float` (per-segment roll), `corridor_traps_per_run_min/max: int` (cluster size). Defaults preserve Subtask A's scattered-only behaviour. `uses_corridor_clusters()` predicate gates the new pass.
+3. ✅ `_place_corridor_traps()` runs BEFORE the legacy scattered pass on the same spawn — modes are additive. Per-segment rules:
+   - Skip if the segment already holds traps from a previous spawn's pass (one spawn per segment so the player reads "this corridor is poisoned with X" rather than a layered hazard)
+   - Skip if the segment is **junction-adjacent** to a segment that already holds traps. Without this, two clusters separated only by a non-trappable junction cell read as one long run with a single safe tile in the middle, forcing more damage than the per-segment max would suggest. Caught during developer playtest; fix lives in `_segment_blocked_by_existing_traps`.
+   - Skip if eligible-cell count < `corridor_traps_per_run_min` (silent under-delivery is worse than placing fewer traps elsewhere)
+   - Otherwise pick a random eligible start cell and BFS-flood within the segment to gather up to N contiguous cells (N rolled in [min, max], clamped to eligible count)
+   - Cluster cells are tracked in `_cluster_cells` and the **scattered pass excludes any candidate 4-adjacent to a cluster cell**. Without this, a 5-cell segment with a 3-cell cluster leaves the 2 leftover cells eligible for the scattered pass, producing a contiguous 5-trap run that defeats the per-segment cluster cap. Caught during developer playtest of an S-shaped corridor.
+4. ✅ `MapPopup.debug_show_traps: bool = false` — when on, draws a small upward triangle on every explored trap cell (red = STEP, orange = TIMED). Off by default in shipping; flip on in the Inspector to validate placement.
+5. ✅ Tests: unit (`test_trap_spawn` extended — corridor field defaults, `uses_corridor_clusters` matrix); integration (`test_level_generator` extended — segments only contain corridors, exclude junctions, are disjoint; clusters lay consecutive cells; corridor-only landing; chance=0 produces no traps; run size ≤ max; second spawn skips already-trapped segments).
+6. ⏳ Manual asset work (developer): bump `corridor_segment_chance` and `corridor_traps_per_run_min/max` on a `TrapSpawn` in `forest.tres` to validate placement in-engine. The new fields default to 0/1/3 so existing biome configs keep their previous scattered-only behaviour until the developer opts in.
+
+###### Subtask B2 — Room density placement (deferred)
 - Per-room placement: `room_chance: float`, `room_coverage_min_percent: float`, `room_coverage_max_percent: float`, `room_min_spacing: int`
-- Path-safety validation:
-  - For STEP traps: BFS from entrance to exit excluding step-trap cells; if no trap-free path exists, roll back step-traps until one does
-  - For TIMED traps: ensure at least one "rest cell" (non-trap cell) within K Manhattan tiles of every trap cell
-- Tests for corridor segment detection, cluster placement, room density, clear-path validation
+- Tests for room density + graceful degrade when min-spacing over-constrains coverage
+
+###### Subtask B3 — Path-safety validators + chest/lever adjacency (deferred)
+- STEP-trap-free BFS from entrance → exit AND entrance → every chest / lever / floor-object cell; rollback step traps until satisfied (so step traps never gate access to objects placed during level generation)
+- TIMED-trap rest-cell validator: every timed trap has a non-trap cell within K Manhattan tiles
+- Chest/lever timed-trap adjacency rule: every chest and every lever has at least one 4-adjacent cell free of timed traps so the player has somewhere safe to stand while waiting out cycles
+- Tests for all validators and atomic rollback when constraints can't be met
 
 #### Task 3 follow-ups (after Subtask B)
 - Fireball trap (pressure plate or continuous)

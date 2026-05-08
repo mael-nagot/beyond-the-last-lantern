@@ -2,6 +2,11 @@ class_name MapPopup
 extends Control
 
 @export var debug_reveal_all: bool = false
+# When true, draws a small upward-pointing triangle on every trap cell:
+# red for STEP traps, orange for TIMED. Off by default — leaks design
+# info to the player. Flip on in the Inspector while validating Phase 8
+# Task 3 trap placement (Subtask B).
+@export var debug_show_traps: bool = true
 
 var map_data: MapData
 var generator: LevelGenerator
@@ -215,6 +220,11 @@ func _on_map_draw() -> void:
 			if cell.object != null and cell.object.data != null:
 				_draw_object_marker(rect_pos, rect_size, cell_size, cell.object)
 
+			# Draw trap marker (debug only) — small upward-pointing
+			# triangle. Used to validate Phase 8 Task 3 placement.
+			if debug_show_traps and cell.trap != null:
+				_draw_trap_marker(rect_pos, rect_size, cell_size, cell.trap)
+
 			# Draw exit — diamond shape
 			if cell.cell_type == GridCell.CellType.EXIT:
 				var center = rect_pos + rect_size * 0.5
@@ -314,6 +324,33 @@ func _draw_lever_marker(center: Vector2, cell_size: float, lever: LeverInstance)
 		var border := Color(color.r * 0.5, color.g * 0.5, color.b * 0.5)
 		for i in range(4):
 			map_draw.draw_line(diamond[i], diamond[(i + 1) % 4], border, max(line_width * 0.6, 1.0))
+
+func _draw_trap_marker(rect_pos: Vector2, rect_size: Vector2, cell_size: float, trap: TrapInstance) -> void:
+	# Small upward-pointing filled triangle inside the cell. STEP traps
+	# get a sharp red (one-shot HP tax); TIMED traps get a warmer orange
+	# (cyclic warning). Same shape so the player reads "spike here"
+	# regardless; the tint distinguishes the two trigger modes.
+	if trap == null or trap.data == null:
+		return
+	var center := rect_pos + rect_size * 0.5
+	var s: float = cell_size * 0.32
+	var triangle := PackedVector2Array([
+		center + Vector2(0.0, -s),     # tip (top)
+		center + Vector2(s, s * 0.7),  # bottom-right
+		center + Vector2(-s, s * 0.7), # bottom-left
+	])
+	var color: Color
+	if trap.data.is_timed():
+		color = Color(0.95, 0.55, 0.10)  # warning orange
+	else:
+		color = Color(0.85, 0.15, 0.15)  # sharp red
+	map_draw.draw_colored_polygon(triangle, color)
+	# Thin darker outline so the marker reads against the parchment
+	# background even at small zoom.
+	var border := Color(color.r * 0.5, color.g * 0.5, color.b * 0.5)
+	var lw: float = max(cell_size * 0.06, 1.0)
+	for i in range(3):
+		map_draw.draw_line(triangle[i], triangle[(i + 1) % 3], border, lw)
 
 func _draw_door_slab(door: DoorInstance, offset: Vector2, cell_size: float, line_width: float) -> void:
 	# A door sits on the boundary between cell_a and cell_b. The slab

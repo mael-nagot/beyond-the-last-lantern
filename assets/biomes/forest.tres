@@ -97,7 +97,9 @@ script = ExtResource("20_obsjo")
 trap = ExtResource("21_3vyya")
 count_min = 30
 count_max = 30
-placement = 2
+placement = 1
+corridor_segment_chance = 0.494
+corridor_traps_per_run_min = 2
 metadata/_custom_type_script = "uid://bpkkmcjv0jnht"
 
 [sub_resource type="Resource" id="Resource_3vyya"]
