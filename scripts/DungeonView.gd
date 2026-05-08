@@ -431,20 +431,30 @@ func _door_y_rotation_deg(door: DoorInstance) -> float:
 # Traps — Phase 8 Task 3 Subtask A.
 #
 # Each trap renders as TWO pieces inside `TrapsRoot`:
-#  1. A flat MeshInstance3D quad lying on the floor with the holes
-#     texture (always visible — the holes are a permanent feature of
-#     the cell, communicating danger even when spikes are retracted).
-#  2. A per-spike Sprite3D billboard tree under a "spikes" Node3D
+#  1. Flat floor decals ("holes" art). A trap with a `grid_cols × grid_rows`
+#     grid emits one decal per slot, all coplanar slightly above the floor.
+#     Always visible — the holes communicate danger even when spikes are
+#     retracted. To keep draw calls cheap when many traps are placed
+#     (e.g. corridor clusters + room density combined), every decal
+#     across every trap that shares a `holes_sprite` texture renders as
+#     a single batched `MultiMeshInstance3D` — N hundred individual
+#     `MeshInstance3D` nodes collapse into one draw call per texture.
+#  2. A per-spike Sprite3D billboard tree under a "Spikes" Node3D
 #     (visible only while the trap is EXTENDED). Each spike is its
 #     own billboard so the cluster reads as 3D — multiple billboards
 #     at different XZ positions parallax against each other as the
-#     player moves around the cell.
+#     player moves around the cell. These STAY individual nodes
+#     because (a) they need FIXED_Y billboarding which MultiMesh would
+#     need a custom shader to replicate, and (b) Game.gd toggles their
+#     `visible` flag per state — bookkeeping is cleaner with a per-trap
+#     parent. Spikes are also only on-screen while extended, so peak
+#     draw-call cost is a fraction of the always-visible decals.
 #
-# The two pieces share a per-trap root Node3D so we can hide / show
-# the spikes by toggling that subroot's `visible` flag without
-# walking the children. TIMED traps additionally get an
-# AudioStreamPlayer3D for spatial activate / deactivate sounds (with
-# `max_distance` from the trap's `hearing_distance`).
+# Per-trap state lookup: `_trap_visuals` keys by TrapInstance and stores
+# `{ root, spikes_root }` (the spike parent Node3D, used by
+# `update_trap_visual` and `_refresh_trap_spike_positions`). The decals
+# live in shared MultiMesh nodes and don't need per-trap handles —
+# they're never toggled or moved after the level is built.
 # -------------------------------------------------------
 func _build_traps() -> void:
 	for child in _traps_root.get_children():
@@ -452,17 +462,27 @@ func _build_traps() -> void:
 	_trap_visuals.clear()
 	if generator == null:
 		return
+	# Group floor decals by `holes_sprite` so each texture gets exactly
+	# one MultiMeshInstance3D — a single draw call across every trap
+	# that shares that art. Collected up front, built once after the
+	# per-trap loop so the MultiMesh's `instance_count` is final before
+	# we set transforms.
+	var decals_by_texture: Dictionary = {}  # Texture2D -> Array[Transform3D]
 	for trap in generator.traps:
 		if trap == null or trap.data == null:
 			continue
-		var entry: Dictionary = _make_trap_node(trap)
+		var entry: Dictionary = _make_trap_spikes(trap)
 		# Empty dict signals "nothing renderable" (assets misconfigured).
-		# is_empty avoids the trap of treating {} as null — would crash
-		# `entry["root"]` below.
 		if entry.is_empty():
 			continue
 		_traps_root.add_child(entry["root"])
 		_trap_visuals[trap] = entry
+		_gather_trap_decal_transforms(trap, decals_by_texture)
+	for tex in decals_by_texture:
+		var transforms: Array = decals_by_texture[tex]
+		if transforms.is_empty():
+			continue
+		_traps_root.add_child(_make_trap_decal_multimesh(tex, transforms))
 
 func rebuild_traps() -> void:
 	if _traps_root == null:
@@ -529,7 +549,7 @@ func _trap_spike_offset(trap: TrapInstance) -> Vector3:
 		oz = float(signi(diff.y)) * data.spike_lean_toward_player
 	return Vector3(ox, 0.0, oz)
 
-func _make_trap_node(trap: TrapInstance) -> Dictionary:
+func _make_trap_spikes(trap: TrapInstance) -> Dictionary:
 	var data: TrapData = trap.data
 	if data.holes_sprite == null and data.extended_sprite == null:
 		# Nothing to render — likely an asset misconfiguration. Don't
@@ -542,35 +562,19 @@ func _make_trap_node(trap: TrapInstance) -> Dictionary:
 	var root := Node3D.new()
 	root.position = Vector3(cx, 0.0, cz)
 
-	var positions := _trap_grid_positions_local(data)
-
-	# Floor decal — one flat quad per grid intersection, all coplanar
-	# slightly above the floor (Y = 0.01) to avoid Z-fighting with the
-	# triplanar floor texture beneath. Always visible.
-	if data.holes_sprite != null:
-		var hole_mat: StandardMaterial3D = _build_trap_floor_material(data.holes_sprite)
-		var hole_size: float = data.hole_world_size if data.hole_world_size > 0.0 else _natural_hole_world_size(data.holes_sprite, data, positions.size())
-		for offset: Vector3 in positions:
-			var quad := QuadMesh.new()
-			quad.size = Vector2(hole_size, hole_size)
-			var decal := MeshInstance3D.new()
-			decal.mesh = quad
-			decal.material_override = hole_mat
-			decal.position = Vector3(offset.x, 0.01, offset.z)
-			decal.rotation_degrees = Vector3(-90.0, 0.0, 0.0)
-			root.add_child(decal)
-
 	# Spikes subtree — a single Node3D parent toggled visible/hidden
 	# in lockstep with `trap.state`. Per-spike billboards inside it
 	# parallax against each other at close range. Position is
 	# offset by `_trap_spike_offset` so designers can lean the
 	# spikes toward the player (just the spikes — the floor holes
-	# stay anchored to the cell centre).
+	# stay anchored to the cell centre, batched in a separate
+	# MultiMeshInstance3D).
 	var spikes_root := Node3D.new()
 	spikes_root.name = "Spikes"
 	spikes_root.visible = trap.is_extended()
 	spikes_root.position = _trap_spike_offset(trap)
 	if data.extended_sprite != null:
+		var positions := _trap_grid_positions_local(data)
 		var tex: Texture2D = data.extended_sprite
 		var tex_w: int = max(1, tex.get_width())
 		var tex_h: int = max(1, tex.get_height())
@@ -611,6 +615,51 @@ func _make_trap_node(trap: TrapInstance) -> Dictionary:
 		"root": root,
 		"spikes_root": spikes_root,
 	}
+
+# Append the per-decal world transforms for THIS trap into the shared
+# decal bucket (keyed by holes_sprite Texture2D). Each transform
+# encodes: (a) the trap's world position, (b) the per-slot offset from
+# the cell centre, (c) a -90° X rotation to lay the quad flat, and
+# (d) a hole_world_size scale on the quad's local X/Y axes.
+func _gather_trap_decal_transforms(trap: TrapInstance, decals_by_texture: Dictionary) -> void:
+	var data: TrapData = trap.data
+	if data.holes_sprite == null:
+		return
+	if not decals_by_texture.has(data.holes_sprite):
+		decals_by_texture[data.holes_sprite] = []
+	var positions := _trap_grid_positions_local(data)
+	var hole_size: float = data.hole_world_size if data.hole_world_size > 0.0 else _natural_hole_world_size(data.holes_sprite, data, positions.size())
+	var cx: float = trap.cell.x * CELL_SIZE + CELL_SIZE * 0.5
+	var cz: float = trap.cell.y * CELL_SIZE + CELL_SIZE * 0.5
+	# Rotate -90° around X so a quad authored on the XY plane lies flat
+	# on the XZ floor plane. Scale on (local) X / Y to set the per-tile
+	# size; the post-rotation Z scale is irrelevant for a planar quad.
+	var basis_template := Basis(Vector3(1.0, 0.0, 0.0), -PI * 0.5).scaled(Vector3(hole_size, hole_size, 1.0))
+	var bucket: Array = decals_by_texture[data.holes_sprite]
+	for offset: Vector3 in positions:
+		bucket.append(Transform3D(basis_template, Vector3(cx + offset.x, 0.01, cz + offset.z)))
+
+# Build one MultiMeshInstance3D that renders every decal sharing a
+# given holes_sprite. The MultiMesh's mesh is a unit QuadMesh — the
+# per-instance transform's scale handles the actual hole size, so a
+# single shared mesh resource serves all variants. Material is the
+# same alpha-scissor StandardMaterial3D the per-cell decals used to
+# build individually (still cached in `_trap_floor_material_cache`).
+func _make_trap_decal_multimesh(tex: Texture2D, transforms: Array) -> MultiMeshInstance3D:
+	var quad := QuadMesh.new()
+	quad.size = Vector2(1.0, 1.0)
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = false
+	mm.use_custom_data = false
+	mm.mesh = quad
+	mm.instance_count = transforms.size()
+	for i in range(transforms.size()):
+		mm.set_instance_transform(i, transforms[i])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	mmi.material_override = _build_trap_floor_material(tex)
+	return mmi
 
 # Build the world-space XZ offsets (Y = 0) for one cell's spike+hole
 # grid. Designer-controlled via `grid_cols / grid_rows / grid_inset`.
