@@ -1,14 +1,18 @@
 class_name BiomeTextureEntry
 extends Resource
 
-# One entry in a biome's wall / floor / ceiling texture pool. Pairs an
-# albedo + normal so the two can never get out of sync (the previous
-# flat-array setup picked them independently and could land
-# wall_bark_01_albedo with wall_bark_02_normal). The placement flag-set
-# scopes the entry to specific cell classifications: a "mossy dead-end"
-# wall variant only spawns on dead-end cells; a "vaulted room ceiling"
-# only on room cells; etc. Empty / unmatched arrays fall back to the
-# full pool — see `pick_for`.
+# One entry in a biome's wall / floor / ceiling texture pool. Holds
+# the albedo texture and a placement flag-set that scopes the entry to
+# specific cell classifications: a "mossy dead-end" wall variant only
+# spawns on dead-end cells; a "vaulted room ceiling" only on room
+# cells; etc. Empty / unmatched arrays fall back to the full pool —
+# see `pick_for`.
+#
+# Normal maps were intentionally dropped — the chunky pixel art + the
+# ambient-only lighting model don't benefit from per-pixel surface
+# relief, and bundling a `normal` field on the entry was the original
+# motivation for grouping albedo+normal together (so they couldn't
+# desync). Without normals, the entry is just (albedo + scope rules).
 
 const PLACEMENT_CORRIDOR := 1
 const PLACEMENT_ROOM     := 2
@@ -16,7 +20,6 @@ const PLACEMENT_DEAD_END := 4
 const PLACEMENT_ANY      := PLACEMENT_CORRIDOR | PLACEMENT_ROOM | PLACEMENT_DEAD_END
 
 @export var albedo: Texture2D
-@export var normal: Texture2D
 @export_flags("Corridor", "Room", "Dead End") var placement: int = PLACEMENT_ANY
 
 # Relative pick frequency among entries that pass classification +

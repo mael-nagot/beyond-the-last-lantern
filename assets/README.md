@@ -142,7 +142,7 @@ The game uses an old-school pixel art aesthetic inspired by Eye of the Beholder 
 - **Ambient-only lighting** — no harsh directional lights. Depth is painted into the textures.
 - **Limited color palette** per biome — 16 to 32 colors for consistency
 - **Fog** provides depth cues — distant walls fade into the fog color
-- **Normal maps** add subtle surface relief under ambient light (normal_scale kept low at 0.5)
+- **No normal maps** — the chunky pixel-art look + the ambient-only lighting model don't benefit from per-pixel surface relief, and dropping them simplifies the texture pipeline (one albedo per `BiomeTextureEntry`)
 - **Triplanar mapping** blends textures at corners for organic transitions (configurable per biome)
 - **Objects and enemies** rendered as Sprite3D billboards (flat 2D sprites that face the camera)
 - **Items** need two art pieces: a small icon and a larger dungeon floor sprite

@@ -618,20 +618,15 @@ func _make_item_sprite(inst: ItemInstance) -> Sprite3D:
 func _material_for_entry(entry: BiomeTextureEntry) -> StandardMaterial3D:
 	if _material_cache.has(entry):
 		return _material_cache[entry]
-	var mat: StandardMaterial3D = _build_material(entry.albedo, entry.normal)
+	var mat: StandardMaterial3D = _build_material(entry.albedo)
 	_material_cache[entry] = mat
 	return mat
 
-func _build_material(albedo: Texture2D, normal: Texture2D) -> StandardMaterial3D:
+func _build_material(albedo: Texture2D) -> StandardMaterial3D:
 	var mat = StandardMaterial3D.new()
 
 	if albedo != null:
 		mat.albedo_texture = albedo
-
-	if normal != null:
-		mat.normal_enabled = true
-		mat.normal_texture = normal
-		mat.normal_scale   = 0.5
 
 	if biome.use_triplanar:
 		var scale_x = 1.0 / CELL_SIZE

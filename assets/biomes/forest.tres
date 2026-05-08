@@ -3,8 +3,6 @@
 [ext_resource type="Script" uid="uid://bentd6twklhjr" path="res://scripts/BiomeData.gd" id="1_5w715"]
 [ext_resource type="Texture2D" uid="uid://ebx3msr2yhig" path="res://assets/textures/biomes/forest/ceilings/forest ceiling_01_albedo.jpg" id="1_bq1p8"]
 [ext_resource type="Texture2D" uid="uid://do12vq4fygnrp" path="res://assets/textures/biomes/forest/floors/forest floor_01_albedo.jpg" id="1_ve4a7"]
-[ext_resource type="Texture2D" uid="uid://dyvsvxp7uv6mi" path="res://assets/textures/biomes/forest/floors/forest floor_01_normal.png" id="3_0wobd"]
-[ext_resource type="Texture2D" uid="uid://ca8l5y3ywlnv1" path="res://assets/textures/biomes/forest/ceilings/forest ceiling_01_normal.png" id="3_fvx5y"]
 [ext_resource type="Script" uid="uid://dwvpkpfjm8dyn" path="res://scripts/LootEntry.gd" id="4_458bs"]
 [ext_resource type="Resource" uid="uid://dltjjt1nys4br" path="res://assets/items/health_potion.tres" id="5_plw3j"]
 [ext_resource type="Texture2D" uid="uid://eaqrrmrm74gy" path="res://assets/textures/biomes/forest/walls/forest_wall_01_albedo.jpg" id="7_bq1p8"]
@@ -13,7 +11,6 @@
 [ext_resource type="Script" uid="uid://duxnh0exbhpst" path="res://scripts/KeyDoorSpawn.gd" id="7_w7wxy"]
 [ext_resource type="AudioStream" uid="uid://ci0f4ivs6tis6" path="res://assets/sounds/biomes/forest/move/step_02.ogg" id="8_0wobd"]
 [ext_resource type="Resource" uid="uid://ddnj3qteby4ip" path="res://assets/objects/door_forest_locked.tres" id="8_qtcl7"]
-[ext_resource type="Texture2D" uid="uid://cipdynsyi30nw" path="res://assets/textures/biomes/forest/walls/forest_wall_01_normal.png" id="9_fvx5y"]
 [ext_resource type="Script" path="res://scripts/BiomeTextureEntry.gd" id="30_tex"]
 [ext_resource type="AudioStream" uid="uid://bavnebmwmtudp" path="res://assets/sounds/biomes/forest/move/step_03.ogg" id="9_nhtug"]
 [ext_resource type="Resource" uid="uid://cqso31osmprq3" path="res://assets/objects/lever_forest.tres" id="9_w7wxy"]
@@ -86,19 +83,16 @@ metadata/_custom_type_script = "uid://c4fbuyttq7iik"
 [sub_resource type="Resource" id="Resource_wall_default"]
 script = ExtResource("30_tex")
 albedo = ExtResource("7_bq1p8")
-normal = ExtResource("9_fvx5y")
 placement = 7
 
 [sub_resource type="Resource" id="Resource_floor_default"]
 script = ExtResource("30_tex")
 albedo = ExtResource("1_ve4a7")
-normal = ExtResource("3_0wobd")
 placement = 7
 
 [sub_resource type="Resource" id="Resource_ceiling_default"]
 script = ExtResource("30_tex")
 albedo = ExtResource("1_bq1p8")
-normal = ExtResource("3_fvx5y")
 placement = 7
 
 [resource]

@@ -3,7 +3,6 @@ extends GutTest
 func test_defaults() -> void:
 	var entry := BiomeTextureEntry.new()
 	assert_null(entry.albedo)
-	assert_null(entry.normal)
 	assert_eq(entry.placement, BiomeTextureEntry.PLACEMENT_ANY)
 	assert_eq(entry.weight, 1)
 	assert_eq(entry.min_distance_to_same, 0)
