@@ -200,22 +200,23 @@ func _build_mesh() -> void:
 				[Vector2i(-1,  0), Vector3(cx - CELL_SIZE * 0.5, wall_height * 0.5, cy),  90.0],
 				[Vector2i( 1,  0), Vector3(cx + CELL_SIZE * 0.5, wall_height * 0.5, cy), 270.0],
 			]
-			# All wall sides of a cell share one entry — picked once per
-			# cell so every face of the same room/corridor cell is
-			# visually coherent, and the distance constraint applies to
-			# the cell, not to each individual face.
-			var wall_entry: BiomeTextureEntry = null
+			# Wall classification is per-face (not per-cell) so that a
+			# dead-end cell's BACK wall — the one facing the player as
+			# they walk toward the dead end — can pick from
+			# PLACEMENT_DEAD_END entries while the two side walls fall
+			# back to PLACEMENT_CORRIDOR. The same hash + same matching
+			# set still resolves to the same entry, so within one
+			# classification all faces stay coherent.
 			for n in neighbours:
 				var dir   = n[0] as Vector2i
 				var npos  = Vector2i(x + dir.x, y + dir.y)
 				var ncell = generator.get_cell(npos.x, npos.y)
 				if ncell and ncell.cell_type == GridCell.CellType.WALL:
-					if wall_entry == null:
-						wall_entry = BiomeTextureEntry.pick_for(
-							biome.wall_textures, classification, grid_pos, wall_history)
-						if wall_entry != null:
-							_record_history(wall_history, wall_entry, grid_pos)
+					var wall_classification: int = generator.classify_wall_face(grid_pos, dir)
+					var wall_entry: BiomeTextureEntry = BiomeTextureEntry.pick_for(
+						biome.wall_textures, wall_classification, grid_pos, wall_history)
 					if wall_entry != null:
+						_record_history(wall_history, wall_entry, grid_pos)
 						_add_vertical_quad(n[1], n[2], _material_for_entry(wall_entry))
 
 func _record_history(history: Dictionary, entry: BiomeTextureEntry, cell_pos: Vector2i) -> void:

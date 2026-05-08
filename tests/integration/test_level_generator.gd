@@ -1501,3 +1501,82 @@ func test_wall_decoration_animated_path_uses_frames() -> void:
 	var gen := _make_generator(biome)
 	for inst in gen.wall_decorations:
 		assert_true(inst.data.is_animated())
+
+# -------------------------------------------------------
+# Per-wall-face classification (Phase 4 polish follow-up)
+# -------------------------------------------------------
+
+func _find_dead_end_floor_cell(gen: LevelGenerator) -> Vector2i:
+	# A floor cell with exactly one floor neighbour. Used to verify
+	# classify_wall_face picks DEAD_END for the back wall and CORRIDOR
+	# for the side walls.
+	for x in range(1, gen.grid_width - 1):
+		for y in range(1, gen.grid_height - 1):
+			var cell: GridCell = gen.grid[x][y]
+			if cell.cell_type != GridCell.CellType.FLOOR:
+				continue
+			var pos := Vector2i(x, y)
+			if pos == gen.entrance_pos or pos == gen.exit_pos:
+				continue
+			var floor_neighbours := 0
+			for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				if gen.grid[x + d.x][y + d.y].cell_type != GridCell.CellType.WALL:
+					floor_neighbours += 1
+			if floor_neighbours == 1:
+				return pos
+	return Vector2i(-1, -1)
+
+func test_classify_wall_face_back_wall_of_dead_end_is_dead_end() -> void:
+	var gen := _make_generator(_make_biome())
+	var pos := _find_dead_end_floor_cell(gen)
+	assert_ne(pos, Vector2i(-1, -1), "test biome should produce at least one dead end floor cell")
+	# Find the open direction (the only floor neighbour).
+	var open_dir := Vector2i.ZERO
+	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+		if gen.grid[pos.x + d.x][pos.y + d.y].cell_type != GridCell.CellType.WALL:
+			open_dir = d
+			break
+	# Back wall = opposite of open direction.
+	var back_dir := -open_dir
+	assert_eq(gen.classify_wall_face(pos, back_dir), ObjectSpawn.PLACEMENT_DEAD_END)
+
+func test_classify_wall_face_side_walls_of_dead_end_are_corridor() -> void:
+	var gen := _make_generator(_make_biome())
+	var pos := _find_dead_end_floor_cell(gen)
+	assert_ne(pos, Vector2i(-1, -1))
+	var open_dir := Vector2i.ZERO
+	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+		if gen.grid[pos.x + d.x][pos.y + d.y].cell_type != GridCell.CellType.WALL:
+			open_dir = d
+			break
+	# Two side walls = perpendicular to the open / back axis. Both
+	# must classify as CORRIDOR so a DEAD_END-only texture (e.g. a
+	# big-tree mural) lands only on the back wall, not wrapping the
+	# cell on three sides.
+	var perp_a := Vector2i(open_dir.y, open_dir.x)
+	var perp_b := Vector2i(-open_dir.y, -open_dir.x)
+	assert_eq(gen.classify_wall_face(pos, perp_a), ObjectSpawn.PLACEMENT_CORRIDOR)
+	assert_eq(gen.classify_wall_face(pos, perp_b), ObjectSpawn.PLACEMENT_CORRIDOR)
+
+func test_classify_wall_face_non_dead_end_matches_cell_classification() -> void:
+	var gen := _make_generator(_make_biome())
+	# Non-dead-end floor cells should report the same classification
+	# for every wall direction.
+	for x in range(1, gen.grid_width - 1):
+		for y in range(1, gen.grid_height - 1):
+			var cell: GridCell = gen.grid[x][y]
+			if cell.cell_type != GridCell.CellType.FLOOR:
+				continue
+			var pos := Vector2i(x, y)
+			var floor_neighbours := 0
+			for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				if gen.grid[x + d.x][y + d.y].cell_type != GridCell.CellType.WALL:
+					floor_neighbours += 1
+			if floor_neighbours == 1:
+				continue  # dead end is the special case, tested separately
+			var cell_class: int = gen.classify_cell(pos)
+			for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				assert_eq(gen.classify_wall_face(pos, d), cell_class,
+					"wall face at %s dir %s should match cell classification" % [pos, d])
+			return  # one cell is enough to prove the rule
+	fail_test("expected at least one non-dead-end floor cell")
