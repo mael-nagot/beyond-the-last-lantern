@@ -79,6 +79,14 @@ extends Resource
 # in a sequential order the player can actually walk.
 @export var key_door_spawns: Array[KeyDoorSpawn] = []
 
+# Traps (Phase 8 Task 3 — Subtask A). Placed AFTER doors / linked
+# objects / key doors but BEFORE items + decorations, so trap cells
+# are excluded from item placement (the player can't pile loot onto
+# a trap that would damage them on pickup approach) and traps never
+# share a tile with chests / levers. Each entry produces
+# count_min..count_max single-cell trap placements.
+@export var trap_spawns: Array[TrapSpawn] = []
+
 # Wall-mounted decorations (paintings, torches, lanterns). Placed
 # LAST among scenery — they don't gate or interact with anything,
 # they just dress wall faces. Each entry attaches its decoration to

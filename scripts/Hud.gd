@@ -19,6 +19,7 @@ var pickup_prompt: PickupPrompt
 var toast: Toast
 var loot_popup: LootPopup
 var item_description_popup: ItemDescriptionPopup
+var damage_flash: DamageFlash
 var map_data: MapData
 var _dungeon_view: DungeonView = null
 
@@ -54,6 +55,18 @@ func _ready() -> void:
 	item_description_popup = ItemDescriptionPopup.new()
 	item_description_popup.name = "ItemDescriptionPopup"
 	hud_root.add_child(item_description_popup)
+
+	# DamageFlash sits ABOVE every other HUD child so the red tint
+	# covers both the dungeon view (one CanvasLayer below) and the
+	# rest of the HUD. MapPopup is reordered to be the last sibling
+	# below, which puts it ABOVE this flash — that's intentional:
+	# while the map is open we don't want the flash painting over a
+	# transparent map background. Trap damage doesn't fire while
+	# paused anyway, so the flash sequencing here is mostly belt-
+	# and-braces.
+	damage_flash = DamageFlash.new()
+	damage_flash.name = "DamageFlash"
+	hud_root.add_child(damage_flash)
 
 	# MapPopup is defined in the scene as a child of HUDRoot, so it
 	# lands BEFORE the programmatic Toast / PickupPrompt / LootPopup
@@ -98,6 +111,14 @@ func _refresh_pause() -> void:
 func show_toast(translation_key: String, duration: float = Toast.DEFAULT_DURATION) -> void:
 	if toast != null:
 		toast.show_message(translation_key, duration)
+
+# Trigger the screen-flash damage feedback. Game.gd calls this when
+# the party takes damage from any source (traps today; combat /
+# status effects later). Safe to call from a tick loop — DamageFlash
+# kills its own in-flight tween before starting a new one.
+func flash_damage() -> void:
+	if damage_flash != null:
+		damage_flash.flash()
 
 func setup_dungeon_view(dv: DungeonView) -> void:
 	_dungeon_view = dv

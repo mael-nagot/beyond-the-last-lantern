@@ -20,6 +20,7 @@ var floor_items_max: int = 8
 var objects_pool: Array[ObjectSpawn] = []
 var linked_objects_pool: Array[LinkedObjectSpawn] = []
 var key_door_spawns_pool: Array[KeyDoorSpawn] = []
+var trap_spawns_pool: Array[TrapSpawn] = []
 var wall_decorations_pool: Array[WallDecorationSpawn] = []
 
 var grid: Array = []
@@ -39,6 +40,12 @@ var _doors_by_edge: Dictionary = {}  # edge_key (String) -> DoorInstance
 # the same face via _wall_faces_used.
 var wall_decorations: Array[WallDecorationInstance] = []
 var _wall_faces_used: Dictionary = {}  # face_key (String) -> true
+
+# Traps live on cells (`GridCell.trap`) but we also keep a flat list
+# so the renderer + Game tick can iterate without re-scanning the
+# whole grid each frame. Subtask A places single-cell traps; Subtask
+# B will extend with corridor clusters / room density.
+var traps: Array[TrapInstance] = []
 
 func configure(biome: BiomeData) -> void:
 	if biome == null:
@@ -63,6 +70,7 @@ func configure(biome: BiomeData) -> void:
 	objects_pool = biome.objects
 	linked_objects_pool = biome.linked_objects
 	key_door_spawns_pool = biome.key_door_spawns
+	trap_spawns_pool = biome.trap_spawns
 	wall_decorations_pool = biome.wall_decorations
 
 func generate() -> void:
@@ -71,6 +79,7 @@ func generate() -> void:
 	_doors_by_edge.clear()
 	wall_decorations.clear()
 	_wall_faces_used.clear()
+	traps.clear()
 	if room_count > 0:
 		_place_rooms()
 	_grow_maze()
@@ -84,6 +93,7 @@ func generate() -> void:
 	_place_doors()
 	_place_linked_objects()
 	_place_key_doors()
+	_place_traps()
 	_place_items()
 	_place_wall_decorations()
 
@@ -1381,6 +1391,87 @@ func _is_any_door_endpoint(pos: Vector2i) -> bool:
 
 
 # -------------------------------------------------------
+# Traps (Phase 8 Task 3 — Subtask A: simple distance-based placement)
+#
+# Traps live on `GridCell.trap` (separate slot from `cell.object`).
+# Placed AFTER all object passes so trap cells are guaranteed to be
+# free of chests / doors / levers, and BEFORE items so the item
+# placement skips trap cells. Traps don't block movement, so they
+# don't affect chain reachability — no BFS validation needed at this
+# layer.
+# -------------------------------------------------------
+func _place_traps() -> void:
+	if trap_spawns_pool.is_empty():
+		return
+	var cells_by_type := _classify_floor_cells()
+	for spawn in trap_spawns_pool:
+		if spawn == null or spawn.trap == null:
+			continue
+		var count := randi_range(max(0, spawn.count_min), max(spawn.count_min, spawn.count_max))
+		for _i in range(count):
+			_try_place_trap(spawn, cells_by_type)
+
+func _try_place_trap(spawn: TrapSpawn, cells_by_type: Dictionary) -> void:
+	var base_candidates := _trap_candidates_for_spawn(spawn, cells_by_type)
+	if base_candidates.is_empty():
+		return
+	# Graceful degrade on min_distance — same pattern items / objects /
+	# decorations use. Better to ship a slightly clustered set of traps
+	# than a silent zero when the constraint over-constrains.
+	var distance: int = max(0, spawn.min_distance_to_other_trap)
+	while distance >= 0:
+		var candidates: Array = base_candidates
+		if distance > 0:
+			candidates = base_candidates.filter(
+				func(p): return not _too_close_to_existing_trap(p, distance)
+			)
+		if not candidates.is_empty():
+			var pos: Vector2i = candidates[randi() % candidates.size()]
+			var inst := TrapInstance.create(spawn.trap, pos)
+			grid[pos.x][pos.y].trap = inst
+			traps.append(inst)
+			# Remove from the cells-by-type pool so subsequent traps in
+			# the same biome don't re-pick this cell. Removing from the
+			# typed list keeps `_classify_floor_cells` re-roll-free.
+			cells_by_type[classify_cell(pos)].erase(pos)
+			return
+		distance -= 1
+
+func _trap_candidates_for_spawn(spawn: TrapSpawn, cells_by_type: Dictionary) -> Array:
+	var result: Array = []
+	for placement_bit in [ObjectSpawn.PLACEMENT_CORRIDOR, ObjectSpawn.PLACEMENT_ROOM, ObjectSpawn.PLACEMENT_DEAD_END]:
+		if not spawn.allows(placement_bit):
+			continue
+		for pos in cells_by_type[placement_bit]:
+			# Don't drop traps on the entrance / exit (the player
+			# spawns there or wins by reaching there — neither should
+			# get hit by a Phase 8 trap).
+			if pos == entrance_pos or pos == exit_pos:
+				continue
+			# A cell with an object already (chest, lever) is excluded
+			# so the player can interact without standing on a trap.
+			# `_classify_floor_cells` already skips blocked cells, but
+			# levers are non-blocking objects — explicit guard anyway.
+			var cell: GridCell = grid[pos.x][pos.y]
+			if cell.object != null:
+				continue
+			if cell.trap != null:
+				continue
+			result.append(pos)
+	return result
+
+func _too_close_to_existing_trap(pos: Vector2i, min_distance: int) -> bool:
+	if min_distance <= 0:
+		return false
+	for inst in traps:
+		if inst == null:
+			continue
+		var d: int = abs(pos.x - inst.cell.x) + abs(pos.y - inst.cell.y)
+		if d < min_distance:
+			return true
+	return false
+
+# -------------------------------------------------------
 # Items
 # -------------------------------------------------------
 func _place_items() -> void:
@@ -1508,6 +1599,13 @@ func _classify_floor_cells() -> Dictionary:
 				# A blocking object already sits here (chest, door, …)
 				# — the player can't stand on it, so items shouldn't pile
 				# on it either.
+				continue
+			# Trap cells are walkable (traps don't block) but we don't
+			# want chests / floor items piling on top of a hazard, so the
+			# pool excludes them. Placement passes that EXPLICITLY want
+			# to consider trap cells (none today) would build their own
+			# candidate set instead of going through this helper.
+			if cell.trap != null:
 				continue
 			var pos := Vector2i(x, y)
 			if _is_dead_end(pos):

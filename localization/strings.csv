@@ -24,3 +24,7 @@ item.key_forest.name,Forest Key
 item.key_forest.description,A key found in the forest depths.
 ui.loot.title_chest,Chest
 ui.loot.take_all,Take All
+trap.spike_step.name,Spike Trap
+trap.spike_step.description,Hidden floor spikes that snap up when stepped on.
+trap.spike_timed.name,Cycling Spike Trap
+trap.spike_timed.description,Floor spikes that periodically extend and retract.

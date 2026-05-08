@@ -38,6 +38,13 @@ var _items_root: Node3D
 var _objects_root: Node3D
 var _doors_root: Node3D
 var _decorations_root: Node3D
+var _traps_root: Node3D
+# TrapInstance → Dictionary { "root": Node3D, "spikes_root": Node3D }
+# Lookup so update_trap_visual / _refresh_trap_spike_positions can
+# touch the spike subtree without walking the scene tree. The floor
+# decal is permanent and not tracked here — only the spike root
+# toggles per state change.
+var _trap_visuals: Dictionary = {}
 # Decorations using face_camera mode — DungeonView's `_process` rotates
 # each one each frame to face the camera, with a designer-configured
 # X-axis tilt so the top leans toward the player.
@@ -53,6 +60,10 @@ var _object_sprites: Dictionary = {}  # Vector2i -> Sprite3D (for cheap per-move
 # its own material, which costs hundreds of duplicate materials per
 # level (one per wall side per cell).
 var _material_cache: Dictionary = {}  # BiomeTextureEntry -> StandardMaterial3D
+# Separate cache keyed by Texture2D for trap floor decals. Kept
+# distinct from `_material_cache` so the two caches never collide on
+# their key types.
+var _trap_floor_material_cache: Dictionary = {}  # Texture2D -> StandardMaterial3D
 var drop_target: DungeonDropTarget
 
 func setup(gen: LevelGenerator) -> void:
@@ -61,11 +72,13 @@ func setup(gen: LevelGenerator) -> void:
 	_ensure_objects_root()
 	_ensure_doors_root()
 	_ensure_decorations_root()
+	_ensure_traps_root()
 	_ensure_drop_target()
 	_build_mesh()
 	_build_objects()
 	_build_doors()
 	_build_items()
+	_build_traps()
 	_build_wall_decorations()
 	_place_camera_at_entrance()
 	_apply_biome_environment()
@@ -99,6 +112,13 @@ func _ensure_decorations_root() -> void:
 	_decorations_root = Node3D.new()
 	_decorations_root.name = "WallDecorationsRoot"
 	sub_viewport.add_child(_decorations_root)
+
+func _ensure_traps_root() -> void:
+	if _traps_root != null and is_instance_valid(_traps_root):
+		return
+	_traps_root = Node3D.new()
+	_traps_root.name = "TrapsRoot"
+	sub_viewport.add_child(_traps_root)
 
 func _ensure_drop_target() -> void:
 	if drop_target != null and is_instance_valid(drop_target):
@@ -407,6 +427,243 @@ func _door_y_rotation_deg(door: DoorInstance) -> float:
 		return 90.0
 	return 0.0
 
+# -------------------------------------------------------
+# Traps — Phase 8 Task 3 Subtask A.
+#
+# Each trap renders as TWO pieces inside `TrapsRoot`:
+#  1. A flat MeshInstance3D quad lying on the floor with the holes
+#     texture (always visible — the holes are a permanent feature of
+#     the cell, communicating danger even when spikes are retracted).
+#  2. A per-spike Sprite3D billboard tree under a "spikes" Node3D
+#     (visible only while the trap is EXTENDED). Each spike is its
+#     own billboard so the cluster reads as 3D — multiple billboards
+#     at different XZ positions parallax against each other as the
+#     player moves around the cell.
+#
+# The two pieces share a per-trap root Node3D so we can hide / show
+# the spikes by toggling that subroot's `visible` flag without
+# walking the children. TIMED traps additionally get an
+# AudioStreamPlayer3D for spatial activate / deactivate sounds (with
+# `max_distance` from the trap's `hearing_distance`).
+# -------------------------------------------------------
+func _build_traps() -> void:
+	for child in _traps_root.get_children():
+		child.queue_free()
+	_trap_visuals.clear()
+	if generator == null:
+		return
+	for trap in generator.traps:
+		if trap == null or trap.data == null:
+			continue
+		var entry: Dictionary = _make_trap_node(trap)
+		# Empty dict signals "nothing renderable" (assets misconfigured).
+		# is_empty avoids the trap of treating {} as null — would crash
+		# `entry["root"]` below.
+		if entry.is_empty():
+			continue
+		_traps_root.add_child(entry["root"])
+		_trap_visuals[trap] = entry
+
+func rebuild_traps() -> void:
+	if _traps_root == null:
+		return
+	_build_traps()
+
+# Cheap per-tick path: flip the spike subtree's `visible` flag without
+# rebuilding the trap. Game.gd calls this on each ACTIVATED /
+# DEACTIVATED event from TrapInstance.tick.
+func update_trap_visual(trap: TrapInstance) -> void:
+	if trap == null:
+		return
+	var entry: Variant = _trap_visuals.get(trap, null)
+	if entry == null:
+		return
+	var spikes_root: Node3D = entry["spikes_root"]
+	if is_instance_valid(spikes_root):
+		spikes_root.visible = trap.is_extended()
+
+# Per-trap "lean toward player" offset for the spike subtree. Mirrors
+# the cell-object lean (used by chests) but applies only to the
+# spikes — the floor holes stay anchored to the cell centre. Refresh
+# is called on player turn (same trigger as `_refresh_object_positions`)
+# because the lean axis is tied to facing, not position; refreshing
+# on move would visibly snap the spikes mid-step.
+func _refresh_trap_spike_positions() -> void:
+	if _trap_visuals.is_empty():
+		return
+	for trap in _trap_visuals.keys():
+		var entry: Variant = _trap_visuals.get(trap, null)
+		if entry == null:
+			continue
+		var spikes_root: Node3D = entry["spikes_root"]
+		if not is_instance_valid(spikes_root) or trap == null or trap.data == null:
+			continue
+		spikes_root.position = _trap_spike_offset(trap)
+
+# Cell-relative offset for a trap's spike subtree. Returns Vector3.ZERO
+# unless `data.spike_lean_toward_player > 0` AND the player is on a
+# cell different from the trap (lean direction tied to whichever
+# cardinal axis the player currently faces). Same algorithm as
+# `_object_position` but emitting a delta instead of an absolute
+# position so the trap root can stay parked at the cell centre.
+func _trap_spike_offset(trap: TrapInstance) -> Vector3:
+	var data: TrapData = trap.data
+	if data.spike_lean_toward_player <= 0.0:
+		return Vector3.ZERO
+	var diff := _current_grid_pos - trap.cell
+	if diff == Vector2i.ZERO:
+		# Player is standing on the trap — no axis to lean on,
+		# spikes stay centred. Returning early avoids a divide-by-
+		# zero-ish branch below.
+		return Vector3.ZERO
+	var ox: float = 0.0
+	var oz: float = 0.0
+	var prefer_x: bool = abs(_current_facing.x) > abs(_current_facing.y)
+	if prefer_x and diff.x != 0:
+		ox = float(signi(diff.x)) * data.spike_lean_toward_player
+	elif (not prefer_x) and diff.y != 0:
+		oz = float(signi(diff.y)) * data.spike_lean_toward_player
+	elif diff.x != 0:
+		ox = float(signi(diff.x)) * data.spike_lean_toward_player
+	elif diff.y != 0:
+		oz = float(signi(diff.y)) * data.spike_lean_toward_player
+	return Vector3(ox, 0.0, oz)
+
+func _make_trap_node(trap: TrapInstance) -> Dictionary:
+	var data: TrapData = trap.data
+	if data.holes_sprite == null and data.extended_sprite == null:
+		# Nothing to render — likely an asset misconfiguration. Don't
+		# emit a node, but warn so the developer notices.
+		push_warning("DungeonView: trap '%s' at %s has neither holes_sprite nor extended_sprite — skipped" % [data.name_key, trap.cell])
+		return {}
+	var cx: float = trap.cell.x * CELL_SIZE + CELL_SIZE * 0.5
+	var cz: float = trap.cell.y * CELL_SIZE + CELL_SIZE * 0.5
+
+	var root := Node3D.new()
+	root.position = Vector3(cx, 0.0, cz)
+
+	var positions := _trap_grid_positions_local(data)
+
+	# Floor decal — one flat quad per grid intersection, all coplanar
+	# slightly above the floor (Y = 0.01) to avoid Z-fighting with the
+	# triplanar floor texture beneath. Always visible.
+	if data.holes_sprite != null:
+		var hole_mat: StandardMaterial3D = _build_trap_floor_material(data.holes_sprite)
+		var hole_size: float = data.hole_world_size if data.hole_world_size > 0.0 else _natural_hole_world_size(data.holes_sprite, data, positions.size())
+		for offset: Vector3 in positions:
+			var quad := QuadMesh.new()
+			quad.size = Vector2(hole_size, hole_size)
+			var decal := MeshInstance3D.new()
+			decal.mesh = quad
+			decal.material_override = hole_mat
+			decal.position = Vector3(offset.x, 0.01, offset.z)
+			decal.rotation_degrees = Vector3(-90.0, 0.0, 0.0)
+			root.add_child(decal)
+
+	# Spikes subtree — a single Node3D parent toggled visible/hidden
+	# in lockstep with `trap.state`. Per-spike billboards inside it
+	# parallax against each other at close range. Position is
+	# offset by `_trap_spike_offset` so designers can lean the
+	# spikes toward the player (just the spikes — the floor holes
+	# stay anchored to the cell centre).
+	var spikes_root := Node3D.new()
+	spikes_root.name = "Spikes"
+	spikes_root.visible = trap.is_extended()
+	spikes_root.position = _trap_spike_offset(trap)
+	if data.extended_sprite != null:
+		var tex: Texture2D = data.extended_sprite
+		var tex_w: int = max(1, tex.get_width())
+		var tex_h: int = max(1, tex.get_height())
+		var pixel_size: float = data.world_height / float(tex_h)
+		var spike_y: float = data.world_height * 0.5 + data.y_offset
+		# Force a horizontal stretch via scale.x when the designer wants
+		# the spike base wider/narrower than its texture's natural aspect
+		# (e.g. matching `hole_world_size` so each spike fills its hole).
+		# Mirrors the door's world_width pattern.
+		var x_scale: float = 1.0
+		if data.spike_world_width > 0.0:
+			var natural_world_width: float = float(tex_w) * pixel_size
+			if natural_world_width > 0.0:
+				x_scale = data.spike_world_width / natural_world_width
+		for offset: Vector3 in positions:
+			var sprite := Sprite3D.new()
+			sprite.texture = tex
+			sprite.pixel_size = pixel_size
+			sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+			sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+			sprite.position = Vector3(offset.x, spike_y, offset.z)
+			if x_scale != 1.0:
+				sprite.scale = Vector3(x_scale, 1.0, 1.0)
+			spikes_root.add_child(sprite)
+	root.add_child(spikes_root)
+
+	# Note: TIMED trap activate / deactivate audio used to live on a
+	# per-trap AudioStreamPlayer3D here, but Godot 4's spatial audio
+	# inside a SubViewport gave us inconsistent listener routing —
+	# sounds often went silent. Game.gd now plays trap sounds through
+	# SoundManager (non-spatial) with a manual distance gate against
+	# `hearing_distance`. Drops the smooth distance falloff curve in
+	# exchange for reliability; revisit in Phase 19 when audio gets
+	# the dedicated polish pass.
+
+	return {
+		"root": root,
+		"spikes_root": spikes_root,
+	}
+
+# Build the world-space XZ offsets (Y = 0) for one cell's spike+hole
+# grid. Designer-controlled via `grid_cols / grid_rows / grid_inset`.
+# Inset 0 = touches cell edges; 0.5 = bunched at centre. Positions
+# distribute evenly: with cols=1 the column centres on 0; with
+# cols=2 they sit symmetrically around 0; with cols=3 they're at
+# -k, 0, +k; etc.
+func _trap_grid_positions_local(data: TrapData) -> Array:
+	var cols: int = max(1, data.grid_cols)
+	var rows: int = max(1, data.grid_rows)
+	var inset: float = clamp(data.grid_inset, 0.0, 0.5)
+	# Span = cell minus inset on both sides. Each axis range goes from
+	# (-span/2) to (+span/2) inclusive when count > 1; centred at 0
+	# when count == 1.
+	var span: float = CELL_SIZE * (1.0 - inset * 2.0)
+	var result: Array = []
+	for r in range(rows):
+		var rt: float = 0.0 if rows == 1 else float(r) / float(rows - 1) - 0.5
+		var rz: float = rt * span
+		for c in range(cols):
+			var ct: float = 0.0 if cols == 1 else float(c) / float(cols - 1) - 0.5
+			var cxr: float = ct * span
+			result.append(Vector3(cxr, 0.0, rz))
+	return result
+
+func _natural_hole_world_size(tex: Texture2D, data: TrapData, slot_count: int) -> float:
+	# Fallback when the designer leaves hole_world_size at 0. Sizes
+	# the hole so a 2×2 grid roughly fills the cell — good default.
+	# Larger grids shrink each tile; smaller grids leave breathing
+	# room.
+	var per_axis: int = max(1, int(round(sqrt(float(slot_count)))))
+	var span: float = CELL_SIZE * (1.0 - clamp(data.grid_inset, 0.0, 0.5) * 2.0)
+	var size_estimate: float = span / float(max(1, per_axis))
+	if size_estimate <= 0.0:
+		return 1.0
+	return size_estimate
+
+func _build_trap_floor_material(albedo: Texture2D) -> StandardMaterial3D:
+	# Cached on the texture so multiple traps sharing the same
+	# holes_sprite share one material (same trick as biome textures).
+	if _trap_floor_material_cache.has(albedo):
+		return _trap_floor_material_cache[albedo]
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = albedo
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	mat.alpha_scissor_threshold = 0.5
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	# The floor mesh below uses triplanar mapping; the trap decal is
+	# UV-mapped so the hole stays sharp regardless of cell position.
+	mat.cull_mode = BaseMaterial3D.CULL_BACK
+	_trap_floor_material_cache[albedo] = mat
+	return mat
+
 func _build_wall_decorations() -> void:
 	_billboard_decorations.clear()
 	_flickering_lights.clear()
@@ -690,15 +947,21 @@ func set_initial_facing(facing: Vector2i) -> void:
 	camera.rotation_degrees.y = _current_angle
 	camera.position           = _grid_to_world(_current_grid_pos.x, _current_grid_pos.y)
 	_refresh_object_positions()
+	_refresh_trap_spike_positions()
 
 func move_camera_to(grid_pos: Vector2i, facing: Vector2i) -> void:
 	_current_grid_pos = grid_pos
 	_current_facing   = facing
 	var target_pos    = _grid_to_world(grid_pos.x, grid_pos.y)
-	var tween         = create_tween()
-	tween.set_parallel(true)
-	tween.tween_property(camera, "position", target_pos, 0.12)
-	tween.tween_property(camera, "rotation_degrees:y", _current_angle, 0.12)
+	# Kill any prior movement tween so consecutive moves don't compound
+	# (and so shake_camera's kill-and-snap path sees a single owner of
+	# camera.position).
+	if _move_tween != null and _move_tween.is_valid():
+		_move_tween.kill()
+	_move_tween = create_tween()
+	_move_tween.set_parallel(true)
+	_move_tween.tween_property(camera, "position", target_pos, 0.12)
+	_move_tween.tween_property(camera, "rotation_degrees:y", _current_angle, 0.12)
 	# Object positions are intentionally NOT refreshed here — the lean
 	# axis is tied to facing, so the chest only re-leans when the player
 	# turns. Refreshing on move would visibly snap the chest mid-step.
@@ -710,6 +973,7 @@ func rotate_camera_to(turn_right: bool, facing: Vector2i = Vector2i.ZERO) -> voi
 	var tween = create_tween()
 	tween.tween_property(camera, "rotation_degrees:y", _current_angle, 0.12)
 	_refresh_object_positions()
+	_refresh_trap_spike_positions()
 
 const SHAKE_INTENSITY := 0.12
 const SHAKE_DURATION  := 0.18
@@ -717,6 +981,13 @@ const SHAKE_STEPS     := 5
 
 var _shake_tween: Tween = null
 var _shake_origin: Vector3 = Vector3.ZERO
+# Tween created by `move_camera_to`. Tracked so `shake_camera` can
+# kill an in-flight movement before starting its own animation —
+# without this, both tweens fight for `camera.position` and the
+# shake's anchor lands at wherever the camera was MID-MOVE, which
+# visibly pulls the player back from the cell they just stepped
+# onto (the original "step trap pushes you back" bug).
+var _move_tween: Tween = null
 
 # Brief omni-directional jolt of the camera position. Used for wall
 # bumps and rejected interactions (locked-door click feedback).
@@ -725,10 +996,34 @@ var _shake_origin: Vector3 = Vector3.ZERO
 # fire — an active shake is killed and the camera reset before a
 # fresh shake starts so successive shakes don't drift.
 func shake_camera(magnitude: float = 1.0) -> void:
+	# Kill any in-flight movement tween — without this, the move tween
+	# (0.12s) keeps trying to interpolate camera.position toward the
+	# target cell while the shake tween (0.18s) interpolates around
+	# its captured origin. The two fight for the same property each
+	# frame and the shake's "settle" position visibly drags the camera
+	# back to wherever it was when the shake started, not the cell the
+	# player walked onto. Killing the move tween here makes the shake
+	# the sole owner of camera.position for its duration.
+	if _move_tween != null and _move_tween.is_valid():
+		_move_tween.kill()
+		_move_tween = null
 	if _shake_tween != null and _shake_tween.is_running():
 		_shake_tween.kill()
 		camera.position = _shake_origin
-	_shake_origin = camera.position
+	# Anchor the shake on the LOGICAL grid cell, not whatever
+	# camera.position currently is. If we get here mid-move (trap
+	# damage fires the same frame the player steps onto the trap)
+	# camera.position is still partway between cells, and using it
+	# as the origin would settle the shake at that intermediate
+	# point — visually pulling the player back. _grid_to_world gives
+	# us the canonical "where the player IS" coordinate.
+	_shake_origin = _grid_to_world(_current_grid_pos.x, _current_grid_pos.y)
+	# Snap camera to the canonical origin BEFORE the shake starts so
+	# step #1's interpolation begins from the trap cell rather than
+	# from the (possibly stale) mid-move position. Otherwise the
+	# first 0.04s of the shake animates from "old position" to
+	# "trap cell + offset", which reads as a slide.
+	camera.position = _shake_origin
 	_shake_tween = create_tween()
 	var intensity: float = SHAKE_INTENSITY * magnitude
 	var step_dur := SHAKE_DURATION / float(SHAKE_STEPS)
