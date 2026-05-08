@@ -1408,13 +1408,17 @@ func _is_any_door_endpoint(pos: Vector2i) -> bool:
 # don't affect chain reachability — no BFS validation needed at this
 # layer.
 #
-# Two placement modes per spawn (additive):
-#   1. Corridor clusters (Subtask B) — runs first. For each corridor
+# Three placement modes per spawn (additive — combine freely):
+#   1. Corridor clusters (Subtask B1) — runs first. For each corridor
 #      segment, roll `corridor_segment_chance`; on hit, lay a contiguous
 #      run of N trap cells inside that segment. Segments that already
 #      hold traps from an earlier spawn's pass are skipped so two
 #      spawns don't fight over the same corridor.
-#   2. Scattered (Subtask A) — runs second. The legacy per-cell mode:
+#   2. Room density (Subtask B2) — runs second. For each room, roll
+#      `room_chance`; on hit, place N traps inside the room where N
+#      is a percentage of the room's eligible cells, with optional
+#      Manhattan spacing between them.
+#   3. Scattered (Subtask A) — runs last. The legacy per-cell mode:
 #      lay `count_min..count_max` individual traps with a distance
 #      preference between them.
 # -------------------------------------------------------
@@ -1429,9 +1433,11 @@ func _place_traps() -> void:
 		if spawn == null or spawn.trap == null:
 			continue
 		# Corridor clusters first — they consume cells in bulk, which
-		# the scattered pass then implicitly avoids via `cell.trap`.
+		# the room + scattered passes implicitly avoid via `cell.trap`.
 		if spawn.uses_corridor_clusters() and spawn.allows(ObjectSpawn.PLACEMENT_CORRIDOR):
 			_place_corridor_traps(spawn, segments, cells_by_type)
+		if spawn.uses_room_density() and spawn.allows(ObjectSpawn.PLACEMENT_ROOM):
+			_place_room_traps(spawn, cells_by_type)
 		var count := randi_range(max(0, spawn.count_min), max(spawn.count_min, spawn.count_max))
 		for _i in range(count):
 			_try_place_trap(spawn, cells_by_type)
@@ -1632,6 +1638,86 @@ func _gather_run_in_segment(eligible: Array, target_n: int) -> Array:
 			visited[n] = true
 			queue.append(n)
 	return result
+
+func _place_room_traps(spawn: TrapSpawn, cells_by_type: Dictionary) -> void:
+	for room_obj in _room_rects:
+		var room: Rect2i = room_obj as Rect2i
+		if randf() >= spawn.room_chance:
+			continue
+		# Exclusivity — when this spawn opts out of sharing, skip any
+		# room that already has traps from an earlier spawn's pass.
+		# Designer choice: gives a room a single-spawn identity
+		# ("this room is poison-spike trapped") instead of mixed
+		# variety ("this room has both step AND timed hazards").
+		if not spawn.allow_mixed_room_traps and _room_has_any_trap(room):
+			continue
+		var room_cells: Array = _eligible_room_cells(room)
+		if room_cells.is_empty():
+			continue
+		var coverage_min: float = clamp(spawn.room_coverage_min_percent, 0.0, 100.0)
+		var coverage_max: float = clamp(spawn.room_coverage_max_percent, coverage_min, 100.0)
+		var coverage_pct: float = randf_range(coverage_min, coverage_max) / 100.0
+		var target_count: int = max(1, int(ceil(room_cells.size() * coverage_pct)))
+		# Random walk the eligible set, placing traps that satisfy the
+		# spacing rule, until the target is hit or no candidate fits.
+		# Graceful degrade: if spacing over-constrains coverage we
+		# stop early rather than crashing or warning.
+		room_cells.shuffle()
+		var placed_count: int = 0
+		for pos in room_cells:
+			if placed_count >= target_count:
+				break
+			if _too_close_to_room_traps(pos, room, spawn.room_min_spacing):
+				continue
+			var inst := TrapInstance.create(spawn.trap, pos)
+			grid[pos.x][pos.y].trap = inst
+			traps.append(inst)
+			placed_count += 1
+			# Keep cells_by_type in sync so the scattered pass won't
+			# re-pick this cell.
+			cells_by_type[classify_cell(pos)].erase(pos)
+
+func _eligible_room_cells(room: Rect2i) -> Array:
+	var result: Array = []
+	for x in range(room.position.x, room.position.x + room.size.x):
+		for y in range(room.position.y, room.position.y + room.size.y):
+			if not _in_bounds(x, y):
+				continue
+			var cell: GridCell = grid[x][y]
+			if cell.cell_type != GridCell.CellType.FLOOR:
+				continue
+			var pos := Vector2i(x, y)
+			if pos == entrance_pos or pos == exit_pos:
+				continue
+			if cell.object != null:
+				continue
+			if cell.trap != null:
+				continue
+			result.append(pos)
+	return result
+
+func _room_has_any_trap(room: Rect2i) -> bool:
+	for inst in traps:
+		if inst == null:
+			continue
+		if room.has_point(inst.cell):
+			return true
+	return false
+
+func _too_close_to_room_traps(pos: Vector2i, room: Rect2i, min_spacing: int) -> bool:
+	if min_spacing <= 0:
+		return false
+	for inst in traps:
+		if inst == null:
+			continue
+		# Only enforce spacing against traps inside the same room —
+		# corridor cluster cells outside the room rect are unrelated.
+		if not room.has_point(inst.cell):
+			continue
+		var d: int = abs(pos.x - inst.cell.x) + abs(pos.y - inst.cell.y)
+		if d < min_spacing:
+			return true
+	return false
 
 func _try_place_trap(spawn: TrapSpawn, cells_by_type: Dictionary) -> void:
 	var base_candidates := _trap_candidates_for_spawn(spawn, cells_by_type)

@@ -340,9 +340,16 @@ Split into three incremental sub-PRs so each one has something testable in-engin
 5. ✅ Tests: unit (`test_trap_spawn` extended — corridor field defaults, `uses_corridor_clusters` matrix); integration (`test_level_generator` extended — segments only contain corridors, exclude junctions, are disjoint; clusters lay consecutive cells; corridor-only landing; chance=0 produces no traps; run size ≤ max; second spawn skips already-trapped segments).
 6. ⏳ Manual asset work (developer): bump `corridor_segment_chance` and `corridor_traps_per_run_min/max` on a `TrapSpawn` in `forest.tres` to validate placement in-engine. The new fields default to 0/1/3 so existing biome configs keep their previous scattered-only behaviour until the developer opts in.
 
-###### Subtask B2 — Room density placement (deferred)
-- Per-room placement: `room_chance: float`, `room_coverage_min_percent: float`, `room_coverage_max_percent: float`, `room_min_spacing: int`
-- Tests for room density + graceful degrade when min-spacing over-constrains coverage
+###### Subtask B2 — Room density placement ✅ (code; awaits developer playtest)
+1. ✅ `TrapSpawn` extended with `room_chance: float` (per-room roll), `room_coverage_min_percent / max_percent: float` (target coverage range), `room_min_spacing: int` (Manhattan spacing between traps in the same room, cross-spawn), `allow_mixed_room_traps: bool` (default true — opt out for "this room is one trap type" exclusivity, mirroring the one-spawn-per-segment rule for corridor clusters). `uses_room_density()` predicate gates the new pass.
+2. ✅ `_place_room_traps()` runs AFTER the corridor pass and BEFORE the scattered pass on the same spawn — modes are additive. Per-room rules:
+   - Skip if `randf() >= room_chance`
+   - Skip if `not allow_mixed_room_traps` and the room already holds traps from a prior spawn
+   - Roll target coverage in [min, max], compute target count = ceil(eligible_cells × coverage)
+   - Random-walk eligible cells, placing traps that satisfy `room_min_spacing` against ALL existing traps in the same room (cross-spawn)
+   - Stop early if no candidate fits — graceful degrade when spacing over-constrains coverage
+3. ✅ Tests: unit (`test_trap_spawn` extended — room field defaults, `uses_room_density` matrix); integration (`test_level_generator` extended — zero-chance places nothing, room-only landing, `room_min_spacing` honoured cross-room and cross-spawn, coverage falls within rolled range, entrance/exit excluded, `allow_mixed_room_traps = false` blocks second spawn from sharing rooms, `= true` allows mixed rooms).
+4. ⏳ Manual asset work (developer): bump `room_chance` and `room_coverage_min/max_percent` on a `TrapSpawn` in `forest.tres` to validate room placement in-engine. Mix two spawns with `allow_mixed_room_traps` flipped differently to test exclusivity.
 
 ###### Subtask B3 — Path-safety validators + chest/lever adjacency (deferred)
 - STEP-trap-free BFS from entrance → exit AND entrance → every chest / lever / floor-object cell; rollback step traps until satisfied (so step traps never gate access to objects placed during level generation)
