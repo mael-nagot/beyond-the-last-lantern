@@ -1391,7 +1391,7 @@ func _is_any_door_endpoint(pos: Vector2i) -> bool:
 
 
 # -------------------------------------------------------
-# Traps (Phase 8 Task 3 — Subtask A: simple distance-based placement)
+# Traps (Phase 8 Task 3 — Subtasks A + B)
 #
 # Traps live on `GridCell.trap` (separate slot from `cell.object`).
 # Placed AFTER all object passes so trap cells are guaranteed to be
@@ -1399,17 +1399,168 @@ func _is_any_door_endpoint(pos: Vector2i) -> bool:
 # placement skips trap cells. Traps don't block movement, so they
 # don't affect chain reachability — no BFS validation needed at this
 # layer.
+#
+# Two placement modes per spawn (additive):
+#   1. Corridor clusters (Subtask B) — runs first. For each corridor
+#      segment, roll `corridor_segment_chance`; on hit, lay a contiguous
+#      run of N trap cells inside that segment. Segments that already
+#      hold traps from an earlier spawn's pass are skipped so two
+#      spawns don't fight over the same corridor.
+#   2. Scattered (Subtask A) — runs second. The legacy per-cell mode:
+#      lay `count_min..count_max` individual traps with a distance
+#      preference between them.
 # -------------------------------------------------------
 func _place_traps() -> void:
 	if trap_spawns_pool.is_empty():
 		return
+	# Detect segments once per generation — the topology doesn't change
+	# between spawns; only which cells are eligible for THIS spawn does.
+	var segments: Array = _detect_corridor_segments()
 	var cells_by_type := _classify_floor_cells()
 	for spawn in trap_spawns_pool:
 		if spawn == null or spawn.trap == null:
 			continue
+		# Corridor clusters first — they consume cells in bulk, which
+		# the scattered pass then implicitly avoids via `cell.trap`.
+		if spawn.uses_corridor_clusters() and spawn.allows(ObjectSpawn.PLACEMENT_CORRIDOR):
+			_place_corridor_traps(spawn, segments, cells_by_type)
 		var count := randi_range(max(0, spawn.count_min), max(spawn.count_min, spawn.count_max))
 		for _i in range(count):
 			_try_place_trap(spawn, cells_by_type)
+
+# Returns Array[Array[Vector2i]] — each inner array is a maximal
+# connected component of NON-JUNCTION corridor cells. A "junction" is
+# a corridor cell with 3+ corridor neighbours (a T-intersection or
+# crossroads), excluded so two corridors meeting at a T don't merge
+# into one giant segment that reads as a single "trapped corridor"
+# from the player's perspective.
+#
+# Tests rely on this method's output shape and stability — keep the
+# return contract stable.
+func _detect_corridor_segments() -> Array:
+	var corridor_cells: Dictionary = {}  # Vector2i -> true
+	var junctions: Dictionary = {}        # Vector2i -> true
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var pos := Vector2i(x, y)
+			var cell: GridCell = grid[x][y]
+			if cell.cell_type != GridCell.CellType.FLOOR:
+				continue
+			if classify_cell(pos) != ObjectSpawn.PLACEMENT_CORRIDOR:
+				continue
+			corridor_cells[pos] = true
+			var corridor_neighbours := 0
+			for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				var n: Vector2i = pos + d
+				if not _in_bounds(n.x, n.y):
+					continue
+				var nc: GridCell = grid[n.x][n.y]
+				if nc.cell_type != GridCell.CellType.FLOOR:
+					continue
+				if classify_cell(n) == ObjectSpawn.PLACEMENT_CORRIDOR:
+					corridor_neighbours += 1
+			if corridor_neighbours >= 3:
+				junctions[pos] = true
+	# BFS connected components on non-junction corridor cells.
+	var segments: Array = []
+	var visited: Dictionary = {}
+	for pos_key in corridor_cells:
+		var pos: Vector2i = pos_key
+		if junctions.has(pos) or visited.has(pos):
+			continue
+		var segment: Array = []
+		var queue: Array = [pos]
+		visited[pos] = true
+		while not queue.is_empty():
+			var cur: Vector2i = queue.pop_front()
+			segment.append(cur)
+			for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				var n: Vector2i = cur + d
+				if not corridor_cells.has(n) or junctions.has(n) or visited.has(n):
+					continue
+				visited[n] = true
+				queue.append(n)
+		if not segment.is_empty():
+			segments.append(segment)
+	return segments
+
+func _place_corridor_traps(spawn: TrapSpawn, segments: Array, cells_by_type: Dictionary) -> void:
+	for segment in segments:
+		# "Skip if segment already has traps from a previous spawn's
+		# pass" — open-question 2 settled. One spawn per segment keeps
+		# the player's mental model clean ("this corridor is poisoned
+		# with X" rather than "this corridor has a layered hazard").
+		if _segment_has_traps(segment):
+			continue
+		if randf() >= spawn.corridor_segment_chance:
+			continue
+		# Eligible cells inside the segment: skip entrance/exit, cells
+		# with an object, and cells already holding a trap (defensive —
+		# segment-has-traps above should have caught these).
+		var eligible: Array = _eligible_segment_cells(segment)
+		var min_n: int = max(1, spawn.corridor_traps_per_run_min)
+		if eligible.size() < min_n:
+			# Segment too short — open-question 1 settled (skip rather
+			# than under-deliver).
+			continue
+		var max_n: int = max(min_n, spawn.corridor_traps_per_run_max)
+		# Clamp the target to what the segment can actually hold.
+		max_n = min(max_n, eligible.size())
+		var target_n: int = randi_range(min_n, max_n)
+		var run: Array = _gather_run_in_segment(eligible, target_n)
+		for pos in run:
+			var inst := TrapInstance.create(spawn.trap, pos)
+			grid[pos.x][pos.y].trap = inst
+			traps.append(inst)
+			# Keep cells_by_type in sync with the scattered pass'
+			# expectations — same pattern as `_try_place_trap`.
+			cells_by_type[classify_cell(pos)].erase(pos)
+
+func _segment_has_traps(segment: Array) -> bool:
+	for pos in segment:
+		if grid[pos.x][pos.y].trap != null:
+			return true
+	return false
+
+func _eligible_segment_cells(segment: Array) -> Array:
+	var result: Array = []
+	for pos in segment:
+		if pos == entrance_pos or pos == exit_pos:
+			continue
+		var cell: GridCell = grid[pos.x][pos.y]
+		if cell.object != null:
+			continue
+		if cell.trap != null:
+			continue
+		result.append(pos)
+	return result
+
+# Picks a random eligible start in the segment and walks outward
+# (BFS-flood, restricted to the eligible set) collecting up to
+# `target_n` cells. Yields a contiguous run even when eligibility
+# carves the segment into sub-blocks (e.g. a chest in the middle
+# splits one segment into two; the flood stays inside the sub-block
+# the start sits in).
+func _gather_run_in_segment(eligible: Array, target_n: int) -> Array:
+	if eligible.is_empty() or target_n <= 0:
+		return []
+	var eligible_set: Dictionary = {}
+	for pos in eligible:
+		eligible_set[pos] = true
+	var start: Vector2i = eligible[randi() % eligible.size()]
+	var result: Array = []
+	var visited: Dictionary = {start: true}
+	var queue: Array = [start]
+	while not queue.is_empty() and result.size() < target_n:
+		var cur: Vector2i = queue.pop_front()
+		result.append(cur)
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			var n: Vector2i = cur + d
+			if not eligible_set.has(n) or visited.has(n):
+				continue
+			visited[n] = true
+			queue.append(n)
+	return result
 
 func _try_place_trap(spawn: TrapSpawn, cells_by_type: Dictionary) -> void:
 	var base_candidates := _trap_candidates_for_spawn(spawn, cells_by_type)
