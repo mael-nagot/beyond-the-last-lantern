@@ -1,17 +1,17 @@
 [gd_resource type="Resource" script_class="BiomeData" format=3 uid="uid://xevqf0q5x5fk"]
 
 [ext_resource type="Script" uid="uid://bentd6twklhjr" path="res://scripts/BiomeData.gd" id="1_5w715"]
-[ext_resource type="Texture2D" uid="uid://ebx3msr2yhig" path="res://assets/textures/biomes/forest/ceilings/forest ceiling_01_albedo.jpg" id="1_bq1p8"]
-[ext_resource type="Texture2D" uid="uid://do12vq4fygnrp" path="res://assets/textures/biomes/forest/floors/forest floor_01_albedo.jpg" id="1_ve4a7"]
+[ext_resource type="Texture2D" uid="uid://ebx3msr2yhig" path="res://assets/textures/biomes/forest/ceilings/forest ceiling_01.jpg" id="1_bq1p8"]
+[ext_resource type="Texture2D" uid="uid://do12vq4fygnrp" path="res://assets/textures/biomes/forest/floors/forest floor_01.jpg" id="1_ve4a7"]
+[ext_resource type="Texture2D" uid="uid://b1s2v6l44cc8k" path="res://assets/textures/biomes/forest/ceilings/forest ceiling_02_sky.jpg" id="3_xwfpp"]
 [ext_resource type="Script" uid="uid://dwvpkpfjm8dyn" path="res://scripts/LootEntry.gd" id="4_458bs"]
 [ext_resource type="Resource" uid="uid://dltjjt1nys4br" path="res://assets/items/health_potion.tres" id="5_plw3j"]
-[ext_resource type="Texture2D" uid="uid://eaqrrmrm74gy" path="res://assets/textures/biomes/forest/walls/forest_wall_01_albedo.jpg" id="7_bq1p8"]
+[ext_resource type="Texture2D" uid="uid://eaqrrmrm74gy" path="res://assets/textures/biomes/forest/walls/forest_wall_01.jpg" id="7_bq1p8"]
 [ext_resource type="Script" uid="uid://c716yxx8rccyt" path="res://scripts/LinkedObjectSpawn.gd" id="7_fvx5y"]
 [ext_resource type="AudioStream" uid="uid://demirrr5g78xj" path="res://assets/sounds/biomes/forest/move/step_01.ogg" id="7_sstbg"]
 [ext_resource type="Script" uid="uid://duxnh0exbhpst" path="res://scripts/KeyDoorSpawn.gd" id="7_w7wxy"]
 [ext_resource type="AudioStream" uid="uid://ci0f4ivs6tis6" path="res://assets/sounds/biomes/forest/move/step_02.ogg" id="8_0wobd"]
 [ext_resource type="Resource" uid="uid://ddnj3qteby4ip" path="res://assets/objects/door_forest_locked.tres" id="8_qtcl7"]
-[ext_resource type="Script" path="res://scripts/BiomeTextureEntry.gd" id="30_tex"]
 [ext_resource type="AudioStream" uid="uid://bavnebmwmtudp" path="res://assets/sounds/biomes/forest/move/step_03.ogg" id="9_nhtug"]
 [ext_resource type="Resource" uid="uid://cqso31osmprq3" path="res://assets/objects/lever_forest.tres" id="9_w7wxy"]
 [ext_resource type="Resource" uid="uid://dycnhx5qmylkc" path="res://assets/items/key_forest.tres" id="9_xwfpp"]
@@ -21,12 +21,30 @@
 [ext_resource type="Resource" uid="uid://b0furuompokno" path="res://assets/objects/door_forest.tres" id="13_bq1p8"]
 [ext_resource type="Script" uid="uid://c4fbuyttq7iik" path="res://scripts/WallDecorationSpawn.gd" id="21_evnw4"]
 [ext_resource type="Resource" uid="uid://bcwekrkc5e52" path="res://assets/decorations/torch01.tres" id="22_obsjo"]
+[ext_resource type="Texture2D" uid="uid://b0mt2xvmng0ww" path="res://assets/textures/biomes/forest/walls/forest_wall_02_big_tree.jpg" id="23_evnw4"]
+[ext_resource type="Script" uid="uid://bjkjhbhykhrmp" path="res://scripts/BiomeTextureEntry.gd" id="30_tex"]
+
+[sub_resource type="Resource" id="Resource_ceiling_default"]
+script = ExtResource("30_tex")
+albedo = ExtResource("1_bq1p8")
+weight = 4
+
+[sub_resource type="Resource" id="Resource_obsjo"]
+script = ExtResource("30_tex")
+albedo = ExtResource("3_xwfpp")
+placement = 2
+min_distance_to_same = 2
+metadata/_custom_type_script = "uid://bjkjhbhykhrmp"
 
 [sub_resource type="Resource" id="Resource_ve4a7"]
 script = ExtResource("4_458bs")
 item = ExtResource("5_plw3j")
 min_distance_to_other_item = 5
 metadata/_custom_type_script = "uid://dwvpkpfjm8dyn"
+
+[sub_resource type="Resource" id="Resource_floor_default"]
+script = ExtResource("30_tex")
+albedo = ExtResource("1_ve4a7")
 
 [sub_resource type="Resource" id="Resource_evnw4"]
 script = ExtResource("7_w7wxy")
@@ -83,23 +101,20 @@ metadata/_custom_type_script = "uid://c4fbuyttq7iik"
 [sub_resource type="Resource" id="Resource_wall_default"]
 script = ExtResource("30_tex")
 albedo = ExtResource("7_bq1p8")
-placement = 7
+weight = 4
 
-[sub_resource type="Resource" id="Resource_floor_default"]
+[sub_resource type="Resource" id="Resource_bssym"]
 script = ExtResource("30_tex")
-albedo = ExtResource("1_ve4a7")
-placement = 7
-
-[sub_resource type="Resource" id="Resource_ceiling_default"]
-script = ExtResource("30_tex")
-albedo = ExtResource("1_bq1p8")
-placement = 7
+albedo = ExtResource("23_evnw4")
+placement = 4
+min_distance_to_same = 4
+metadata/_custom_type_script = "uid://bjkjhbhykhrmp"
 
 [resource]
 script = ExtResource("1_5w715")
-wall_textures = Array[ExtResource("30_tex")]([SubResource("Resource_wall_default")])
+wall_textures = Array[ExtResource("30_tex")]([SubResource("Resource_wall_default"), SubResource("Resource_bssym")])
 floor_textures = Array[ExtResource("30_tex")]([SubResource("Resource_floor_default")])
-ceiling_textures = Array[ExtResource("30_tex")]([SubResource("Resource_ceiling_default")])
+ceiling_textures = Array[ExtResource("30_tex")]([SubResource("Resource_ceiling_default"), SubResource("Resource_obsjo")])
 fog_density = 0.2
 ambient_color = Color(0.85430586, 0.82665706, 0.76737565, 1)
 ambient_energy = 1.8
