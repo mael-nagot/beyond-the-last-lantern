@@ -63,13 +63,14 @@ extends Resource
 # specify e.g. "1-3 wooden chests AND 0-1 iron chests". Placement (room
 # / corridor / dead-end) is per-entry too.
 @export var objects: Array[ObjectSpawn] = []
-# Lever ↔ door pairs. Placed AFTER `objects` so chests and decorative
-# doors are already in. Each entry produces count_min..count_max
-# pairs; the lever is guaranteed reachable from the entrance even
-# when its linked door is closed.
-@export var linked_objects: Array[LinkedObjectSpawn] = []
-# Key ↔ locked-door pairs (Phase 8 Task 2c). Placed AFTER linked
-# objects. Each entry produces count_min..count_max pairs; the key
+# Lever ↔ door clusters. Placed AFTER `objects` so chests and
+# decorative doors are already in. Each entry produces count_min..
+# count_max independent clusters of M levers and N doors; every
+# lever is guaranteed reachable from the entrance under the cluster's
+# AND/OR logic.
+@export var lever_door_spawns: Array[LeverDoorSpawn] = []
+# Key ↔ locked-door pairs (Phase 8 Task 2c). Placed AFTER lever-door
+# clusters. Each entry produces count_min..count_max pairs; the key
 # is guaranteed reachable from the entrance WITHOUT crossing its own
 # door first. Chain reachability v2 also tracks key collection so
 # levers / keys / chests / exits behind locked doors are reachable

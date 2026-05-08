@@ -1,7 +1,7 @@
 extends GutTest
 
 func test_defaults_preserve_backward_compat() -> void:
-	var spawn := LinkedObjectSpawn.new()
+	var spawn := LeverDoorSpawn.new()
 	assert_eq(spawn.count_min, 1)
 	assert_eq(spawn.count_max, 1)
 	assert_eq(spawn.levers_per_cluster, 1)
@@ -15,7 +15,7 @@ func test_defaults_preserve_backward_compat() -> void:
 	assert_false(spawn.door_must_gate_content)
 
 func test_cluster_shape_fields_are_settable() -> void:
-	var spawn := LinkedObjectSpawn.new()
+	var spawn := LeverDoorSpawn.new()
 	spawn.levers_per_cluster = 3
 	spawn.doors_per_cluster = 2
 	spawn.lever_logic = 1
@@ -28,7 +28,7 @@ func test_holds_object_data_refs() -> void:
 	lever_data.category = ObjectData.Category.LEVER
 	var door_data := ObjectData.new()
 	door_data.category = ObjectData.Category.DOOR
-	var spawn := LinkedObjectSpawn.new()
+	var spawn := LeverDoorSpawn.new()
 	spawn.lever_object = lever_data
 	spawn.door_object = door_data
 	assert_eq(spawn.lever_object, lever_data)

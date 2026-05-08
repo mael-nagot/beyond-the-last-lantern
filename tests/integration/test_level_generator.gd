@@ -520,7 +520,7 @@ func test_each_edge_carries_at_most_one_door() -> void:
 		seen[key] = true
 
 # -------------------------------------------------------
-# Linked-object placement (Phase 8 Task 2b: lever ↔ door pairs)
+# Lever ↔ door clusters (Phase 8 Task 2b)
 # -------------------------------------------------------
 
 func _make_lever_data() -> ObjectData:
@@ -530,8 +530,8 @@ func _make_lever_data() -> ObjectData:
 	data.name_key = "test.lever"
 	return data
 
-func _make_linked_spawn(lever_data: ObjectData, door_data: ObjectData, count_min: int, count_max: int) -> LinkedObjectSpawn:
-	var spawn := LinkedObjectSpawn.new()
+func _make_lever_door_spawn(lever_data: ObjectData, door_data: ObjectData, count_min: int, count_max: int) -> LeverDoorSpawn:
+	var spawn := LeverDoorSpawn.new()
 	spawn.lever_object = lever_data
 	spawn.door_object = door_data
 	spawn.count_min = count_min
@@ -547,9 +547,9 @@ func _all_lever_cells(gen: LevelGenerator) -> Array:
 				result.append(Vector2i(x, y))
 	return result
 
-func test_linked_pair_emits_one_door_and_one_lever_each() -> void:
+func test_default_cluster_emits_one_door_and_one_lever_each() -> void:
 	var biome := _make_biome()
-	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)]
+	biome.lever_door_spawns = [_make_lever_door_spawn(_make_lever_data(), _make_door(), 2, 2)]
 	var gen := _make_generator(biome)
 	# 0 to 2 pairs depending on whether seed allows placement; for this
 	# fixed seed we know the maze has eligible corridors. Defensive:
@@ -565,7 +565,7 @@ func test_linked_pair_emits_one_door_and_one_lever_each() -> void:
 
 func test_each_lever_links_back_to_exactly_one_door() -> void:
 	var biome := _make_biome()
-	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)]
+	biome.lever_door_spawns = [_make_lever_door_spawn(_make_lever_data(), _make_door(), 2, 2)]
 	var gen := _make_generator(biome)
 	for cell_pos in _all_lever_cells(gen):
 		var lever: LeverInstance = gen.grid[cell_pos.x][cell_pos.y].object
@@ -590,7 +590,7 @@ func test_every_lever_chain_reachable_with_two_pairs() -> void:
 	# opens its linked doors, and at fixed point every placed lever
 	# is reachable from somewhere in that set.
 	var biome := _make_biome()
-	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)]
+	biome.lever_door_spawns = [_make_lever_door_spawn(_make_lever_data(), _make_door(), 2, 2)]
 	var gen := _make_generator(biome)
 	if gen.doors.is_empty():
 		return  # seed couldn't place either pair — fine, nothing to assert
@@ -607,7 +607,7 @@ func test_every_lever_chain_reachable_with_two_pairs() -> void:
 func test_lever_does_not_share_cell_with_chest_or_door_endpoint() -> void:
 	var biome := _make_biome()
 	biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
-	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)]
+	biome.lever_door_spawns = [_make_lever_door_spawn(_make_lever_data(), _make_door(), 2, 2)]
 	var gen := _make_generator(biome)
 	for cell_pos in _all_lever_cells(gen):
 		# Lever cell holds a LeverInstance, not a chest.
@@ -622,7 +622,7 @@ func test_lever_does_not_share_cell_with_chest_or_door_endpoint() -> void:
 
 func test_lever_placement_count_falls_within_min_max() -> void:
 	var biome := _make_biome()
-	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 1, 3)]
+	biome.lever_door_spawns = [_make_lever_door_spawn(_make_lever_data(), _make_door(), 1, 3)]
 	var gen := _make_generator(biome)
 	var lever_count: int = _all_lever_cells(gen).size()
 	# Allow a lower bound of 0 in case the seed couldn't fit any pair —
@@ -633,10 +633,10 @@ func test_lever_placement_count_falls_within_min_max() -> void:
 func test_lever_to_door_max_distance_is_respected() -> void:
 	# With a tight max, every placed lever must be within that
 	# Manhattan distance of its paired door's nearest endpoint.
-	var spawn := _make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)
+	var spawn := _make_lever_door_spawn(_make_lever_data(), _make_door(), 2, 2)
 	spawn.lever_to_door_max_distance = 4
 	var biome := _make_biome()
-	biome.linked_objects = [spawn]
+	biome.lever_door_spawns = [spawn]
 	var gen := _make_generator(biome)
 	for cell_pos in _all_lever_cells(gen):
 		var lever: LeverInstance = gen.grid[cell_pos.x][cell_pos.y].object
@@ -650,10 +650,10 @@ func test_lever_to_door_max_distance_is_respected() -> void:
 			[cell_pos, dist, door.cell_a, door.cell_b])
 
 func test_lever_to_door_min_distance_is_respected() -> void:
-	var spawn := _make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)
+	var spawn := _make_lever_door_spawn(_make_lever_data(), _make_door(), 2, 2)
 	spawn.lever_to_door_min_distance = 6
 	var biome := _make_biome()
-	biome.linked_objects = [spawn]
+	biome.lever_door_spawns = [spawn]
 	var gen := _make_generator(biome)
 	for cell_pos in _all_lever_cells(gen):
 		var lever: LeverInstance = gen.grid[cell_pos.x][cell_pos.y].object
@@ -666,12 +666,12 @@ func test_lever_to_door_min_distance_is_respected() -> void:
 			"lever at %s is %d tiles from its door %s—%s (min=6)" %
 			[cell_pos, dist, door.cell_a, door.cell_b])
 
-func test_linked_door_is_not_decorative() -> void:
-	# A door created via a linked spawn must have linked_levers
+func test_cluster_door_is_not_decorative() -> void:
+	# A door created via a LeverDoorSpawn must have linked_levers
 	# populated; a decorative door (via objects pool) must not.
 	var biome := _make_biome()
 	biome.objects = [_make_door_spawn(_make_door(), 1, 1)]
-	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 1, 1)]
+	biome.lever_door_spawns = [_make_lever_door_spawn(_make_lever_data(), _make_door(), 1, 1)]
 	var gen := _make_generator(biome)
 	var has_decorative := false
 	var has_linked := false
@@ -817,7 +817,7 @@ func test_every_lever_chain_reachable_with_three_pairs() -> void:
 	# chain (start at entrance, open every reachable lever's doors,
 	# repeat).
 	var biome := _make_biome()
-	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 3, 3)]
+	biome.lever_door_spawns = [_make_lever_door_spawn(_make_lever_data(), _make_door(), 3, 3)]
 	for s in [101, 202, 303, 404, 505, 606, 707, 808]:
 		var gen := _make_generator(biome, s)
 		if gen.doors.is_empty():
@@ -837,29 +837,29 @@ func test_every_lever_chain_reachable_with_three_pairs() -> void:
 				assert_true(has_neighbour,
 					"seed %d: lever at %s is not chain-reachable from entrance" % [s, pos])
 
-func test_exit_remains_chain_reachable_with_linked_pairs() -> void:
+func test_exit_remains_chain_reachable_with_lever_door_clusters() -> void:
 	# Even with locked doors gating the level, the exit must be
 	# reachable assuming the player progressively pulls levers.
 	var biome := _make_biome()
-	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 3, 3)]
+	biome.lever_door_spawns = [_make_lever_door_spawn(_make_lever_data(), _make_door(), 3, 3)]
 	for s in [111, 222, 333, 444, 555]:
 		var gen := _make_generator(biome, s)
 		var chain: Dictionary = _simulate_chain_reachable_from_entrance(gen)
 		assert_true(chain.has(gen.exit_pos),
 			"seed %d: exit %s not chain-reachable" % [s, gen.exit_pos])
 
-func test_linked_must_gate_content_rejects_useless_locks() -> void:
-	# With door_must_gate_content=true on a LinkedObjectSpawn, every
+func test_lever_door_must_gate_content_rejects_useless_locks() -> void:
+	# With door_must_gate_content=true on a LeverDoorSpawn, every
 	# placed lever-locked door must actually gate something (a chest,
 	# lever, key, or the exit) — otherwise the lock is pointless.
 	# Mirrors the KeyDoorSpawn must_gate test: re-derive content
 	# reachability with each placed door permanently closed and
 	# assert SOMETHING content-bearing becomes unreachable.
-	var spawn := _make_linked_spawn(_make_lever_data(), _make_door(), 3, 3)
+	var spawn := _make_lever_door_spawn(_make_lever_data(), _make_door(), 3, 3)
 	spawn.door_must_gate_content = true
 	var biome := _make_biome()
 	biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
-	biome.linked_objects = [spawn]
+	biome.lever_door_spawns = [spawn]
 	var gen := _make_generator(biome)
 	var linked_doors: Array = []
 	for door in gen.doors:
@@ -890,17 +890,17 @@ func test_linked_must_gate_content_rejects_useless_locks() -> void:
 			"lever-locked door %s—%s gates nothing — must_gate_content should have rejected it" %
 			[door.cell_a, door.cell_b])
 
-func test_linked_pair_rollback_clears_lever_cell_when_must_gate_rejects() -> void:
+func test_cluster_rollback_clears_lever_cell_when_must_gate_rejects() -> void:
 	# Internal-state guard: if must_gate_content rejects a placement,
 	# the rollback must clear the tentatively-placed lever cell along
 	# with the door. Otherwise we ship orphan levers wired to no
 	# door. We assert the invariant directly: every lever cell
 	# resolves to a door still in the doors list.
-	var spawn := _make_linked_spawn(_make_lever_data(), _make_door(), 3, 3)
+	var spawn := _make_lever_door_spawn(_make_lever_data(), _make_door(), 3, 3)
 	spawn.door_must_gate_content = true
 	var biome := _make_biome()
 	biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
-	biome.linked_objects = [spawn]
+	biome.lever_door_spawns = [spawn]
 	for s in [111, 222, 333, 444, 555]:
 		var gen := _make_generator(biome, s)
 		for cell_pos in _all_lever_cells(gen):
@@ -915,8 +915,8 @@ func test_linked_pair_rollback_clears_lever_cell_when_must_gate_rejects() -> voi
 # M:N lever ↔ door clusters (Phase 8 Task 2b follow-up)
 # -------------------------------------------------------
 
-func _make_mn_cluster_spawn(n_levers: int, n_doors: int, logic: int = 0) -> LinkedObjectSpawn:
-	var spawn := _make_linked_spawn(_make_lever_data(), _make_door(), 1, 1)
+func _make_mn_cluster_spawn(n_levers: int, n_doors: int, logic: int = 0) -> LeverDoorSpawn:
+	var spawn := _make_lever_door_spawn(_make_lever_data(), _make_door(), 1, 1)
 	spawn.levers_per_cluster = n_levers
 	spawn.doors_per_cluster = n_doors
 	spawn.lever_logic = logic
@@ -925,7 +925,7 @@ func _make_mn_cluster_spawn(n_levers: int, n_doors: int, logic: int = 0) -> Link
 
 func test_2_lever_1_door_cluster_cross_links_correctly() -> void:
 	var biome := _make_biome()
-	biome.linked_objects = [_make_mn_cluster_spawn(2, 1)]
+	biome.lever_door_spawns = [_make_mn_cluster_spawn(2, 1)]
 	var gen := _make_generator(biome)
 	var levers: Array = _all_lever_cells(gen)
 	var linked_doors: Array = []
@@ -945,7 +945,7 @@ func test_2_lever_1_door_cluster_cross_links_correctly() -> void:
 
 func test_1_lever_2_door_cluster_cross_links_correctly() -> void:
 	var biome := _make_biome()
-	biome.linked_objects = [_make_mn_cluster_spawn(1, 2)]
+	biome.lever_door_spawns = [_make_mn_cluster_spawn(1, 2)]
 	var gen := _make_generator(biome)
 	var levers: Array = _all_lever_cells(gen)
 	var linked_doors: Array = []
@@ -964,7 +964,7 @@ func test_1_lever_2_door_cluster_cross_links_correctly() -> void:
 func test_cluster_lever_logic_propagates_to_doors() -> void:
 	var spawn := _make_mn_cluster_spawn(2, 1, 1)  # OR logic
 	var biome := _make_biome()
-	biome.linked_objects = [spawn]
+	biome.lever_door_spawns = [spawn]
 	var gen := _make_generator(biome)
 	for door in gen.doors:
 		if not door.linked_levers.is_empty():
@@ -973,7 +973,7 @@ func test_cluster_lever_logic_propagates_to_doors() -> void:
 
 func test_mn_cluster_chain_reachable() -> void:
 	var biome := _make_biome()
-	biome.linked_objects = [_make_mn_cluster_spawn(2, 2)]
+	biome.lever_door_spawns = [_make_mn_cluster_spawn(2, 2)]
 	for s in [101, 202, 303, 404, 505]:
 		var gen := _make_generator(biome, s)
 		if gen.doors.is_empty():
@@ -992,7 +992,7 @@ func test_mn_cluster_chain_reachable() -> void:
 
 func test_mn_cluster_rollback_is_atomic() -> void:
 	var biome := _make_biome()
-	biome.linked_objects = [_make_mn_cluster_spawn(3, 2)]
+	biome.lever_door_spawns = [_make_mn_cluster_spawn(3, 2)]
 	for s in [111, 222, 333, 444, 555]:
 		var gen := _make_generator(biome, s)
 		for cell_pos in _all_lever_cells(gen):

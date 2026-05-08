@@ -18,7 +18,7 @@ var floor_loot: Array[LootEntry] = []
 var floor_items_min: int = 3
 var floor_items_max: int = 8
 var objects_pool: Array[ObjectSpawn] = []
-var linked_objects_pool: Array[LinkedObjectSpawn] = []
+var lever_door_spawns_pool: Array[LeverDoorSpawn] = []
 var key_door_spawns_pool: Array[KeyDoorSpawn] = []
 var wall_decorations_pool: Array[WallDecorationSpawn] = []
 
@@ -61,7 +61,7 @@ func configure(biome: BiomeData) -> void:
 	floor_items_min = biome.floor_items_min
 	floor_items_max = biome.floor_items_max
 	objects_pool = biome.objects
-	linked_objects_pool = biome.linked_objects
+	lever_door_spawns_pool = biome.lever_door_spawns
 	key_door_spawns_pool = biome.key_door_spawns
 	wall_decorations_pool = biome.wall_decorations
 
@@ -82,7 +82,7 @@ func generate() -> void:
 		return
 	_place_objects()
 	_place_doors()
-	_place_linked_objects()
+	_place_lever_doors()
 	_place_key_doors()
 	_place_items()
 	_place_wall_decorations()
@@ -597,8 +597,8 @@ func is_edge_blocked(a: Vector2i, b: Vector2i) -> bool:
 	return d.is_edge_blocked()
 
 # -------------------------------------------------------
-# Linked objects (Phase 8 Task 2b follow-up — M:N lever ↔ door
-# clusters). Each LinkedObjectSpawn produces N independent clusters.
+# Lever ↔ door clusters (Phase 8 Task 2b follow-up — M:N).
+# Each LeverDoorSpawn produces N independent clusters.
 # A cluster contains levers_per_cluster levers and doors_per_cluster
 # doors, all cross-linked. A door's opened state is a function of
 # the pulled state of every lever in its cluster, evaluated under
@@ -608,20 +608,20 @@ func is_edge_blocked(a: Vector2i, b: Vector2i) -> bool:
 const _CLUSTER_OUTER_ATTEMPTS := 30
 const _CLUSTER_INNER_ATTEMPTS := 30
 
-func _place_linked_objects() -> void:
-	if linked_objects_pool.is_empty():
+func _place_lever_doors() -> void:
+	if lever_door_spawns_pool.is_empty():
 		return
-	for spawn in linked_objects_pool:
+	for spawn in lever_door_spawns_pool:
 		if spawn == null:
 			continue
 		if spawn.lever_object == null or spawn.door_object == null:
-			push_warning("LevelGenerator: linked spawn missing lever or door object — skipping")
+			push_warning("LevelGenerator: lever-door spawn missing lever or door object — skipping")
 			continue
 		var count := randi_range(max(0, spawn.count_min), max(spawn.count_min, spawn.count_max))
 		for _i in range(count):
 			_try_place_cluster(spawn)
 
-func _try_place_cluster(spawn: LinkedObjectSpawn) -> void:
+func _try_place_cluster(spawn: LeverDoorSpawn) -> void:
 	var pre_chain: Dictionary = _chain_reachable_from_entrance()
 	var n_doors: int = max(1, spawn.doors_per_cluster)
 	var n_levers: int = max(1, spawn.levers_per_cluster)
@@ -662,7 +662,7 @@ func _try_place_cluster(spawn: LinkedObjectSpawn) -> void:
 	push_warning("LevelGenerator: could not place cluster (lever='%s', door='%s', %d×%d)" %
 		[_obj_label(spawn.lever_object), _obj_label(spawn.door_object), n_levers, n_doors])
 
-func _try_place_cluster_doors(spawn: LinkedObjectSpawn, n_doors: int, cluster_doors: Array) -> bool:
+func _try_place_cluster_doors(spawn: LeverDoorSpawn, n_doors: int, cluster_doors: Array) -> bool:
 	var base_edges: Array = _candidate_edges_for_door_object(spawn.door_object, 0)
 	base_edges.shuffle()
 	for _door_i in range(n_doors):
@@ -684,7 +684,7 @@ func _try_place_cluster_doors(spawn: LinkedObjectSpawn, n_doors: int, cluster_do
 		cluster_doors.append(door)
 	return true
 
-func _try_place_cluster_levers(spawn: LinkedObjectSpawn, n_levers: int, cluster_doors: Array, cluster_levers: Array, cluster_lever_positions: Array, pre_chain: Dictionary) -> bool:
+func _try_place_cluster_levers(spawn: LeverDoorSpawn, n_levers: int, cluster_doors: Array, cluster_levers: Array, cluster_lever_positions: Array, pre_chain: Dictionary) -> bool:
 	var and_reachable: Dictionary = {}
 	if spawn.lever_logic == DoorInstance.LeverLogic.AND:
 		var excluded: Dictionary = {}
@@ -697,7 +697,7 @@ func _try_place_cluster_levers(spawn: LinkedObjectSpawn, n_levers: int, cluster_
 			return false
 	return true
 
-func _try_place_one_cluster_lever(spawn: LinkedObjectSpawn, cluster_doors: Array, cluster_levers: Array, cluster_lever_positions: Array, pre_chain: Dictionary, and_reachable: Dictionary) -> bool:
+func _try_place_one_cluster_lever(spawn: LeverDoorSpawn, cluster_doors: Array, cluster_levers: Array, cluster_lever_positions: Array, pre_chain: Dictionary, and_reachable: Dictionary) -> bool:
 	var distance: int = max(0, spawn.lever_min_distance_to_other_object)
 	while distance >= 0:
 		var obj_snapshot: Array = _snapshot_occupied_cells()
@@ -732,7 +732,7 @@ func _try_place_one_cluster_lever(spawn: LinkedObjectSpawn, cluster_doors: Array
 		distance -= 1
 	return false
 
-func _build_lever_candidate_pool(spawn: LinkedObjectSpawn, cluster_doors: Array, cluster_lever_positions: Array, min_distance: int, obj_snapshot: Array, and_reachable: Dictionary) -> Array:
+func _build_lever_candidate_pool(spawn: LeverDoorSpawn, cluster_doors: Array, cluster_lever_positions: Array, min_distance: int, obj_snapshot: Array, and_reachable: Dictionary) -> Array:
 	var cells_by_type: Dictionary = _classify_floor_cells()
 	var pool: Array = []
 	for placement_bit in [ObjectSpawn.PLACEMENT_CORRIDOR, ObjectSpawn.PLACEMENT_ROOM, ObjectSpawn.PLACEMENT_DEAD_END]:
@@ -756,7 +756,7 @@ func _build_lever_candidate_pool(spawn: LinkedObjectSpawn, cluster_doors: Array,
 			pool.append(pos)
 	return pool
 
-func _within_lever_to_cluster_door_range(lever_pos: Vector2i, cluster_doors: Array, spawn: LinkedObjectSpawn) -> bool:
+func _within_lever_to_cluster_door_range(lever_pos: Vector2i, cluster_doors: Array, spawn: LeverDoorSpawn) -> bool:
 	var min_d: int = max(0, spawn.lever_to_door_min_distance)
 	var max_d: int = spawn.lever_to_door_max_distance
 	if min_d == 0 and max_d < 0:
@@ -839,7 +839,7 @@ func _rollback_cluster(cluster_doors: Array, cluster_lever_positions: Array, clu
 
 func _candidate_edges_for_door_object(door_data: ObjectData, min_distance: int) -> Array:
 	# Mirrors `_candidate_edges_for_door` but takes raw ObjectData +
-	# min_distance because LinkedObjectSpawn doesn't share the
+	# min_distance because LeverDoorSpawn doesn't share the
 	# ObjectSpawn placement-flag shape.
 	var seen: Dictionary = {}
 	var result: Array = []
@@ -1308,7 +1308,7 @@ func _has_reachable_neighbour(pos: Vector2i, reachable: Dictionary) -> bool:
 
 func _bfs_walkable_with_closed_edges(origin: Vector2i, closed_edges: Dictionary) -> Dictionary:
 	# Same as _bfs_walkable_from but treats the given edges as walls.
-	# Powers chain reachability for linked-pair validation.
+	# Powers chain reachability for cluster validation.
 	var visited: Dictionary = {origin: true}
 	var queue: Array = [origin]
 	while not queue.is_empty():
@@ -1337,10 +1337,10 @@ func _obj_label(data: ObjectData) -> String:
 
 func _is_any_door_endpoint(pos: Vector2i) -> bool:
 	# Levers must never sit on a cell that's also a door endpoint —
-	# either decorative or linked (including the door this lever is
-	# being paired with). Visually the lever-right-next-to-its-door
-	# case reads as redundant; mechanically a lever inside the door's
-	# slab projection is just confusing.
+	# decorative, lever-locked, or key-locked. Visually the
+	# lever-right-next-to-its-door case reads as redundant;
+	# mechanically a lever inside the door's slab projection is
+	# just confusing.
 	for door in doors:
 		if door.cell_a == pos or door.cell_b == pos:
 			return true

@@ -80,7 +80,7 @@ const KEY_LOCATION_DEFAULT := KEY_LOCATION_FLOOR
 
 @export_group("Key ↔ door spread (HARD bounds, no graceful degrade)")
 # Manhattan distance from the key to its OWN paired door. Same shape
-# as LinkedObjectSpawn's lever_to_door range — small means the key
+# as LeverDoorSpawn's lever_to_door range — small means the key
 # is found nearby ("here's the door, here's the key"), large means
 # the key is hidden far away (real exploration). max_distance = -1
 # means unlimited.

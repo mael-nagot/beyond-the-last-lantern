@@ -1,4 +1,4 @@
-class_name LinkedObjectSpawn
+class_name LeverDoorSpawn
 extends Resource
 
 @export var lever_object: ObjectData
