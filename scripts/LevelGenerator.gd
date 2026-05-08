@@ -392,7 +392,7 @@ func _attempt_place(spawn: ObjectSpawn, candidates: Array, cells_by_type: Dictio
 		instance.loot_table = spawn.loot_table
 		cell.object = instance
 		if _placement_preserves_reachability(pos, before_reachable):
-			cells_by_type[_classify_single(pos)].erase(pos)
+			cells_by_type[classify_cell(pos)].erase(pos)
 			return true
 		cell.object = null
 	return false
@@ -459,7 +459,11 @@ func _candidate_cells_for_spawn(spawn: ObjectSpawn, cells_by_type: Dictionary) -
 			result.append(pos)
 	return result
 
-func _classify_single(pos: Vector2i) -> int:
+# Public — DungeonView calls this per floor cell to pick a texture
+# variant. Returns one of the PLACEMENT_* constants. For wall cells
+# the result is arbitrary (the predicates fall through to
+# PLACEMENT_CORRIDOR), so the renderer only calls this on floor cells.
+func classify_cell(pos: Vector2i) -> int:
 	if _is_dead_end(pos):
 		return ObjectSpawn.PLACEMENT_DEAD_END
 	if _is_in_room(pos):

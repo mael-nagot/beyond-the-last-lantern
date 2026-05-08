@@ -48,6 +48,11 @@ var _billboard_decorations: Array[Node3D] = []
 # and a per-placement phase so torches don't flicker in sync.
 var _flickering_lights: Array[OmniLight3D] = []
 var _object_sprites: Dictionary = {}  # Vector2i -> Sprite3D (for cheap per-move repositioning)
+# One StandardMaterial3D per BiomeTextureEntry, reused across every
+# quad that resolves to the same entry. Without this each quad allocated
+# its own material, which costs hundreds of duplicate materials per
+# level (one per wall side per cell).
+var _material_cache: Dictionary = {}  # BiomeTextureEntry -> StandardMaterial3D
 var drop_target: DungeonDropTarget
 
 func setup(gen: LevelGenerator) -> void:
@@ -147,6 +152,10 @@ func update_viewport_ratios(portrait_ratio: float, landscape_ratio: float) -> vo
 func _build_mesh() -> void:
 	for child in dungeon_root.get_children():
 		child.queue_free()
+	# Materials may have been built against a stale biome on the previous
+	# generate; rebuild from scratch so designers tweaking the biome live
+	# see their edits.
+	_material_cache.clear()
 
 	for x in range(generator.grid_width):
 		for y in range(generator.grid_height):
@@ -156,18 +165,22 @@ func _build_mesh() -> void:
 
 			var cx = x * CELL_SIZE + CELL_SIZE * 0.5
 			var cy = y * CELL_SIZE + CELL_SIZE * 0.5
+			var grid_pos := Vector2i(x, y)
+			# A wall between a corridor cell and a room cell is two
+			# separate quads (one drawn from each floor cell's side); each
+			# uses its host floor cell's classification, so the same wall
+			# can render mossy on the corridor side and clean on the room
+			# side without any extra book-keeping.
+			var classification: int = generator.classify_cell(grid_pos)
 
-			_add_horizontal_quad(
-				Vector3(cx, 0.0, cy),
-				_make_material(biome.floor_albedo, biome.floor_normal)
-			)
+			var floor_mat: StandardMaterial3D = _material_for(biome.floor_textures, classification, grid_pos)
+			if floor_mat != null:
+				_add_horizontal_quad(Vector3(cx, 0.0, cy), floor_mat)
 
 			if show_ceiling:
-				_add_horizontal_quad(
-					Vector3(cx, wall_height, cy),
-					_make_material(biome.ceiling_albedo, biome.ceiling_normal),
-					true
-				)
+				var ceil_mat: StandardMaterial3D = _material_for(biome.ceiling_textures, classification, grid_pos)
+				if ceil_mat != null:
+					_add_horizontal_quad(Vector3(cx, wall_height, cy), ceil_mat, true)
 
 			var neighbours = [
 				[Vector2i( 0, -1), Vector3(cx, wall_height * 0.5, cy - CELL_SIZE * 0.5),   0.0],
@@ -180,7 +193,9 @@ func _build_mesh() -> void:
 				var npos  = Vector2i(x + dir.x, y + dir.y)
 				var ncell = generator.get_cell(npos.x, npos.y)
 				if ncell and ncell.cell_type == GridCell.CellType.WALL:
-					_add_vertical_quad(n[1], n[2], _make_material(biome.wall_albedo, biome.wall_normal))
+					var wall_mat: StandardMaterial3D = _material_for(biome.wall_textures, classification, grid_pos)
+					if wall_mat != null:
+						_add_vertical_quad(n[1], n[2], wall_mat)
 
 func rebuild_items() -> void:
 	if _items_root == null:
@@ -570,15 +585,30 @@ func _make_item_sprite(inst: ItemInstance) -> Sprite3D:
 	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
 	return sprite
 
-func _make_material(albedo_set: Array, normal_set: Array = []) -> StandardMaterial3D:
+# Resolves a (entries, classification, cell) to a cached
+# StandardMaterial3D — the entry's deterministic pick is computed once
+# per cell, and the resulting material is shared across every quad that
+# resolves to the same entry. Returns null only when the entry list is
+# empty / all-null (callers skip the quad in that case).
+func _material_for(entries: Array, classification: int, cell_pos: Vector2i) -> StandardMaterial3D:
+	var entry: BiomeTextureEntry = BiomeTextureEntry.pick_for(entries, classification, cell_pos)
+	if entry == null:
+		return null
+	if _material_cache.has(entry):
+		return _material_cache[entry]
+	var mat: StandardMaterial3D = _build_material(entry.albedo, entry.normal)
+	_material_cache[entry] = mat
+	return mat
+
+func _build_material(albedo: Texture2D, normal: Texture2D) -> StandardMaterial3D:
 	var mat = StandardMaterial3D.new()
 
-	if albedo_set.size() > 0:
-		mat.albedo_texture = albedo_set[randi() % albedo_set.size()]
+	if albedo != null:
+		mat.albedo_texture = albedo
 
-	if normal_set.size() > 0:
+	if normal != null:
 		mat.normal_enabled = true
-		mat.normal_texture = normal_set[randi() % normal_set.size()]
+		mat.normal_texture = normal
 		mat.normal_scale   = 0.5
 
 	if biome.use_triplanar:

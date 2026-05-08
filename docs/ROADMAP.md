@@ -61,8 +61,16 @@
 - Forest biome created with hand-drawn textures
 - Biome loaded and applied at level generation time
 
-#### Phase 4 polish — Per-placement texture selection
-Wall / floor / ceiling textures per biome should be selectable by cell type (Corridor / Room / Dead End) so designers can author location-specific art (mossy dead-end walls, vaulted room ceilings, worn corridor floors). New `BiomeTextureEntry` resource wrapping (albedo + normal + placement flags); `BiomeData` switches its flat texture arrays for arrays of these entries; classification reuses the same flag constants as `LootEntry` / `ObjectSpawn` / `WallDecorationSpawn`. Cells with no matching texture fall back to a default. Walls inherit cell-side classification — the same wall can render differently from its corridor side vs. its room side.
+#### Phase 4 polish — Per-placement texture selection ✅
+Wall / floor / ceiling textures per biome are now selectable by cell type (Corridor / Room / Dead End) so designers can author location-specific art (mossy dead-end walls, vaulted room ceilings, worn corridor floors).
+1. ✅ `BiomeTextureEntry.gd` Resource — pairs `albedo` + `normal` (no more independent picks landing mismatched pairs) + `placement` flag-set reusing `PLACEMENT_CORRIDOR / ROOM / DEAD_END / ANY` from `LootEntry` / `ObjectSpawn` / `WallDecorationSpawn`
+2. ✅ `BiomeData` switched its flat `Array[Texture2D]` fields to `Array[BiomeTextureEntry]` (`wall_textures`, `floor_textures`, `ceiling_textures`); old `wall_albedo / wall_normal / floor_albedo / floor_normal / ceiling_albedo / ceiling_normal` removed
+3. ✅ `LevelGenerator.classify_cell(pos)` exposes the existing Corridor / Room / Dead-End classifier publicly so `DungeonView` can ask per cell
+4. ✅ Wall side classification — a wall between a corridor cell and a room cell renders as two separate quads (one drawn from each floor cell's side); each quad inherits its host floor cell's classification, so the same wall can show mossy art on the corridor side and clean art on the room side without extra book-keeping
+5. ✅ `BiomeTextureEntry.pick_for(entries, classification, cell_pos)` static helper — filters by classification first; falls back to the full entry list when nothing matches (designer intent: render *something* rather than a blank face); picks deterministically from a position-hash so the same cell renders identically across mesh rebuilds, save/load, and seed replays
+6. ✅ Material cache in `DungeonView` — one `StandardMaterial3D` per `BiomeTextureEntry`, shared across every quad resolving to it (replaces the previous "new material per quad" pattern; cleared on each `_build_mesh` so live biome edits still pick up)
+7. ✅ Tests: `test_biome_texture_entry.gd` (defaults, allows() matrix, pick_for empty / matching / fallback / determinism / distribution / null-skipping)
+8. ✅ Manual asset wiring (developer): `assets/biomes/forest.tres` migrated — the old single albedo / normal pair is now wrapped in a default `BiomeTextureEntry` per surface (placement = ANY). To take advantage of the new feature, drop in additional entries with narrower placement flags (e.g. a dead-end-only mossy wall variant).
 
 ### Phase 5 — UI / HUD ✅
 

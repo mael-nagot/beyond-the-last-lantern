@@ -14,6 +14,7 @@
 [ext_resource type="AudioStream" uid="uid://ci0f4ivs6tis6" path="res://assets/sounds/biomes/forest/move/step_02.ogg" id="8_0wobd"]
 [ext_resource type="Resource" uid="uid://ddnj3qteby4ip" path="res://assets/objects/door_forest_locked.tres" id="8_qtcl7"]
 [ext_resource type="Texture2D" uid="uid://cipdynsyi30nw" path="res://assets/textures/biomes/forest/walls/forest_wall_01_normal.png" id="9_fvx5y"]
+[ext_resource type="Script" path="res://scripts/BiomeTextureEntry.gd" id="30_tex"]
 [ext_resource type="AudioStream" uid="uid://bavnebmwmtudp" path="res://assets/sounds/biomes/forest/move/step_03.ogg" id="9_nhtug"]
 [ext_resource type="Resource" uid="uid://cqso31osmprq3" path="res://assets/objects/lever_forest.tres" id="9_w7wxy"]
 [ext_resource type="Resource" uid="uid://dycnhx5qmylkc" path="res://assets/items/key_forest.tres" id="9_xwfpp"]
@@ -82,14 +83,29 @@ count_max = 30
 min_distance_to_other_decoration = 4
 metadata/_custom_type_script = "uid://c4fbuyttq7iik"
 
+[sub_resource type="Resource" id="Resource_wall_default"]
+script = ExtResource("30_tex")
+albedo = ExtResource("7_bq1p8")
+normal = ExtResource("9_fvx5y")
+placement = 7
+
+[sub_resource type="Resource" id="Resource_floor_default"]
+script = ExtResource("30_tex")
+albedo = ExtResource("1_ve4a7")
+normal = ExtResource("3_0wobd")
+placement = 7
+
+[sub_resource type="Resource" id="Resource_ceiling_default"]
+script = ExtResource("30_tex")
+albedo = ExtResource("1_bq1p8")
+normal = ExtResource("3_fvx5y")
+placement = 7
+
 [resource]
 script = ExtResource("1_5w715")
-wall_albedo = Array[Texture2D]([ExtResource("7_bq1p8")])
-wall_normal = Array[Texture2D]([ExtResource("9_fvx5y")])
-floor_albedo = Array[Texture2D]([ExtResource("1_ve4a7")])
-floor_normal = Array[Texture2D]([ExtResource("3_0wobd")])
-ceiling_albedo = Array[Texture2D]([ExtResource("1_bq1p8")])
-ceiling_normal = Array[Texture2D]([ExtResource("3_fvx5y")])
+wall_textures = Array[ExtResource("30_tex")]([SubResource("Resource_wall_default")])
+floor_textures = Array[ExtResource("30_tex")]([SubResource("Resource_floor_default")])
+ceiling_textures = Array[ExtResource("30_tex")]([SubResource("Resource_ceiling_default")])
 fog_density = 0.2
 ambient_color = Color(0.85430586, 0.82665706, 0.76737565, 1)
 ambient_energy = 1.8
