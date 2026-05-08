@@ -614,6 +614,31 @@ func test_corridor_cluster_run_size_within_max() -> void:
 			assert_lte(component_size, max_run,
 				"seed %d: cluster of size %d exceeds max %d" % [seed_n, component_size, max_run])
 
+func test_scattered_traps_dont_neighbour_cluster_cells() -> void:
+	# Cluster + scattered on the same spawn. After placement, no
+	# scattered trap may sit 4-adjacent to a cluster cell — that's
+	# the rule that prevents a 5-cell segment with a 3-cell cluster
+	# from getting its 2 leftover cells filled by scattered, producing
+	# a 5-trap contiguous run.
+	for seed_n in [1234, 5678, 9012, 3456]:
+		var biome := _make_biome()
+		var spawn := _make_corridor_cluster_spawn(_make_trap_data(), 1.0, 3, 3)
+		# Add aggressive scattered placement — high count + corridor
+		# placement increases the chance the rule matters.
+		spawn.count_min = 12
+		spawn.count_max = 12
+		biome.trap_spawns = [spawn]
+		var gen := _make_generator(biome, seed_n)
+		for inst in gen.traps:
+			# Skip cluster cells themselves — they ARE adjacent to
+			# other cluster cells by construction.
+			if gen._cluster_cells.has(inst.cell):
+				continue
+			# This is a scattered trap; verify no 4-neighbour is a cluster cell.
+			for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				assert_false(gen._cluster_cells.has(inst.cell + d),
+					"seed %d: scattered trap at %s neighbours cluster cell at %s" % [seed_n, inst.cell, inst.cell + d])
+
 func test_corridor_clusters_skip_junction_adjacent_segments() -> void:
 	# A junction cell (corridor with 3+ corridor neighbours) bridges
 	# two segments. If both segments held clusters, the player would

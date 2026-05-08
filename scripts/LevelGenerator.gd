@@ -44,8 +44,15 @@ var _wall_faces_used: Dictionary = {}  # face_key (String) -> true
 # Traps live on cells (`GridCell.trap`) but we also keep a flat list
 # so the renderer + Game tick can iterate without re-scanning the
 # whole grid each frame. Subtask A places single-cell traps; Subtask
-# B will extend with corridor clusters / room density.
+# B layers corridor clusters / room density.
 var traps: Array[TrapInstance] = []
+# Subset of trap cells produced by the corridor-cluster pass (Subtask
+# B1). The scattered pass uses this to exclude its candidates from
+# being 4-adjacent to a cluster cell — without it, a 5-cell segment
+# with a 3-cell cluster leaves the 2 leftover cells eligible for
+# scattered placement, producing a contiguous run of 5 traps that
+# defeats the per-segment cluster cap.
+var _cluster_cells: Dictionary = {}
 
 func configure(biome: BiomeData) -> void:
 	if biome == null:
@@ -80,6 +87,7 @@ func generate() -> void:
 	wall_decorations.clear()
 	_wall_faces_used.clear()
 	traps.clear()
+	_cluster_cells.clear()
 	if room_count > 0:
 		_place_rooms()
 	_grow_maze()
@@ -1525,6 +1533,7 @@ func _place_corridor_traps(spawn: TrapSpawn, segments: Array, cells_by_type: Dic
 			var inst := TrapInstance.create(spawn.trap, pos)
 			grid[pos.x][pos.y].trap = inst
 			traps.append(inst)
+			_cluster_cells[pos] = true
 			# Keep cells_by_type in sync with the scattered pass'
 			# expectations — same pattern as `_try_place_trap`.
 			cells_by_type[classify_cell(pos)].erase(pos)
@@ -1670,8 +1679,24 @@ func _trap_candidates_for_spawn(spawn: TrapSpawn, cells_by_type: Dictionary) -> 
 				continue
 			if cell.trap != null:
 				continue
+			# Subtask B1: scattered traps must not sit 4-adjacent to a
+			# corridor-cluster cell. Without this, a cluster of run_max
+			# cells can be extended by scattered traps in the same
+			# segment, producing a contiguous run that exceeds the
+			# per-segment cluster cap. The cluster's edge needs to read
+			# as the END of the trapped run.
+			if _is_adjacent_to_cluster(pos):
+				continue
 			result.append(pos)
 	return result
+
+func _is_adjacent_to_cluster(pos: Vector2i) -> bool:
+	if _cluster_cells.is_empty():
+		return false
+	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+		if _cluster_cells.has(pos + d):
+			return true
+	return false
 
 func _too_close_to_existing_trap(pos: Vector2i, min_distance: int) -> bool:
 	if min_distance <= 0:
