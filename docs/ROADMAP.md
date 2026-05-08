@@ -61,6 +61,9 @@
 - Forest biome created with hand-drawn textures
 - Biome loaded and applied at level generation time
 
+#### Phase 4 polish — Per-placement texture selection
+Wall / floor / ceiling textures per biome should be selectable by cell type (Corridor / Room / Dead End) so designers can author location-specific art (mossy dead-end walls, vaulted room ceilings, worn corridor floors). New `BiomeTextureEntry` resource wrapping (albedo + normal + placement flags); `BiomeData` switches its flat texture arrays for arrays of these entries; classification reuses the same flag constants as `LootEntry` / `ObjectSpawn` / `WallDecorationSpawn`. Cells with no matching texture fall back to a default. Walls inherit cell-side classification — the same wall can render differently from its corridor side vs. its room side.
+
 ### Phase 5 — UI / HUD ✅
 
 - Full responsive HUD adapting to portrait and landscape
