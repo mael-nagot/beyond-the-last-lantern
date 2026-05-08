@@ -392,7 +392,7 @@ func _attempt_place(spawn: ObjectSpawn, candidates: Array, cells_by_type: Dictio
 		instance.loot_table = spawn.loot_table
 		cell.object = instance
 		if _placement_preserves_reachability(pos, before_reachable):
-			cells_by_type[_classify_single(pos)].erase(pos)
+			cells_by_type[classify_cell(pos)].erase(pos)
 			return true
 		cell.object = null
 	return false
@@ -459,12 +459,45 @@ func _candidate_cells_for_spawn(spawn: ObjectSpawn, cells_by_type: Dictionary) -
 			result.append(pos)
 	return result
 
-func _classify_single(pos: Vector2i) -> int:
+# Public — DungeonView calls this per floor cell to pick a texture
+# variant. Returns one of the PLACEMENT_* constants. For wall cells
+# the result is arbitrary (the predicates fall through to
+# PLACEMENT_CORRIDOR), so the renderer only calls this on floor cells.
+func classify_cell(pos: Vector2i) -> int:
 	if _is_dead_end(pos):
 		return ObjectSpawn.PLACEMENT_DEAD_END
 	if _is_in_room(pos):
 		return ObjectSpawn.PLACEMENT_ROOM
 	return ObjectSpawn.PLACEMENT_CORRIDOR
+
+# Per-wall-face classification used by the renderer when picking a
+# wall texture variant. Mostly mirrors `classify_cell`, with one
+# special case: at a dead-end cell, only the BACK wall (opposite the
+# single open direction the player walks in from) inherits
+# `PLACEMENT_DEAD_END`. The two side walls behave as corridor walls,
+# so a dead-end-only texture (e.g. a giant tree at the end of the
+# tunnel) appears once in front of the player rather than wrapping
+# the cell on three sides.
+func classify_wall_face(pos: Vector2i, wall_dir: Vector2i) -> int:
+	if _is_dead_end(pos):
+		var open_dir: Vector2i = _dead_end_open_dir(pos)
+		if open_dir != Vector2i.ZERO and wall_dir == -open_dir:
+			return ObjectSpawn.PLACEMENT_DEAD_END
+		return ObjectSpawn.PLACEMENT_CORRIDOR
+	if _is_in_room(pos):
+		return ObjectSpawn.PLACEMENT_ROOM
+	return ObjectSpawn.PLACEMENT_CORRIDOR
+
+# Direction from a dead-end cell toward its single floor neighbour.
+# Returns Vector2i.ZERO if `pos` isn't a dead end, so callers can
+# branch on the result without re-running `_is_dead_end`.
+func _dead_end_open_dir(pos: Vector2i) -> Vector2i:
+	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+		var nx: int = pos.x + d.x
+		var ny: int = pos.y + d.y
+		if _in_bounds(nx, ny) and grid[nx][ny].cell_type != GridCell.CellType.WALL:
+			return d
+	return Vector2i.ZERO
 
 # -------------------------------------------------------
 # Doors (edge-based — never stored on a GridCell)

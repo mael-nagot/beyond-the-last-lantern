@@ -3,17 +3,20 @@ extends Resource
 
 @export var biome_name: String = "Forest"
 
+# Each entry pairs an albedo + normal so the two can never be picked
+# independently (the previous flat-array setup could land
+# wall_bark_01_albedo with wall_bark_02_normal). Each entry also carries
+# placement flags (Corridor / Room / Dead End) so designers can author
+# location-specific art — mossy dead-end walls, vaulted room ceilings,
+# worn corridor floors. Empty match = fall back to the full pool.
 @export_group("Wall Textures")
-@export var wall_albedo: Array[Texture2D] = []
-@export var wall_normal: Array[Texture2D] = []
+@export var wall_textures: Array[BiomeTextureEntry] = []
 
 @export_group("Floor Textures")
-@export var floor_albedo: Array[Texture2D] = []
-@export var floor_normal: Array[Texture2D] = []
+@export var floor_textures: Array[BiomeTextureEntry] = []
 
 @export_group("Ceiling Textures")
-@export var ceiling_albedo: Array[Texture2D] = []
-@export var ceiling_normal: Array[Texture2D] = []
+@export var ceiling_textures: Array[BiomeTextureEntry] = []
 
 @export_group("Appearance")
 @export var wall_height:    float = 6.3

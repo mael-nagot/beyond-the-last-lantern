@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://eaqrrmrm74gy"
-path="res://.godot/imported/forest_wall_01_albedo.jpg-e06155f2fac3ddbd97893b181a8db81a.ctex"
+uid="uid://do12vq4fygnrp"
+path="res://.godot/imported/forest floor_01.jpg-eb26d708a394d2628e83f8fe7a9a94de.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/textures/biomes/forest/walls/forest_wall_01_albedo.jpg"
-dest_files=["res://.godot/imported/forest_wall_01_albedo.jpg-e06155f2fac3ddbd97893b181a8db81a.ctex"]
+source_file="res://assets/textures/biomes/forest/floors/forest floor_01.jpg"
+dest_files=["res://.godot/imported/forest floor_01.jpg-eb26d708a394d2628e83f8fe7a9a94de.ctex"]
 
 [params]
 

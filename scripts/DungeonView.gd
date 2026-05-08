@@ -48,6 +48,11 @@ var _billboard_decorations: Array[Node3D] = []
 # and a per-placement phase so torches don't flicker in sync.
 var _flickering_lights: Array[OmniLight3D] = []
 var _object_sprites: Dictionary = {}  # Vector2i -> Sprite3D (for cheap per-move repositioning)
+# One StandardMaterial3D per BiomeTextureEntry, reused across every
+# quad that resolves to the same entry. Without this each quad allocated
+# its own material, which costs hundreds of duplicate materials per
+# level (one per wall side per cell).
+var _material_cache: Dictionary = {}  # BiomeTextureEntry -> StandardMaterial3D
 var drop_target: DungeonDropTarget
 
 func setup(gen: LevelGenerator) -> void:
@@ -147,6 +152,18 @@ func update_viewport_ratios(portrait_ratio: float, landscape_ratio: float) -> vo
 func _build_mesh() -> void:
 	for child in dungeon_root.get_children():
 		child.queue_free()
+	# Materials may have been built against a stale biome on the previous
+	# generate; rebuild from scratch so designers tweaking the biome live
+	# see their edits.
+	_material_cache.clear()
+	# Per-surface placement history — each maps `BiomeTextureEntry` →
+	# `Array[Vector2i]` of cells already using that entry. Picker reads
+	# this to enforce `min_distance_to_same` and we append after each
+	# pick. Iteration order (x outer, y inner) is stable, so the history
+	# evolves identically across rebuilds.
+	var wall_history: Dictionary = {}
+	var floor_history: Dictionary = {}
+	var ceiling_history: Dictionary = {}
 
 	for x in range(generator.grid_width):
 		for y in range(generator.grid_height):
@@ -156,18 +173,26 @@ func _build_mesh() -> void:
 
 			var cx = x * CELL_SIZE + CELL_SIZE * 0.5
 			var cy = y * CELL_SIZE + CELL_SIZE * 0.5
+			var grid_pos := Vector2i(x, y)
+			# A wall between a corridor cell and a room cell is two
+			# separate quads (one drawn from each floor cell's side); each
+			# uses its host floor cell's classification, so the same wall
+			# can render mossy on the corridor side and clean on the room
+			# side without any extra book-keeping.
+			var classification: int = generator.classify_cell(grid_pos)
 
-			_add_horizontal_quad(
-				Vector3(cx, 0.0, cy),
-				_make_material(biome.floor_albedo, biome.floor_normal)
-			)
+			var floor_entry: BiomeTextureEntry = BiomeTextureEntry.pick_for(
+				biome.floor_textures, classification, grid_pos, floor_history)
+			if floor_entry != null:
+				_record_history(floor_history, floor_entry, grid_pos)
+				_add_horizontal_quad(Vector3(cx, 0.0, cy), _material_for_entry(floor_entry))
 
 			if show_ceiling:
-				_add_horizontal_quad(
-					Vector3(cx, wall_height, cy),
-					_make_material(biome.ceiling_albedo, biome.ceiling_normal),
-					true
-				)
+				var ceil_entry: BiomeTextureEntry = BiomeTextureEntry.pick_for(
+					biome.ceiling_textures, classification, grid_pos, ceiling_history)
+				if ceil_entry != null:
+					_record_history(ceiling_history, ceil_entry, grid_pos)
+					_add_horizontal_quad(Vector3(cx, wall_height, cy), _material_for_entry(ceil_entry), true)
 
 			var neighbours = [
 				[Vector2i( 0, -1), Vector3(cx, wall_height * 0.5, cy - CELL_SIZE * 0.5),   0.0],
@@ -175,12 +200,29 @@ func _build_mesh() -> void:
 				[Vector2i(-1,  0), Vector3(cx - CELL_SIZE * 0.5, wall_height * 0.5, cy),  90.0],
 				[Vector2i( 1,  0), Vector3(cx + CELL_SIZE * 0.5, wall_height * 0.5, cy), 270.0],
 			]
+			# Wall classification is per-face (not per-cell) so that a
+			# dead-end cell's BACK wall — the one facing the player as
+			# they walk toward the dead end — can pick from
+			# PLACEMENT_DEAD_END entries while the two side walls fall
+			# back to PLACEMENT_CORRIDOR. The same hash + same matching
+			# set still resolves to the same entry, so within one
+			# classification all faces stay coherent.
 			for n in neighbours:
 				var dir   = n[0] as Vector2i
 				var npos  = Vector2i(x + dir.x, y + dir.y)
 				var ncell = generator.get_cell(npos.x, npos.y)
 				if ncell and ncell.cell_type == GridCell.CellType.WALL:
-					_add_vertical_quad(n[1], n[2], _make_material(biome.wall_albedo, biome.wall_normal))
+					var wall_classification: int = generator.classify_wall_face(grid_pos, dir)
+					var wall_entry: BiomeTextureEntry = BiomeTextureEntry.pick_for(
+						biome.wall_textures, wall_classification, grid_pos, wall_history)
+					if wall_entry != null:
+						_record_history(wall_history, wall_entry, grid_pos)
+						_add_vertical_quad(n[1], n[2], _material_for_entry(wall_entry))
+
+func _record_history(history: Dictionary, entry: BiomeTextureEntry, cell_pos: Vector2i) -> void:
+	if not history.has(entry):
+		history[entry] = []
+	history[entry].append(cell_pos)
 
 func rebuild_items() -> void:
 	if _items_root == null:
@@ -570,16 +612,22 @@ func _make_item_sprite(inst: ItemInstance) -> Sprite3D:
 	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
 	return sprite
 
-func _make_material(albedo_set: Array, normal_set: Array = []) -> StandardMaterial3D:
+# Returns a cached StandardMaterial3D for the given entry, building one
+# on the first request and reusing it on every subsequent call. With
+# multiple variants per surface this collapses N quads × M materials
+# into one material per variant.
+func _material_for_entry(entry: BiomeTextureEntry) -> StandardMaterial3D:
+	if _material_cache.has(entry):
+		return _material_cache[entry]
+	var mat: StandardMaterial3D = _build_material(entry.albedo)
+	_material_cache[entry] = mat
+	return mat
+
+func _build_material(albedo: Texture2D) -> StandardMaterial3D:
 	var mat = StandardMaterial3D.new()
 
-	if albedo_set.size() > 0:
-		mat.albedo_texture = albedo_set[randi() % albedo_set.size()]
-
-	if normal_set.size() > 0:
-		mat.normal_enabled = true
-		mat.normal_texture = normal_set[randi() % normal_set.size()]
-		mat.normal_scale   = 0.5
+	if albedo != null:
+		mat.albedo_texture = albedo
 
 	if biome.use_triplanar:
 		var scale_x = 1.0 / CELL_SIZE
