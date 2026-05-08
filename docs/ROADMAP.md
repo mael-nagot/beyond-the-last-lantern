@@ -332,6 +332,7 @@ Split into three incremental sub-PRs so each one has something testable in-engin
 2. ✅ `TrapSpawn` extended with `corridor_segment_chance: float` (per-segment roll), `corridor_traps_per_run_min/max: int` (cluster size). Defaults preserve Subtask A's scattered-only behaviour. `uses_corridor_clusters()` predicate gates the new pass.
 3. ✅ `_place_corridor_traps()` runs BEFORE the legacy scattered pass on the same spawn — modes are additive. Per-segment rules:
    - Skip if the segment already holds traps from a previous spawn's pass (one spawn per segment so the player reads "this corridor is poisoned with X" rather than a layered hazard)
+   - Skip if the segment is **junction-adjacent** to a segment that already holds traps. Without this, two clusters separated only by a non-trappable junction cell read as one long run with a single safe tile in the middle, forcing more damage than the per-segment max would suggest. Caught during developer playtest; fix lives in `_segment_blocked_by_existing_traps`.
    - Skip if eligible-cell count < `corridor_traps_per_run_min` (silent under-delivery is worse than placing fewer traps elsewhere)
    - Otherwise pick a random eligible start cell and BFS-flood within the segment to gather up to N contiguous cells (N rolled in [min, max], clamped to eligible count)
 4. ✅ `MapPopup.debug_show_traps: bool = false` — when on, draws a small upward triangle on every explored trap cell (red = STEP, orange = TIMED). Off by default in shipping; flip on in the Inspector to validate placement.

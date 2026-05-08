@@ -614,6 +614,60 @@ func test_corridor_cluster_run_size_within_max() -> void:
 			assert_lte(component_size, max_run,
 				"seed %d: cluster of size %d exceeds max %d" % [seed_n, component_size, max_run])
 
+func test_corridor_clusters_skip_junction_adjacent_segments() -> void:
+	# A junction cell (corridor with 3+ corridor neighbours) bridges
+	# two segments. If both segments held clusters, the player would
+	# perceive: trapped run -> single safe junction tile -> trapped
+	# run, which forces back-to-back damage. Verify that for every
+	# junction in the generated level, at most ONE of the segments it
+	# bridges holds traps.
+	var biome := _make_biome()
+	biome.trap_spawns = [_make_corridor_cluster_spawn(_make_trap_data(), 1.0, 2, 3)]
+	var observed_junctions: int = 0
+	for seed_n in [9001, 9002, 9003, 9004, 9005, 9006]:
+		var gen := _make_generator(biome, seed_n)
+		var segments: Array = gen._detect_corridor_segments()
+		var cell_to_seg: Dictionary = {}
+		for i in range(segments.size()):
+			for pos in segments[i]:
+				cell_to_seg[pos] = i
+		# Walk every cell — find junctions, then count distinct trapped
+		# neighbour-segments per junction.
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				var jpos := Vector2i(x, y)
+				if gen.grid[x][y].cell_type != GridCell.CellType.FLOOR:
+					continue
+				if gen.classify_cell(jpos) != ObjectSpawn.PLACEMENT_CORRIDOR:
+					continue
+				var corridor_n: int = 0
+				var neighbour_segs: Dictionary = {}
+				for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+					var n: Vector2i = jpos + d
+					if n.x < 0 or n.x >= gen.grid_width or n.y < 0 or n.y >= gen.grid_height:
+						continue
+					if gen.grid[n.x][n.y].cell_type != GridCell.CellType.FLOOR:
+						continue
+					if gen.classify_cell(n) != ObjectSpawn.PLACEMENT_CORRIDOR:
+						continue
+					corridor_n += 1
+					if cell_to_seg.has(n):
+						neighbour_segs[cell_to_seg[n]] = true
+				if corridor_n < 3:
+					continue
+				observed_junctions += 1
+				var trapped_segs: int = 0
+				for seg_idx in neighbour_segs:
+					for pos in segments[seg_idx]:
+						if gen.grid[pos.x][pos.y].trap != null:
+							trapped_segs += 1
+							break
+				assert_lte(trapped_segs, 1,
+					"seed %d: junction at %s bridges %d trapped segments — should be <= 1" % [seed_n, jpos, trapped_segs])
+	# Sanity: must have exercised at least some junctions in the sweep.
+	assert_gt(observed_junctions, 0,
+		"no junctions found across seed sweep — junction-adjacency rule was never exercised")
+
 func test_corridor_clusters_skip_segments_with_existing_traps() -> void:
 	# Two spawns, both targeting corridors. The first should fill some
 	# segments; the second should skip every already-trapped segment.

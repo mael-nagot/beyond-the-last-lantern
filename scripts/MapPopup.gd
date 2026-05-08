@@ -6,7 +6,7 @@ extends Control
 # red for STEP traps, orange for TIMED. Off by default — leaks design
 # info to the player. Flip on in the Inspector while validating Phase 8
 # Task 3 trap placement (Subtask B).
-@export var debug_show_traps: bool = false
+@export var debug_show_traps: bool = true
 
 var map_data: MapData
 var generator: LevelGenerator

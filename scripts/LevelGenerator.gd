@@ -1485,12 +1485,25 @@ func _detect_corridor_segments() -> Array:
 	return segments
 
 func _place_corridor_traps(spawn: TrapSpawn, segments: Array, cells_by_type: Dictionary) -> void:
+	# Precompute cell -> segment-index lookup so the junction-adjacency
+	# check can verify the WHOLE neighbour segment for traps (not just
+	# its boundary cell — clusters can land far from a segment's end,
+	# leaving the cell-adjacent-to-junction untrapped while the segment
+	# itself is still trapped).
+	var cell_to_seg: Dictionary = {}
+	for i in range(segments.size()):
+		for pos in segments[i]:
+			cell_to_seg[pos] = i
 	for segment in segments:
-		# "Skip if segment already has traps from a previous spawn's
-		# pass" — open-question 2 settled. One spawn per segment keeps
-		# the player's mental model clean ("this corridor is poisoned
-		# with X" rather than "this corridor has a layered hazard").
-		if _segment_has_traps(segment):
+		# Skip if this segment OR a junction-adjacent segment already
+		# holds traps. Two rules in one check:
+		#   - One spawn per segment (avoids layered hazards within a
+		#     single corridor — "this corridor is poisoned with X").
+		#   - One trapped segment per junction (a non-trappable
+		#     junction cell between two clusters reads as ONE long
+		#     run with a single safe tile, which forces more damage
+		#     than the per-segment max would suggest).
+		if _segment_blocked_by_existing_traps(segment, segments, cell_to_seg):
 			continue
 		if randf() >= spawn.corridor_segment_chance:
 			continue
@@ -1516,10 +1529,59 @@ func _place_corridor_traps(spawn: TrapSpawn, segments: Array, cells_by_type: Dic
 			# expectations — same pattern as `_try_place_trap`.
 			cells_by_type[classify_cell(pos)].erase(pos)
 
-func _segment_has_traps(segment: Array) -> bool:
+func _segment_blocked_by_existing_traps(segment: Array, segments: Array, cell_to_seg: Dictionary) -> bool:
+	# Direct check — any cell in this segment already holds a trap.
 	for pos in segment:
 		if grid[pos.x][pos.y].trap != null:
 			return true
+	# Junction-adjacency check — for each cell in this segment, look at
+	# its 4 neighbours for junctions (corridor cells with 3+ corridor
+	# neighbours, excluded from segments). If a junction's corridor
+	# neighbour belongs to a DIFFERENT segment, scan that segment for
+	# any trap — checking the boundary cell alone misses clusters that
+	# landed at the segment's far end.
+	var my_seg_indices: Dictionary = {}
+	for pos in segment:
+		if cell_to_seg.has(pos):
+			my_seg_indices[cell_to_seg[pos]] = true
+	var checked_segs: Dictionary = {}
+	for pos in segment:
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			var jpos: Vector2i = pos + d
+			if not _in_bounds(jpos.x, jpos.y):
+				continue
+			if grid[jpos.x][jpos.y].cell_type != GridCell.CellType.FLOOR:
+				continue
+			if classify_cell(jpos) != ObjectSpawn.PLACEMENT_CORRIDOR:
+				continue
+			# Inline junction check — segments are small and this only
+			# fires while picking placement targets.
+			var corridor_n := 0
+			for d2: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				var nn: Vector2i = jpos + d2
+				if not _in_bounds(nn.x, nn.y):
+					continue
+				if grid[nn.x][nn.y].cell_type != GridCell.CellType.FLOOR:
+					continue
+				if classify_cell(nn) == ObjectSpawn.PLACEMENT_CORRIDOR:
+					corridor_n += 1
+			if corridor_n < 3:
+				continue
+			# `jpos` is a junction. For each of its corridor neighbours,
+			# resolve the segment and check the WHOLE segment for traps.
+			for d3: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				var npos: Vector2i = jpos + d3
+				if not _in_bounds(npos.x, npos.y):
+					continue
+				if not cell_to_seg.has(npos):
+					continue  # non-corridor, dead-end, or another junction — not in any segment
+				var other_seg: int = cell_to_seg[npos]
+				if my_seg_indices.has(other_seg) or checked_segs.has(other_seg):
+					continue
+				checked_segs[other_seg] = true
+				for cell_pos in segments[other_seg]:
+					if grid[cell_pos.x][cell_pos.y].trap != null:
+						return true
 	return false
 
 func _eligible_segment_cells(segment: Array) -> Array:
