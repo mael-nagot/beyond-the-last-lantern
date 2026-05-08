@@ -13,3 +13,8 @@ extends Resource
 @export_group("Player Movement (non-biome)")
 @export var wall_bump_sound: AudioStream
 @export var turn_sounds: Array[AudioStream] = []
+
+@export_group("Damage Feedback")
+# Played when the party takes damage (traps today; combat / status
+# effects later). Centred on the player — non-spatial. Null = silent.
+@export var pain_sound: AudioStream

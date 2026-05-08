@@ -107,6 +107,7 @@ Additional texture types may be added later (roughness, AO, specular) but are no
 - Item icons: 64×64 or 128×128 pixels
 - Item dungeon sprites: 128×128 or 256×256 pixels (transparent background)
 - Wall decoration sprites (paintings, torches, lanterns): 128×128 pixels (transparent background) — for animated decorations, every frame must be the **exact same dimensions** with the same anchor (mounting bracket pixel) across frames, or the sprite will jitter on loop
+- Trap sprites (Phase 8 Task 3): TWO art pieces per trap variant — `<trap>_hole.png` (~64×64, **top-down view**, drawn as if seen from straight above the floor) and `<trap>_extended.png` (~64×128, **side view**, drawn as if seen at eye level looking horizontally). The hole sprite renders flat on the floor (`MeshInstance3D` quad lying horizontal); the extended sprite renders as a vertical billboard. They are intentionally drawn from different perspectives because they're rendered differently. A single hole+spike pair is replicated `grid_cols × grid_rows` times across the cell at runtime — designers do NOT pre-compose multi-spike artwork
 - Enemy sprites: 256×256 or 512×512 pixels (transparent background)
 - Character portraits: 128×128 or 256×256 pixels
 

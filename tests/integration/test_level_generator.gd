@@ -349,6 +349,143 @@ func test_items_avoid_chest_cells() -> void:
 					"items should not pile on blocking-object cell (%d,%d)" % [x, y])
 
 # -------------------------------------------------------
+# Trap placement (Phase 8 Task 3 — Subtask A)
+# -------------------------------------------------------
+
+func _make_trap_data(trigger: int = TrapData.Trigger.STEP, damage: int = 5) -> TrapData:
+	var data := TrapData.new()
+	data.trigger = trigger
+	data.damage = damage
+	data.name_key = "test.trap"
+	return data
+
+func _make_trap_spawn(trap: TrapData, count_min: int, count_max: int, placement: int = ObjectSpawn.PLACEMENT_ANY) -> TrapSpawn:
+	var spawn := TrapSpawn.new()
+	spawn.trap = trap
+	spawn.count_min = count_min
+	spawn.count_max = count_max
+	spawn.placement = placement
+	return spawn
+
+func _all_trap_cells(gen: LevelGenerator) -> Array:
+	var result: Array = []
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			if gen.grid[x][y].trap != null:
+				result.append(Vector2i(x, y))
+	return result
+
+func test_no_traps_placed_when_pool_is_empty() -> void:
+	var gen := _make_generator(_make_biome())
+	assert_eq(gen.traps.size(), 0)
+	assert_eq(_all_trap_cells(gen).size(), 0)
+
+func test_trap_count_falls_within_min_max() -> void:
+	var biome := _make_biome()
+	biome.trap_spawns = [_make_trap_spawn(_make_trap_data(), 3, 5)]
+	var gen := _make_generator(biome)
+	assert_between(gen.traps.size(), 3, 5)
+
+func test_trap_count_matches_authoritative_grid() -> void:
+	# `gen.traps` (flat list) and `cell.trap` (grid slot) must agree.
+	# Drift between them would mean the renderer / damage logic
+	# disagrees with the placement code about what's where.
+	var biome := _make_biome()
+	biome.trap_spawns = [_make_trap_spawn(_make_trap_data(), 4, 4)]
+	var gen := _make_generator(biome)
+	assert_eq(gen.traps.size(), _all_trap_cells(gen).size())
+	for inst in gen.traps:
+		assert_eq(gen.grid[inst.cell.x][inst.cell.y].trap, inst,
+			"trap at %s in flat list must equal cell.trap" % inst.cell)
+
+func test_traps_never_spawn_on_entrance_or_exit() -> void:
+	var biome := _make_biome()
+	biome.trap_spawns = [_make_trap_spawn(_make_trap_data(), 8, 8, ObjectSpawn.PLACEMENT_ANY)]
+	var gen := _make_generator(biome)
+	assert_null(gen.grid[gen.entrance_pos.x][gen.entrance_pos.y].trap)
+	assert_null(gen.grid[gen.exit_pos.x][gen.exit_pos.y].trap)
+
+func test_traps_only_appear_on_floor_cells() -> void:
+	var biome := _make_biome()
+	biome.trap_spawns = [_make_trap_spawn(_make_trap_data(), 5, 5)]
+	var gen := _make_generator(biome)
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			var cell: GridCell = gen.grid[x][y]
+			if cell.cell_type == GridCell.CellType.WALL:
+				assert_null(cell.trap, "wall (%d,%d) should not hold a trap" % [x, y])
+
+func test_corridor_only_traps_only_spawn_in_corridors() -> void:
+	var biome := _make_biome()
+	biome.trap_spawns = [_make_trap_spawn(_make_trap_data(), 5, 5, ObjectSpawn.PLACEMENT_CORRIDOR)]
+	var gen := _make_generator(biome)
+	for trap in gen.traps:
+		var classification: int = gen.classify_cell(trap.cell)
+		assert_eq(classification, ObjectSpawn.PLACEMENT_CORRIDOR,
+			"trap at %s should be on a corridor cell (got classification %d)" % [trap.cell, classification])
+
+func test_traps_never_share_cell_with_objects() -> void:
+	var biome := _make_biome()
+	biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
+	biome.trap_spawns = [_make_trap_spawn(_make_trap_data(), 6, 6, ObjectSpawn.PLACEMENT_ANY)]
+	var gen := _make_generator(biome)
+	for trap in gen.traps:
+		var cell: GridCell = gen.grid[trap.cell.x][trap.cell.y]
+		assert_null(cell.object,
+			"trap at %s shares cell with object %s" % [trap.cell, cell.object])
+
+func test_items_avoid_trap_cells() -> void:
+	# Floor items are placed AFTER traps and must skip trap cells so
+	# loot doesn't pile on a hazard the player would have to step on.
+	var item := _make_item()
+	var loot: Array[LootEntry] = [_make_loot_entry(item)]
+	var biome := _make_biome(loot, 8, 8)
+	biome.trap_spawns = [_make_trap_spawn(_make_trap_data(), 5, 5, ObjectSpawn.PLACEMENT_ANY)]
+	var gen := _make_generator(biome)
+	for trap in gen.traps:
+		var cell: GridCell = gen.grid[trap.cell.x][trap.cell.y]
+		assert_eq(cell.items.size(), 0,
+			"items should not pile on trap cell (%d,%d)" % [trap.cell.x, trap.cell.y])
+
+func test_min_distance_keeps_traps_apart() -> void:
+	var biome := _make_biome()
+	var spawn := _make_trap_spawn(_make_trap_data(), 3, 3, ObjectSpawn.PLACEMENT_ANY)
+	spawn.min_distance_to_other_trap = 6
+	biome.trap_spawns = [spawn]
+	var gen := _make_generator(biome)
+	var positions: Array = []
+	for trap in gen.traps:
+		positions.append(trap.cell)
+	for i in range(positions.size()):
+		for j in range(i + 1, positions.size()):
+			var dist: int = abs(positions[i].x - positions[j].x) + abs(positions[i].y - positions[j].y)
+			assert_gte(dist, 6,
+				"traps at %s and %s are %d apart (need >= 6)" % [positions[i], positions[j], dist])
+
+func test_trap_instance_cell_matches_grid_position() -> void:
+	# TrapInstance.cell is set at placement time and used by the renderer
+	# to anchor the floor decal — drift between cell and its grid slot
+	# would land the visual on the wrong tile.
+	var biome := _make_biome()
+	biome.trap_spawns = [_make_trap_spawn(_make_trap_data(), 4, 4)]
+	var gen := _make_generator(biome)
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			var inst: TrapInstance = gen.grid[x][y].trap
+			if inst != null:
+				assert_eq(inst.cell, Vector2i(x, y))
+
+func test_timed_traps_initialise_with_starting_state() -> void:
+	# A TIMED trap with timed_initial_offset = 0 must start RETRACTED;
+	# the per-frame tick is expected to handle the rest.
+	var biome := _make_biome()
+	var trap_data := _make_trap_data(TrapData.Trigger.TIMED)
+	biome.trap_spawns = [_make_trap_spawn(trap_data, 3, 3)]
+	var gen := _make_generator(biome)
+	for inst in gen.traps:
+		assert_eq(inst.state, TrapInstance.State.RETRACTED)
+
+# -------------------------------------------------------
 # Door placement (Phase 8 Task 2a)
 # -------------------------------------------------------
 

@@ -6,6 +6,19 @@ var _dungeon_view = null
 var _generator: LevelGenerator = null
 var _party: Array[Character] = []
 
+# Brief jolt magnitude when the party takes damage from a trap.
+const _DAMAGE_SHAKE_MAGNITUDE: float = 0.7
+
+# Delay between a successful step ONTO a trap and the trap firing.
+# Slightly longer than DungeonView's 0.12s movement tween so the
+# camera has visibly arrived at the cell before the spike pops, the
+# screen flashes, and the shake hits — sells "I just stepped on
+# something nasty" instead of "I teleported onto something nasty".
+# If the player triggers another move during this window, the new
+# move and the deferred trap effect proceed independently — the
+# trap effect still resolves for the cell that was actually entered.
+const _TRAP_ACTIVATION_DELAY: float = 0.13
+
 func _ready() -> void:
 	var dungeon_view      = $DungeonView
 	var player_controller = $DungeonView/PlayerController
@@ -370,6 +383,7 @@ func _on_move(action: String) -> void:
 	# without changing this callback.
 	if _is_world_paused():
 		return
+	var prev_pos: Vector2i = _player_controller.grid_pos
 	match action:
 		"forward":     _player_controller.move_forward()
 		"backward":    _player_controller.move_backward()
@@ -379,6 +393,8 @@ func _on_move(action: String) -> void:
 		"strafe_right":_player_controller.strafe_right()
 	_update_map()
 	_update_pickup_prompt()
+	if _player_controller.grid_pos != prev_pos:
+		_on_player_entered_cell()
 
 func _is_world_paused() -> bool:
 	# Single source of truth: the SceneTree's paused flag, owned by
@@ -441,6 +457,7 @@ func _input(event: InputEvent) -> void:
 	# Escape-to-close shortcut here.
 	if _is_world_paused():
 		return
+	var prev_pos: Vector2i = _player_controller.grid_pos
 	match event.keycode:
 		KEY_W, KEY_UP:   _player_controller.move_forward()
 		KEY_S, KEY_DOWN: _player_controller.move_backward()
@@ -454,6 +471,8 @@ func _input(event: InputEvent) -> void:
 		KEY_F3:          _debug_reveal_full_map()
 	_update_map()
 	_update_pickup_prompt()
+	if _player_controller.grid_pos != prev_pos:
+		_on_player_entered_cell()
 
 func _debug_damage_party() -> void:
 	for c in _party:
@@ -478,3 +497,159 @@ func _debug_spawn_health_potion() -> void:
 	var leftover = _hud.item_bar.add_item(ItemInstance.create(data, 1))
 	if leftover != null:
 		push_warning("Item bar full — health potion not added")
+
+# -------------------------------------------------------
+# Traps — step entry, periodic tick, damage, feedback
+# -------------------------------------------------------
+
+# Called on every successful position change. STEP traps fire here
+# (single-shot, immediate damage). TIMED trap presence is checked in
+# the per-frame tick instead, since their damage event is the
+# RETRACTED→EXTENDED transition rather than the cell-entry event.
+func _on_player_entered_cell() -> void:
+	if _generator == null:
+		return
+	var cell := _current_cell()
+	if cell == null or cell.trap == null:
+		return
+	var trap: TrapInstance = cell.trap
+	# Defer trap activation/feedback until the move tween has visibly
+	# completed. Without this delay the spike-pop / shake / flash /
+	# damage all fire on the same frame the player presses W, making
+	# the cell entry read as a teleport. The 0.13s window is just
+	# longer than DungeonView's 0.12s position tween. If the world
+	# is paused during the wait (modal popup), the timer pauses too —
+	# trap effects resume when the modal closes.
+	await get_tree().create_timer(_TRAP_ACTIVATION_DELAY).timeout
+	# Re-check the trap is still here. The cell-bound trap can't be
+	# removed at runtime today, but defending against future systems
+	# (disarm, level transitions) is cheap.
+	if not is_instance_valid(self) or _generator == null:
+		return
+	if cell.trap != trap:
+		return
+	if trap.data.is_timed():
+		# TIMED trap: walking ONTO a cell with spikes already extended
+		# should damage the player once. The latch
+		# (damage_applied_this_extension) prevents a double-charge if
+		# the player walks off and back on within the same up phase,
+		# or stood there when ACTIVATED already triggered damage. The
+		# state machine resets the latch on every RETRACTED→EXTENDED
+		# transition so each extension can damage once.
+		if trap.is_extended() and not trap.damage_applied_this_extension and trap.data.damage > 0:
+			trap.damage_applied_this_extension = true
+			_apply_party_damage(trap.data.damage)
+		return
+	if not trap.data.is_step():
+		return
+	var should_damage: bool = trap.on_player_step()
+	if _dungeon_view != null:
+		_dungeon_view.update_trap_visual(trap)
+	# Activate sound — STEP traps fire at the player's feet, so
+	# route through SoundManager (non-spatial) for consistent
+	# loudness even if the spatial player would attenuate.
+	if trap.data.activate_sound != null:
+		SoundManager.play(trap.data.activate_sound)
+	if should_damage:
+		_apply_party_damage(trap.data.damage)
+
+# Per-frame tick. Advances every trap's state machine and reacts to
+# observed transitions:
+#   ACTIVATED   — TIMED trap just popped up. If the player is on the
+#                 cell, apply damage. Sound plays through the trap's
+#                 own AudioStreamPlayer3D (spatial). Visual flips on.
+#   DEACTIVATED — spikes retracted. STEP traps' deactivate sound is
+#                 non-spatial (player just stood there); TIMED traps
+#                 use their 3D player. Visual flips off.
+#
+# `_is_world_paused` would already freeze _process via SceneTree, but
+# we also gate explicitly so the state-machine clock doesn't drift if
+# we ever change `process_mode`. Cheap belt-and-braces.
+func _process(delta: float) -> void:
+	if _generator == null or _generator.traps.is_empty():
+		return
+	if _is_world_paused():
+		return
+	var current: Vector2i = _player_controller.grid_pos if _player_controller != null else Vector2i.ZERO
+	for trap in _generator.traps:
+		if trap == null:
+			continue
+		var event: int = trap.tick(delta)
+		match event:
+			TrapInstance.Event.ACTIVATED:
+				_on_trap_activated(trap, current)
+			TrapInstance.Event.DEACTIVATED:
+				_on_trap_deactivated(trap)
+
+func _on_trap_activated(trap: TrapInstance, player_cell: Vector2i) -> void:
+	if _dungeon_view != null:
+		_dungeon_view.update_trap_visual(trap)
+	# Trap activation sound. TIMED traps gate by hearing distance —
+	# inside `hearing_distance` (Manhattan tiles) plays at full
+	# volume, beyond is silent. We dropped the AudioStreamPlayer3D
+	# falloff curve because it wasn't reliably audible inside the
+	# SubViewport; the manual gate is louder and simpler. STEP traps
+	# never reach here (their state activates via on_player_step,
+	# not via tick), so this branch is timed-only in practice.
+	if trap.data.is_timed() and _player_within_trap_hearing(trap):
+		SoundManager.play(trap.data.activate_sound)
+	# Damage iff the player is standing on this trap's cell at the
+	# moment it pops. Standing-on-trap is checked against the cached
+	# `player_cell` snapshot rather than re-reading mid-loop, so
+	# multi-trap activations in the same frame each see the same
+	# player position. Latch the per-extension flag so a subsequent
+	# walk-off-and-back-on within this same up phase doesn't
+	# double-damage (covered by _on_player_entered_cell's check).
+	if trap.cell == player_cell and trap.data.damage > 0:
+		trap.damage_applied_this_extension = true
+		_apply_party_damage(trap.data.damage)
+
+func _on_trap_deactivated(trap: TrapInstance) -> void:
+	if _dungeon_view == null:
+		return
+	_dungeon_view.update_trap_visual(trap)
+	# Same gating as activate: TIMED traps only emit sound when the
+	# player is within hearing range; STEP traps fire at the player's
+	# feet and play unconditionally.
+	if trap.data.is_timed():
+		if _player_within_trap_hearing(trap):
+			SoundManager.play(trap.data.deactivate_sound)
+	else:
+		SoundManager.play(trap.data.deactivate_sound)
+
+# Manhattan-tile distance from player to trap, scaled by CELL_SIZE,
+# compared against `hearing_distance`. Used to gate timed-trap audio
+# so far-off cycles stay silent — the player's "this dungeon has
+# trap X over there" mental map should depend on proximity, not on
+# every trap in the level firing every cycle.
+func _player_within_trap_hearing(trap: TrapInstance) -> bool:
+	if _player_controller == null or trap == null or trap.data == null:
+		return false
+	if trap.data.hearing_distance <= 0.0:
+		return false
+	var diff: Vector2i = _player_controller.grid_pos - trap.cell
+	# Manhattan distance in tiles; convert to world units against
+	# CELL_SIZE (4.6) so `hearing_distance` reads as world units like
+	# every other game distance.
+	var dist_tiles: float = float(abs(diff.x) + abs(diff.y))
+	var dist_world: float = dist_tiles * 4.6
+	return dist_world <= trap.data.hearing_distance
+
+# Single damage entry point — applies `amount` to every party
+# member, then fires the standard feedback (camera shake + screen
+# flash + pain sound). Future damage sources (combat, status
+# effects) reuse this path so the feel is consistent.
+func _apply_party_damage(amount: int) -> void:
+	if amount <= 0:
+		return
+	for c in _party:
+		if c == null:
+			continue
+		c.damage(amount)
+	if _dungeon_view != null:
+		_dungeon_view.shake_camera(_DAMAGE_SHAKE_MAGNITUDE)
+	if _hud != null:
+		_hud.flash_damage()
+	var cfg: AudioConfig = SoundManager.audio_config
+	if cfg != null:
+		SoundManager.play(cfg.pain_sound)
