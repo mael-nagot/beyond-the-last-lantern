@@ -318,6 +318,35 @@ Paintings, torches, lanterns mounted on wall faces (a side of a floor cell that 
 - Rest point (heal HP/MP, save?)
 - Must clear nearby enemies before resting (needs Phase 10)
 
+#### Task 6 — Teleporters
+Pairs of floor tiles that warp the player from one to the other. Adds shortcut topology to large biomes and unlocks puzzle layouts where two regions share a teleporter pair instead of a corridor.
+- New `TeleporterInstance` (RefCounted) — holds the two paired cells; `partner_of(cell)` resolves the destination
+- Per-biome `Array[TeleporterSpawn]` on `BiomeData` (count_min/max, placement flags, min_distance_between_pair so pairs aren't visually next to each other, max_distance_between_pair so pairs aren't degenerate)
+- Generator places pairs after standard objects but before items; both endpoints must be chain-reachable from the entrance (separately — a teleporter mustn't be the only way to reach its destination, otherwise locked-door / lever puzzles get bypassed)
+- `Game.gd` triggers the warp when the player steps on a teleporter cell — fades camera, snaps to partner, plays warp sound. Prevents immediate re-trigger by remembering the cell the player just arrived on (stepping off + back on re-arms)
+- Map: paired teleporters drawn as matching coloured glyphs (per-pair hue rotation, same trick as Phase 8 Task 2c keys) so the player can see which goes where on explored tiles
+- Visual: animated rune-circle Sprite3D on the floor (FIXED_Y billboard), warm glow via OmniLight3D
+- Localization: `object.teleporter_forest.{name,description}`, `ui.feedback.teleporter_warped`
+
+#### Task 7 — Trade doors
+A door that demands a fixed cost in consumables (food, potions, weapons, armour) instead of a key. Always guards a chest (the cost has to feel worth paying), so the placement code requires a chest in the gated region.
+- New `TradeDoorSpawn` resource (biome-level): door_object, cost_item_data, cost_count, count_min/max, distance constraints. `must_gate_chest` is implicit `true` — the door's whole point is the reward chest behind it
+- New `TradeCostInstance` field on `DoorInstance` (or extend `DoorInstance` with `cost_item: ItemData` + `cost_count: int`) — sticky `unlocked` flag mirrors the key-locked door
+- Generator: same placement model as `KeyDoorSpawn` (1-wide-corridor edge), but instead of placing a key in a reachable cell, the placement just verifies that closing this door cuts off a chest cell. Reuses chain-reachability v2 (treats the door as permanently closed) to confirm the gated region holds at least one chest
+- `Game._toggle_door`: trade-locked branch checks if the bar holds ≥ N of the cost item; consumes them via `ItemBar.remove_n`; door's `unlocked` flips true; falls through to normal toggle. No / not enough cost items → locked feedback with a translated "needs N foo" toast
+- Localization: `object.door_forest_trade.{name,description,locked}` (with placeholders for item name + count), `ui.feedback.trade_door_paid`
+- Reuses the locked-feedback path + camera shake from Task 2c — no new feedback wiring
+
+#### Task 8 — Spinners
+Floor tile that rotates the player N times when stepped on, disorienting them (loses bearing of which way the entrance is). Light comedic / puzzle effect; pairs well with biomes where the map is partially obscured.
+- New `SpinnerData` Resource (extends `ObjectData`) — `rotation_count: int = 3` (how many 90° turns), `rotation_direction` enum (clockwise / counter-clockwise / random)
+- Cell-bound (`GridCell.object`), non-blocking (`blocks_movement = false`), `interactable = false` (no click — the trigger is stepping on)
+- Per-biome `Array[ObjectSpawn]` entry — corridor placement flag preferred (rooms are too easy to recover orientation in)
+- `Game._on_move` (or `PlayerController` post-move hook): when the destination cell holds a spinner and isn't the cell the player just left voluntarily turning, fire `rotate_camera_to(...)` N times in sequence (chained tweens). Only spins on FIRST entry — re-entering doesn't re-spin until the player has stepped fully off
+- Visual: arrow-vortex Sprite3D, FIXED_Y billboard, slowly auto-rotating texture (or animated frames)
+- Sound: low whoosh per turn
+- Localization: `object.spinner_forest.{name,description}`
+
 ### Phase 9 — Character Data System
 
 **Priority: HIGH — Required for combat and inventory**
