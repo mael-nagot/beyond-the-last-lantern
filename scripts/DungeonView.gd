@@ -156,6 +156,14 @@ func _build_mesh() -> void:
 	# generate; rebuild from scratch so designers tweaking the biome live
 	# see their edits.
 	_material_cache.clear()
+	# Per-surface placement history — each maps `BiomeTextureEntry` →
+	# `Array[Vector2i]` of cells already using that entry. Picker reads
+	# this to enforce `min_distance_to_same` and we append after each
+	# pick. Iteration order (x outer, y inner) is stable, so the history
+	# evolves identically across rebuilds.
+	var wall_history: Dictionary = {}
+	var floor_history: Dictionary = {}
+	var ceiling_history: Dictionary = {}
 
 	for x in range(generator.grid_width):
 		for y in range(generator.grid_height):
@@ -173,14 +181,18 @@ func _build_mesh() -> void:
 			# side without any extra book-keeping.
 			var classification: int = generator.classify_cell(grid_pos)
 
-			var floor_mat: StandardMaterial3D = _material_for(biome.floor_textures, classification, grid_pos)
-			if floor_mat != null:
-				_add_horizontal_quad(Vector3(cx, 0.0, cy), floor_mat)
+			var floor_entry: BiomeTextureEntry = BiomeTextureEntry.pick_for(
+				biome.floor_textures, classification, grid_pos, floor_history)
+			if floor_entry != null:
+				_record_history(floor_history, floor_entry, grid_pos)
+				_add_horizontal_quad(Vector3(cx, 0.0, cy), _material_for_entry(floor_entry))
 
 			if show_ceiling:
-				var ceil_mat: StandardMaterial3D = _material_for(biome.ceiling_textures, classification, grid_pos)
-				if ceil_mat != null:
-					_add_horizontal_quad(Vector3(cx, wall_height, cy), ceil_mat, true)
+				var ceil_entry: BiomeTextureEntry = BiomeTextureEntry.pick_for(
+					biome.ceiling_textures, classification, grid_pos, ceiling_history)
+				if ceil_entry != null:
+					_record_history(ceiling_history, ceil_entry, grid_pos)
+					_add_horizontal_quad(Vector3(cx, wall_height, cy), _material_for_entry(ceil_entry), true)
 
 			var neighbours = [
 				[Vector2i( 0, -1), Vector3(cx, wall_height * 0.5, cy - CELL_SIZE * 0.5),   0.0],
@@ -188,14 +200,28 @@ func _build_mesh() -> void:
 				[Vector2i(-1,  0), Vector3(cx - CELL_SIZE * 0.5, wall_height * 0.5, cy),  90.0],
 				[Vector2i( 1,  0), Vector3(cx + CELL_SIZE * 0.5, wall_height * 0.5, cy), 270.0],
 			]
+			# All wall sides of a cell share one entry — picked once per
+			# cell so every face of the same room/corridor cell is
+			# visually coherent, and the distance constraint applies to
+			# the cell, not to each individual face.
+			var wall_entry: BiomeTextureEntry = null
 			for n in neighbours:
 				var dir   = n[0] as Vector2i
 				var npos  = Vector2i(x + dir.x, y + dir.y)
 				var ncell = generator.get_cell(npos.x, npos.y)
 				if ncell and ncell.cell_type == GridCell.CellType.WALL:
-					var wall_mat: StandardMaterial3D = _material_for(biome.wall_textures, classification, grid_pos)
-					if wall_mat != null:
-						_add_vertical_quad(n[1], n[2], wall_mat)
+					if wall_entry == null:
+						wall_entry = BiomeTextureEntry.pick_for(
+							biome.wall_textures, classification, grid_pos, wall_history)
+						if wall_entry != null:
+							_record_history(wall_history, wall_entry, grid_pos)
+					if wall_entry != null:
+						_add_vertical_quad(n[1], n[2], _material_for_entry(wall_entry))
+
+func _record_history(history: Dictionary, entry: BiomeTextureEntry, cell_pos: Vector2i) -> void:
+	if not history.has(entry):
+		history[entry] = []
+	history[entry].append(cell_pos)
 
 func rebuild_items() -> void:
 	if _items_root == null:
@@ -585,15 +611,11 @@ func _make_item_sprite(inst: ItemInstance) -> Sprite3D:
 	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
 	return sprite
 
-# Resolves a (entries, classification, cell) to a cached
-# StandardMaterial3D — the entry's deterministic pick is computed once
-# per cell, and the resulting material is shared across every quad that
-# resolves to the same entry. Returns null only when the entry list is
-# empty / all-null (callers skip the quad in that case).
-func _material_for(entries: Array, classification: int, cell_pos: Vector2i) -> StandardMaterial3D:
-	var entry: BiomeTextureEntry = BiomeTextureEntry.pick_for(entries, classification, cell_pos)
-	if entry == null:
-		return null
+# Returns a cached StandardMaterial3D for the given entry, building one
+# on the first request and reusing it on every subsequent call. With
+# multiple variants per surface this collapses N quads × M materials
+# into one material per variant.
+func _material_for_entry(entry: BiomeTextureEntry) -> StandardMaterial3D:
 	if _material_cache.has(entry):
 		return _material_cache[entry]
 	var mat: StandardMaterial3D = _build_material(entry.albedo, entry.normal)
