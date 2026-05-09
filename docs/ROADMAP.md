@@ -502,6 +502,31 @@ Floor tile that rotates the player N times when stepped on, disorienting them (l
 
 **Priority: MEDIUM — Required for full game progression**
 
+#### Task 1 — Sub-level system (level stack)
+Infrastructure for entering and returning from smaller side-levels within a parent level. Towns reuse this system for enterable buildings (shops, houses, inns).
+
+1. Add `SUB_EXIT` to `GridCell.CellType` — a floor tile that acts as a portal into a sub-level
+2. `SubBiomeEntry.gd` Resource — defines one sub-level portal type for a biome:
+   - `sub_biome: BiomeData` (the biome template for the generated sub-level — typically smaller grid)
+   - `portal_object: ObjectData` (visual for the portal tile — cave mouth, house door, staircase)
+   - `count_min / count_max: int` (how many portals of this type per level)
+   - `placement` flags (Corridor / Room / Dead End — reuses existing placement system)
+   - `min_distance_to_other_portal: int` (spreading constraint)
+3. `BiomeData.sub_biome_entries: Array[SubBiomeEntry]` — per-biome portal pool, placed during generation
+4. `LevelGenerator._place_sub_exits()` — runs in the object placement pipeline. Each placed portal stores its `SubBiomeEntry` on the `GridCell` so `Game.gd` knows which sub-biome to generate on entry
+5. Level stack in `Game.gd`:
+   - `_level_stack: Array` — each entry holds the full parent level state (grid, generator, player position + facing, objects, traps, decorations, explored map state)
+   - On portal entry: push current state, generate the sub-level from the portal's `sub_biome`, rebuild `DungeonView`, place player at the sub-level entrance
+   - On sub-level entrance tile (return): pop the stack, restore the parent level state, rebuild `DungeonView`, place player back on the portal tile they entered from
+6. Sub-levels have an ENTRANCE (the return point) but NO main EXIT — the only way out is back through the entrance
+7. Sub-levels do NOT contain `SUB_EXIT` tiles — one nesting depth only. `_place_sub_exits()` is skipped when generating a sub-level
+8. `DungeonView` teardown + rebuild on push/pop — clear all Node3D children, regenerate mesh, objects, traps, decorations from the (new or restored) level state
+9. Camera transition: fade-to-black on portal entry/exit (reusable for Phase 19 screen transitions between biomes)
+10. Map state: sub-level has its own independent fog-of-war. Parent map state is preserved in the stack and restored on return
+11. Save system integration (Phase 16 dependency): the full level stack must be serializable — each stacked level's grid + object states + map exploration included in `save_run.json`
+12. Localization: `ui.feedback.entering_sub_level`, `ui.feedback.returning` (toast on transition)
+
+#### Task 2 — Biome content
 1. Create remaining biome textures and BiomeData resources
 2. Implement biome-specific mechanics:
    - Underwater biome (air bubbles for breathing, drowning timer)
@@ -509,8 +534,21 @@ Floor tile that rotates the player N times when stepped on, disorienting them (l
    - Swamp biome (mud slows movement, levitation bypasses)
 3. Implement biome progression system (biome sequence with boss/town checkpoints)
 4. Implement biome path selection (choosing between up to 3 alternative biomes)
-5. Create town levels (safe zones, shops, NPCs)
-6. Create boss encounters
+
+#### Task 3 — Towns
+Towns are safe zones between boss fights. Each town is a regular level generated from a town `BiomeData` (no enemies, no traps). Enterable buildings (shops, inns, NPC houses) use the **sub-level system** (Task 1) — each building is a `SubBiomeEntry` portal leading to a small interior sub-level.
+
+1. Create town `BiomeData` (open layout: high room count, wide corridors, no traps, no enemies)
+2. Create interior `BiomeData` templates for building types (shop interior, inn interior, NPC house — small grids, e.g. 7×7 or 9×9)
+3. Add `SubBiomeEntry` portals to the town biome for each building type (house door visual, 1–3 shops, 1 inn, 2–4 NPC houses per town)
+4. Shop interaction system (buy/sell UI inside shop sub-level)
+5. Inn rest mechanic (full heal, save point)
+6. NPC dialogue system for house interiors
+7. Grimoire access point in town
+
+#### Task 4 — Boss encounters
+1. Create boss encounters
+2. Boss room premade blocks (Phase 14 dependency)
 
 ### Phase 16 — Title Screen, Save System & Character Creation
 
