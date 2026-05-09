@@ -222,3 +222,69 @@ func test_view_for_camera_zero_inputs_fall_back_to_front() -> void:
 		ProjectileInstance.view_for_camera(Vector2i(1, 0), Vector2.ZERO),
 		ProjectileInstance.CameraView.FRONT
 	)
+
+# --- Damage to player (Subtask C3) ---
+
+func _make_damaging_data(dmg: int = 8) -> ProjectileTrapData:
+	var data := _make_data()
+	data.damage = dmg
+	return data
+
+func test_consume_damage_returns_true_when_at_player_cell() -> void:
+	# Projectile float-cell `(5.5, 7.0)` floors to grid cell `(5, 7)`.
+	# A player at `(5, 7)` is exactly there → damage applies.
+	var inst := ProjectileInstance.create(_make_damaging_data(8), Vector2(5.5, 7.0), Vector2i(1, 0))
+	assert_true(inst.consume_damage_for_player(Vector2i(5, 7)))
+
+func test_consume_damage_sets_latch_on_success() -> void:
+	# After a successful damage call, the latch is set so the same
+	# projectile can never damage again (even on later ticks where it
+	# might pass through the same cell).
+	var inst := ProjectileInstance.create(_make_damaging_data(8), Vector2(5.5, 7.0), Vector2i(1, 0))
+	inst.consume_damage_for_player(Vector2i(5, 7))
+	assert_true(inst.damage_latch)
+
+func test_consume_damage_returns_false_on_second_call_same_cell() -> void:
+	# Two calls in a row with the player at the projectile cell — the
+	# first returns true and sets the latch; the second returns false.
+	# A single projectile damages once per flight, even if multiple
+	# frames see it on the player's cell.
+	var inst := ProjectileInstance.create(_make_damaging_data(8), Vector2(5.5, 7.0), Vector2i(1, 0))
+	assert_true(inst.consume_damage_for_player(Vector2i(5, 7)))
+	assert_false(inst.consume_damage_for_player(Vector2i(5, 7)))
+
+func test_consume_damage_returns_false_when_not_at_player_cell() -> void:
+	var inst := ProjectileInstance.create(_make_damaging_data(8), Vector2(2.5, 5.5), Vector2i(1, 0))
+	assert_false(inst.consume_damage_for_player(Vector2i(8, 8)))
+	# And the latch must NOT be set — a non-hit shouldn't trip the
+	# latch and lock out a real future hit on the same projectile.
+	assert_false(inst.damage_latch)
+
+func test_consume_damage_returns_false_for_zero_damage_data() -> void:
+	# Harmless prop projectile — zero damage. The wrapper short-circuits
+	# without tripping the latch, so a future variant tweak (set damage
+	# to >0) would start damaging without weird latched-state carryover.
+	var inst := ProjectileInstance.create(_make_damaging_data(0), Vector2(5.5, 7.0), Vector2i(1, 0))
+	assert_false(inst.consume_damage_for_player(Vector2i(5, 7)))
+	assert_false(inst.damage_latch)
+
+func test_consume_damage_returns_false_with_null_data() -> void:
+	# Defensive — should never crash on a malformed instance.
+	var inst := ProjectileInstance.new()
+	assert_false(inst.consume_damage_for_player(Vector2i(0, 0)))
+	assert_false(inst.damage_latch)
+
+func test_consume_damage_floors_continuous_position_correctly() -> void:
+	# `cell_pos.x = 5.99` is still inside grid cell 5 (the cell covers
+	# `[5, 6)`). Floor must be 5, so a player at (5, 7) is hit even
+	# when the projectile is near the cell's far edge.
+	var inst := ProjectileInstance.create(_make_damaging_data(8), Vector2(5.99, 7.5), Vector2i(1, 0))
+	assert_true(inst.consume_damage_for_player(Vector2i(5, 7)))
+
+func test_consume_damage_returns_false_when_already_latched() -> void:
+	# Bypass the wrapper to set the latch, then assert the wrapper
+	# refuses to fire — covers any future caller that might set the
+	# latch directly (e.g. unit tests, debug tooling).
+	var inst := ProjectileInstance.create(_make_damaging_data(8), Vector2(5.5, 7.0), Vector2i(1, 0))
+	inst.damage_latch = true
+	assert_false(inst.consume_damage_for_player(Vector2i(5, 7)))

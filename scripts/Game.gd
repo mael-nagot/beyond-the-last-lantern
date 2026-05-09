@@ -611,6 +611,10 @@ func _tick_projectile_launchers(delta: float) -> void:
 func _tick_projectiles(delta: float) -> void:
 	if _generator.projectiles.is_empty():
 		return
+	# Snapshot the player's cell once for the whole loop so multi-projectile
+	# frames see a consistent player position even if some downstream side
+	# effect tried to move the player (none today, but defensive).
+	var player_cell: Vector2i = _player_controller.grid_pos if _player_controller != null else Vector2i(-99999, -99999)
 	# Iterate by index then collect impacts so we can remove cleanly
 	# after the loop without invalidating the indexing. Modifying the
 	# array mid-iteration would skip entries.
@@ -622,6 +626,16 @@ func _tick_projectiles(delta: float) -> void:
 		var event: int = proj.tick(delta, _generator.grid, _generator.grid_width, _generator.grid_height)
 		if _dungeon_view != null:
 			_dungeon_view.update_projectile_visual(proj)
+		# Phase 8 Task 3 — Subtask C3: damage check after tick. The
+		# wrapper sets `damage_latch` atomically so a single projectile
+		# can only damage once per flight, even if it sits on the
+		# player's cell for multiple frames or multiple ticks see it
+		# there before the projectile moves on. Reuses
+		# `_apply_party_damage` so the feedback (camera shake + flash
+		# + pain sound) matches spike traps and any future damage
+		# source — designers don't have to wire feedback per system.
+		if proj.consume_damage_for_player(player_cell):
+			_apply_party_damage(proj.data.damage)
 		if event == ProjectileInstance.Event.IMPACT:
 			if _player_within_projectile_hearing(proj):
 				if proj.data.impact_sound != null:
