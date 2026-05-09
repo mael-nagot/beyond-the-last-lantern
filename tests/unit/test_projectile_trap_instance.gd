@@ -64,3 +64,111 @@ func test_direction_constants() -> void:
 	assert_eq(ProjectileTrapInstance.DIR_SOUTH, Vector2i(0, 1))
 	assert_eq(ProjectileTrapInstance.DIR_WEST, Vector2i(-1, 0))
 	assert_eq(ProjectileTrapInstance.DIR_EAST, Vector2i(1, 0))
+
+# --- TIMED firing (Subtask C2) ---
+
+func _make_timed_data(period: float = 2.0, initial_offset: float = 0.0) -> ProjectileTrapData:
+	var data := ProjectileTrapData.new()
+	data.trigger = ProjectileTrapData.Trigger.TIMED
+	data.timed_period = period
+	data.timed_initial_offset = initial_offset
+	data.speed_cells_per_second = 8.0
+	return data
+
+func test_create_initialises_timer_to_data_offset_for_timed() -> void:
+	var data := _make_timed_data(2.0, 0.7)
+	var inst := ProjectileTrapInstance.create(data, Vector2i(3, 4), ProjectileTrapInstance.DIR_NORTH)
+	assert_eq(inst.timed_offset, 0.7)
+	assert_eq(inst.timer, 0.7)
+
+func test_create_leaves_timer_zero_for_pressure_plate() -> void:
+	# PRESSURE_PLATE traps don't tick by clock — they fire on player
+	# step (Subtask C4). The timer / offset fields should stay at 0
+	# regardless of any data fields.
+	var data := _make_data()
+	data.trigger = ProjectileTrapData.Trigger.PRESSURE_PLATE
+	var inst := ProjectileTrapInstance.create(data, Vector2i(0, 0), ProjectileTrapInstance.DIR_NORTH)
+	assert_eq(inst.timer, 0.0)
+	assert_eq(inst.timed_offset, 0.0)
+
+func test_tick_returns_null_until_period_elapsed() -> void:
+	var data := _make_timed_data(2.0)
+	var inst := ProjectileTrapInstance.create(data, Vector2i(3, 4), ProjectileTrapInstance.DIR_NORTH)
+	# Advance 1.5s — still under the 2.0s period, so no spawn.
+	assert_null(inst.tick(0.5))
+	assert_null(inst.tick(1.0))
+	assert_almost_eq(inst.timer, 1.5, 0.0001)
+
+func test_tick_spawns_projectile_on_period_rollover() -> void:
+	var data := _make_timed_data(1.0)
+	var inst := ProjectileTrapInstance.create(data, Vector2i(3, 4), ProjectileTrapInstance.DIR_NORTH)
+	# 1.0s exactly — fires.
+	var spawned: ProjectileInstance = inst.tick(1.0)
+	assert_not_null(spawned, "should spawn at exactly the period boundary")
+	assert_eq(spawned.data, data)
+	assert_eq(spawned.direction, Vector2i(0, 1), "north wall fires south")
+
+func test_tick_resets_timer_after_rollover() -> void:
+	var data := _make_timed_data(1.0)
+	var inst := ProjectileTrapInstance.create(data, Vector2i(0, 0), ProjectileTrapInstance.DIR_NORTH)
+	inst.tick(1.0)
+	# After rollover the timer holds the leftover time (here exactly 0)
+	# so the next cycle starts cleanly. fposmod handles delta > period
+	# too — see the next test.
+	assert_almost_eq(inst.timer, 0.0, 0.0001)
+
+func test_tick_handles_long_delta_via_fposmod() -> void:
+	# Single tick of 3.5s with a 1.0s period — should still spawn one
+	# projectile and leave timer at fposmod(3.5, 1.0) = 0.5. We don't
+	# spawn three projectiles in one tick (would feel like a burst);
+	# the placer's TIMED contract is "one shot per period rollover the
+	# tick observes", which is good enough at 60fps.
+	var data := _make_timed_data(1.0)
+	var inst := ProjectileTrapInstance.create(data, Vector2i(0, 0), ProjectileTrapInstance.DIR_NORTH)
+	var spawned: ProjectileInstance = inst.tick(3.5)
+	assert_not_null(spawned)
+	assert_almost_eq(inst.timer, 0.5, 0.0001)
+
+func test_tick_returns_null_for_pressure_plate_data() -> void:
+	# Subtask C2 only wires TIMED firing. PRESSURE_PLATE traps never
+	# tick by clock; their tick should be a no-op.
+	var data := _make_data()
+	data.trigger = ProjectileTrapData.Trigger.PRESSURE_PLATE
+	var inst := ProjectileTrapInstance.create(data, Vector2i(0, 0), ProjectileTrapInstance.DIR_NORTH)
+	assert_null(inst.tick(10.0))
+
+func test_tick_null_data_is_noop() -> void:
+	var inst := ProjectileTrapInstance.new()
+	# data deliberately null
+	assert_null(inst.tick(1.0))
+
+func test_spawned_projectile_starts_at_wall_face_inside_host_cell() -> void:
+	# Host cell (3, 4), wall north → wall face is at y = 4.0 (top of
+	# cell). Projectile starts at (cell.x + 0.5, cell.y) = (3.5, 4.0)
+	# and travels south (direction (0, 1)) — the cell-space starting
+	# y = 4.0 is exactly the boundary between the wall cell (3, 3) and
+	# the host floor cell (3, 4).
+	var data := _make_timed_data(0.5)
+	var inst := ProjectileTrapInstance.create(data, Vector2i(3, 4), ProjectileTrapInstance.DIR_NORTH)
+	var spawned: ProjectileInstance = inst.tick(0.5)
+	assert_not_null(spawned)
+	assert_almost_eq(spawned.cell_pos.x, 3.5, 0.0001)
+	assert_almost_eq(spawned.cell_pos.y, 4.0, 0.0001)
+
+func test_spawned_projectile_direction_matches_fire_direction() -> void:
+	# Sanity: every wall-mount direction produces a projectile flying
+	# in the opposite cardinal direction.
+	var cases := [
+		[ProjectileTrapInstance.DIR_NORTH, Vector2i(0, 1)],
+		[ProjectileTrapInstance.DIR_SOUTH, Vector2i(0, -1)],
+		[ProjectileTrapInstance.DIR_EAST,  Vector2i(-1, 0)],
+		[ProjectileTrapInstance.DIR_WEST,  Vector2i(1, 0)],
+	]
+	for case in cases:
+		var wall: Vector2i = case[0]
+		var expected_dir: Vector2i = case[1]
+		var data := _make_timed_data(0.1)
+		var inst := ProjectileTrapInstance.create(data, Vector2i(3, 4), wall)
+		var spawned: ProjectileInstance = inst.tick(0.1)
+		assert_not_null(spawned)
+		assert_eq(spawned.direction, expected_dir, "wall=%s" % wall)

@@ -566,7 +566,7 @@ func _on_player_entered_cell() -> void:
 # we also gate explicitly so the state-machine clock doesn't drift if
 # we ever change `process_mode`. Cheap belt-and-braces.
 func _process(delta: float) -> void:
-	if _generator == null or _generator.traps.is_empty():
+	if _generator == null:
 		return
 	if _is_world_paused():
 		return
@@ -580,6 +580,57 @@ func _process(delta: float) -> void:
 				_on_trap_activated(trap, current)
 			TrapInstance.Event.DEACTIVATED:
 				_on_trap_deactivated(trap)
+	# Phase 8 Task 3 — Subtask C2. Tick wall-mounted projectile
+	# launchers (TIMED rollovers spawn projectiles) and every
+	# in-flight projectile, removing those that hit a wall this frame.
+	# Order matters: launchers first so a projectile spawned this
+	# frame also gets one tick of motion, instead of waiting until
+	# next frame to start moving.
+	_tick_projectile_launchers(delta)
+	_tick_projectiles(delta)
+
+func _tick_projectile_launchers(delta: float) -> void:
+	if _generator.projectile_traps.is_empty():
+		return
+	for ptrap in _generator.projectile_traps:
+		if ptrap == null:
+			continue
+		var spawned: ProjectileInstance = ptrap.tick(delta)
+		if spawned == null:
+			continue
+		_generator.projectiles.append(spawned)
+		if _dungeon_view != null:
+			_dungeon_view.spawn_projectile_visual(spawned)
+		# Launch sound. TIMED traps gate by hearing distance — same
+		# pattern as spike timed traps. PRESSURE_PLATE traps (C4) play
+		# unconditionally since the player is on the plate.
+		if ptrap.data.is_timed() and _player_within_projectile_trap_hearing(ptrap):
+			if ptrap.data.launch_sound != null:
+				SoundManager.play(ptrap.data.launch_sound)
+
+func _tick_projectiles(delta: float) -> void:
+	if _generator.projectiles.is_empty():
+		return
+	# Iterate by index then collect impacts so we can remove cleanly
+	# after the loop without invalidating the indexing. Modifying the
+	# array mid-iteration would skip entries.
+	var impacted: Array[ProjectileInstance] = []
+	for proj in _generator.projectiles:
+		if proj == null:
+			impacted.append(proj)
+			continue
+		var event: int = proj.tick(delta, _generator.grid, _generator.grid_width, _generator.grid_height)
+		if _dungeon_view != null:
+			_dungeon_view.update_projectile_visual(proj)
+		if event == ProjectileInstance.Event.IMPACT:
+			if _player_within_projectile_hearing(proj):
+				if proj.data.impact_sound != null:
+					SoundManager.play(proj.data.impact_sound)
+			if _dungeon_view != null:
+				_dungeon_view.despawn_projectile_visual(proj)
+			impacted.append(proj)
+	for proj in impacted:
+		_generator.projectiles.erase(proj)
 
 func _on_trap_activated(trap: TrapInstance, player_cell: Vector2i) -> void:
 	if _dungeon_view != null:
@@ -634,6 +685,37 @@ func _player_within_trap_hearing(trap: TrapInstance) -> bool:
 	var dist_tiles: float = float(abs(diff.x) + abs(diff.y))
 	var dist_world: float = dist_tiles * 4.6
 	return dist_world <= trap.data.hearing_distance
+
+# Same pattern as `_player_within_trap_hearing` but for wall-mounted
+# projectile launchers. Distance measured from the player to the
+# launcher's host cell — that's the visual / audio source location.
+# Used to gate `launch_sound` on TIMED traps so distant launchers
+# don't spam the audio mix.
+func _player_within_projectile_trap_hearing(ptrap: ProjectileTrapInstance) -> bool:
+	if _player_controller == null or ptrap == null or ptrap.data == null:
+		return false
+	if ptrap.data.hearing_distance <= 0.0:
+		return false
+	var diff: Vector2i = _player_controller.grid_pos - ptrap.cell
+	var dist_tiles: float = float(abs(diff.x) + abs(diff.y))
+	var dist_world: float = dist_tiles * 4.6
+	return dist_world <= ptrap.data.hearing_distance
+
+# Hearing gate for an in-flight projectile's IMPACT sound. The audio
+# source location is wherever the projectile died, so distance is
+# measured from the player to the projectile's current cell (which on
+# IMPACT has been clamped to the wall face). Same Manhattan-tiles ×
+# CELL_SIZE convention as the launcher / spike-trap gates.
+func _player_within_projectile_hearing(proj: ProjectileInstance) -> bool:
+	if _player_controller == null or proj == null or proj.data == null:
+		return false
+	if proj.data.hearing_distance <= 0.0:
+		return false
+	var proj_cell := Vector2i(int(floor(proj.cell_pos.x)), int(floor(proj.cell_pos.y)))
+	var diff: Vector2i = _player_controller.grid_pos - proj_cell
+	var dist_tiles: float = float(abs(diff.x) + abs(diff.y))
+	var dist_world: float = dist_tiles * 4.6
+	return dist_world <= proj.data.hearing_distance
 
 # Single damage entry point — applies `amount` to every party
 # member, then fires the standard feedback (camera shake + screen
