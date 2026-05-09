@@ -61,6 +61,16 @@ var _cluster_cells: Dictionary = {}
 # decoration and a launcher. Authoritative list — DungeonView iterates
 # this for rendering and Game ticks each entry's firing logic (C2).
 var projectile_traps: Array[ProjectileTrapInstance] = []
+# Every cell that lies on the projectile path of an already-placed
+# launcher (from the cell directly opposite the wall up to and
+# including the cell where the projectile dies — past the escape
+# junction, all the way to the terminating wall). The placer rejects
+# any new candidate whose path would cross a cell in this set, so two
+# launchers can never have overlapping fire lines. Catches the
+# crossfire cases the per-segment cap alone would miss: two launchers
+# in perpendicular corridors both targeting the same T-junction would
+# land the player in dual line of fire when they try to escape.
+var _projectile_path_cells: Dictionary = {}
 
 func configure(biome: BiomeData) -> void:
 	if biome == null:
@@ -98,6 +108,7 @@ func generate() -> void:
 	traps.clear()
 	_cluster_cells.clear()
 	projectile_traps.clear()
+	_projectile_path_cells.clear()
 	if room_count > 0:
 		_place_rooms()
 	_grow_maze()
@@ -2155,35 +2166,16 @@ func _place_corridor_projectile_traps(spawn: ProjectileTrapSpawn, segments: Arra
 			continue
 		# Cross-spawn cap: a corridor segment must hold AT MOST ONE
 		# launcher across all `ProjectileTrapSpawn` entries combined.
-		# Without this rule, two spawns each contributing one launcher
-		# could place them at opposite ends of the same corridor — the
-		# player walks into a corridor with launchers firing toward
-		# each other from both extremities, which reads as crossfire
-		# and undermines the "fire toward the junction" escape
-		# guarantee. (The per-spawn `corridor_max_per_segment` check
-		# below still applies on top, but only within the same spawn.)
+		# (The path-overlap rule below also catches same-segment
+		# placements, but this short-circuit avoids re-tracing every
+		# wall face inside an already-trapped segment for nothing.)
 		if _segment_has_projectile_trap(segment):
 			continue
-		# Build the candidate (cell, wall_dir) pool for this segment.
-		# A candidate is valid when:
-		#   - cell.x/y are in the segment (so the launcher's host cell
-		#     is itself a corridor cell, not a junction or room)
-		#   - cell + wall_dir is a WALL cell (where the launcher mounts)
-		#   - cell - wall_dir is a corridor floor (so the projectile has
-		#     somewhere to fly — the cell directly opposite the wall)
-		#   - tracing forward in fire_direction = -wall_dir reaches a
-		#     junction within `max_escape_distance` tiles without
-		#     hitting a wall first (the player's escape route)
-		#   - no cell along the projectile path (host cell + fire_dir
-		#     up to and including the junction) is the EXIT, holds a
-		#     CHEST, or holds a LEVER — projectiles crossing those
-		#     cells force the player to take damage on the way to a
-		#     reward / interactive point, which feels unfair
-		#   - the wall face isn't already in `_wall_faces_used`
-		#     (decorations register here too — a decoration could land
-		#     here later, but at this point the registry only holds
-		#     other projectile launchers since C1 runs before
-		#     `_place_wall_decorations()`)
+		# Build the candidate (cell, wall_dir, path) pool for this
+		# segment. `_projectile_launch_path` returns the full path on
+		# success and an empty array on rejection — see its comment
+		# for the candidate validity rules. We carry the path through
+		# so we don't have to re-trace it when registering the win.
 		var candidates: Array = []
 		for pos in segment:
 			if pos == entrance_pos or pos == exit_pos:
@@ -2196,9 +2188,10 @@ func _place_corridor_projectile_traps(spawn: ProjectileTrapSpawn, segments: Arra
 			if host_cell.object != null:
 				continue
 			for wall_dir: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
-				if not _is_launchable_wall(pos, wall_dir, junctions, max_escape):
+				var path: Array = _projectile_launch_path(pos, wall_dir, junctions, max_escape)
+				if path.is_empty():
 					continue
-				candidates.append([pos, wall_dir])
+				candidates.append([pos, wall_dir, path])
 		if candidates.is_empty():
 			continue
 		var max_n: int = max(1, spawn.corridor_max_per_segment)
@@ -2211,10 +2204,16 @@ func _place_corridor_projectile_traps(spawn: ProjectileTrapSpawn, segments: Arra
 				break
 			var pos: Vector2i = c[0]
 			var wall_dir: Vector2i = c[1]
-			# Re-check the face registry — a previous candidate in this
-			# loop may have claimed the same (cell, wall_dir).
+			var path: Array = c[2]
+			# Re-check the face registry AND path overlap — an earlier
+			# candidate in this same loop iteration may have claimed
+			# the face or laid down a path that this candidate's path
+			# now intersects. The path was traced before any of those
+			# claims, so we revalidate before committing.
 			var face_key: String = ProjectileTrapInstance.face_key(pos, wall_dir)
 			if _wall_faces_used.has(face_key):
+				continue
+			if _path_overlaps_existing(path):
 				continue
 			# Spreading rule — no graceful degrade per the spec; just
 			# skip the candidate if too close to an existing launcher.
@@ -2223,8 +2222,19 @@ func _place_corridor_projectile_traps(spawn: ProjectileTrapSpawn, segments: Arra
 			var inst := ProjectileTrapInstance.create(spawn.trap, pos, wall_dir)
 			projectile_traps.append(inst)
 			_wall_faces_used[face_key] = true
+			for p in path:
+				_projectile_path_cells[p] = true
 			placed_in_segment += 1
 
+func _path_overlaps_existing(path: Array) -> bool:
+	for p in path:
+		if _projectile_path_cells.has(p):
+			return true
+	return false
+
+# Returns the projectile's full flight path as Array[Vector2i] when
+# the (cell, wall_dir) candidate is launchable; empty array otherwise.
+#
 # A wall face is launchable iff:
 #   - the wall_dir neighbour is a WALL (mount point)
 #   - tracing forward in fire_direction = -wall_dir, the FULL path
@@ -2236,20 +2246,30 @@ func _place_corridor_projectile_traps(spawn: ProjectileTrapSpawn, segments: Arra
 #   - somewhere on that path within `max_escape_distance` tiles there
 #     is a junction (corridor cell with 3+ corridor neighbours) — the
 #     player's escape route from the firing line
+#   - no cell on the path is already on another launcher's path (no
+#     crossfire — the player escaping launcher A by reaching a
+#     junction must not walk into launcher B's line of fire there)
 #   - the face isn't already claimed
 #
 # The path is traced past the escape junction all the way to the
 # terminating wall: the projectile in C2 will fly the entire way, and
 # a chest / lever / exit anywhere along the flight is a problem
 # regardless of how far past the junction it sits.
-func _is_launchable_wall(cell: Vector2i, wall_dir: Vector2i, junctions: Dictionary, max_escape: int) -> bool:
+#
+# Returning the path (instead of a bool) lets the caller register the
+# winning path cells in `_projectile_path_cells` without recomputing.
+func _projectile_launch_path(cell: Vector2i, wall_dir: Vector2i, junctions: Dictionary, max_escape: int) -> Array:
+	var empty: Array = []
 	var wx: int = cell.x + wall_dir.x
 	var wy: int = cell.y + wall_dir.y
 	if not _in_bounds(wx, wy):
-		return false
+		return empty
 	if grid[wx][wy].cell_type != GridCell.CellType.WALL:
-		return false
+		return empty
+	if _wall_faces_used.has(ProjectileTrapInstance.face_key(cell, wall_dir)):
+		return empty
 	var fire_dir: Vector2i = -wall_dir
+	var path: Array = []
 	var found_junction_within_escape: bool = false
 	# Hard cap on iterations as a safety net — every projectile must
 	# eventually hit a wall (the grid border is wall), so this loop
@@ -2261,7 +2281,7 @@ func _is_launchable_wall(cell: Vector2i, wall_dir: Vector2i, junctions: Dictiona
 		var nx: int = cell.x + fire_dir.x * step
 		var ny: int = cell.y + fire_dir.y * step
 		if not _in_bounds(nx, ny):
-			return false
+			return empty
 		var nc: GridCell = grid[nx][ny]
 		# Wall terminates projectile flight — natural end of path.
 		if nc.cell_type == GridCell.CellType.WALL:
@@ -2269,10 +2289,10 @@ func _is_launchable_wall(cell: Vector2i, wall_dir: Vector2i, junctions: Dictiona
 		# Exit on path — projectiles fly onto the exit cell, forcing
 		# damage on the player as they leave the level.
 		if nc.cell_type == GridCell.CellType.EXIT:
-			return false
+			return empty
 		# Any other non-FLOOR cell type (e.g. ENTRANCE) — bail.
 		if nc.cell_type != GridCell.CellType.FLOOR:
-			return false
+			return empty
 		var npos := Vector2i(nx, ny)
 		# Path must stay in corridors. A projectile flying out of the
 		# corridor into a room could become unavoidable since rooms
@@ -2280,7 +2300,7 @@ func _is_launchable_wall(cell: Vector2i, wall_dir: Vector2i, junctions: Dictiona
 		# Subtask C5 handles room placement (where the projectile is
 		# constrained to stay inside the room instead).
 		if classify_cell(npos) != ObjectSpawn.PLACEMENT_CORRIDOR:
-			return false
+			return empty
 		# Reject if the path crosses an interactive object — chests
 		# and levers are reward / interactive points the player has
 		# to walk to deliberately, and being shot on the way feels
@@ -2290,18 +2310,24 @@ func _is_launchable_wall(cell: Vector2i, wall_dir: Vector2i, junctions: Dictiona
 		if nc.object != null and nc.object.data != null:
 			var cat: int = nc.object.data.category
 			if cat == ObjectData.Category.CHEST or cat == ObjectData.Category.LEVER:
-				return false
+				return empty
+		# No crossfire — reject if any cell on this path is already
+		# on another launcher's projectile path. Catches the case
+		# two perpendicular corridors both target the same T-junction
+		# (the escape route from launcher A becomes the firing line
+		# of launcher B), and any other path overlap.
+		if _projectile_path_cells.has(npos):
+			return empty
 		# Track junction-within-escape-budget. Continue past it — the
 		# projectile keeps flying, and chests / levers past the junction
 		# matter too.
 		if junctions.has(npos) and step <= max_escape:
 			found_junction_within_escape = true
+		path.append(npos)
 		step += 1
 	if not found_junction_within_escape:
-		return false
-	if _wall_faces_used.has(ProjectileTrapInstance.face_key(cell, wall_dir)):
-		return false
-	return true
+		return empty
+	return path
 
 # True iff any cell in `segment` already hosts a placed projectile-trap
 # launcher. Used to enforce the cross-spawn one-launcher-per-segment

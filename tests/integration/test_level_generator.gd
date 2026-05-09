@@ -2728,6 +2728,44 @@ func test_projectile_path_does_not_cross_exit_cell() -> void:
 					break
 				step += 1
 
+func test_projectile_paths_never_overlap() -> void:
+	# Rule: no two launchers' projectile paths share any cell. Catches
+	# the crossfire-at-T-junction case the per-segment cap alone would
+	# miss — two launchers in perpendicular corridors both targeting
+	# the SAME junction would trap the player escaping launcher A in
+	# launcher B's line of fire.
+	#
+	# Pump the level full of launchers across multiple spawns + seeds,
+	# then verify that for every pair of placed launchers, walking
+	# both their paths until the wall produces no shared cell.
+	var biome := _make_biome()
+	var trap_a := _make_projectile_trap_data(8, 0)
+	var trap_b := _make_projectile_trap_data(8, 0)
+	biome.projectile_trap_spawns = [
+		_make_projectile_trap_spawn(trap_a, 1.0, 1),
+		_make_projectile_trap_spawn(trap_b, 1.0, 1),
+	]
+	var any_pair_seen: bool = false
+	for s in [12345, 99999, 55555, 42, 31337]:
+		var gen := _make_generator(biome, s)
+		if gen.projectile_traps.size() < 2:
+			continue
+		any_pair_seen = true
+		# Trace each launcher's full path once, then compare pairwise.
+		var paths: Array = []
+		for inst in gen.projectile_traps:
+			paths.append(_projectile_path_until_wall(gen, inst))
+		for i in range(paths.size()):
+			var path_i_set: Dictionary = {}
+			for p in paths[i]:
+				path_i_set[p] = true
+			for j in range(i + 1, paths.size()):
+				for q in paths[j]:
+					assert_false(path_i_set.has(q),
+						"launcher paths %d and %d overlap at %s (seed %d)" % [i, j, q, s])
+	assert_true(any_pair_seen,
+		"no seed produced 2+ launchers — path-overlap test scenario broken")
+
 func test_projectile_at_most_one_launcher_per_segment_cross_spawn() -> void:
 	# Rule: even when multiple `ProjectileTrapSpawn` entries are
 	# configured, every corridor segment holds AT MOST ONE launcher
