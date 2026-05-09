@@ -351,16 +351,20 @@ Split into three incremental sub-PRs so each one has something testable in-engin
 3. ✅ Tests: unit (`test_trap_spawn` extended — room field defaults, `uses_room_density` matrix); integration (`test_level_generator` extended — zero-chance places nothing, room-only landing, `room_min_spacing` honoured cross-room and cross-spawn, coverage falls within rolled range, entrance/exit excluded, `allow_mixed_room_traps = false` blocks second spawn from sharing rooms, `= true` allows mixed rooms).
 4. ⏳ Manual asset work (developer): bump `room_chance` and `room_coverage_min/max_percent` on a `TrapSpawn` in `forest.tres` to validate room placement in-engine. Mix two spawns with `allow_mixed_room_traps` flipped differently to test exclusivity.
 
-###### Subtask B3 — Path-safety validators + chest/lever adjacency (deferred)
-- STEP-trap-free BFS from entrance → exit AND entrance → every chest / lever / floor-object cell; rollback step traps until satisfied (so step traps never gate access to objects placed during level generation)
-- TIMED-trap rest-cell validator: every timed trap has a non-trap cell within K Manhattan tiles
-- Chest/lever timed-trap adjacency rule: every chest and every lever has at least one 4-adjacent cell free of timed traps so the player has somewhere safe to stand while waiting out cycles
-- Tests for all validators and atomic rollback when constraints can't be met
+###### Subtask B3 — Path-safety validators + chest/lever adjacency ✅
+1. ✅ **Trap placement skips floor-item cells** — `_eligible_segment_cells`, `_eligible_room_cells`, and `_trap_candidates_for_spawn` all skip cells where `cell.items` is non-empty, preventing step traps from landing on floor keys placed by `_place_key_doors`.
+2. ✅ **`_remove_trap_at(pos)`** — single entry point for trap removal: clears `cell.trap`, removes from the `traps` flat list, removes from `_cluster_cells` if present. Used by both validators below.
+3. ✅ **Chest/lever timed-trap adjacency** (`_validate_chest_lever_timed_adjacency`) — scans every chest/lever cell; if no 4-adjacent walkable cell is free of TIMED traps, removes one timed trap from a neighbour. Step traps adjacent are OK (they're one-shot, the player can wait off-cell after triggering).
+4. ✅ **Step-trap-free reachability** (`_validate_step_trap_reachability`) — Dijkstra from entrance to ALL reachable cells: step-trap cells cost 100, regular walkable cells cost 1, blocking objects/walls impassable, doors passable. Traces cheapest paths to exit + every chest (via adjacent cell) + every lever + every floor-item cell, removes every step trap along those paths in one batch. Runs AFTER `_place_items()` so floor-item positions are known. Guarantees damage-free routes to all interactive content while preserving trap density (~30 removals on a 200+ trap level, avg 135 surviving).
+5. ✅ **Timed-trap safe distance** (`_validate_timed_trap_safe_distance`) — enforces `room_max_distance_to_safe_cell` globally (not just within rooms). Corridor clusters meeting room edges can create long timed-trap runs exceeding the per-room guarantee; this pass removes timed traps until every walkable cell has a non-timed-trap walkable cell within K tiles (K = max across all spawns).
+6. ✅ Tests: integration (`test_level_generator` extended — exit reachable without step traps across 5 seeds with dense configs, chests reachable via adjacent cell, floor items reachable, average trap count stays high >50, `_remove_trap_at` clears cell + list + cluster_cells, traps never share cells with floor items, chest/lever timed adjacency guaranteed, timed-trap safe distance enforced globally, step traps adjacent to chests are allowed).
+7. ⏳ Manual playtest (developer): run in-engine with `forest.tres` using step trap variant, verify: (a) there's always a damage-free path to exit, chests, levers, and items, (b) trap density is visually high, (c) chests near timed traps have a safe waiting spot, (d) room-to-corridor transitions don't create excessively long timed-trap runs.
 
 #### Task 3 follow-ups (after Subtask B)
 - Fireball trap (pressure plate or continuous)
 - Immobilize trap (player can't move, can turn and attack)
 - Alert trap (aggros enemies in 10-tile radius — needs Phase 10 enemies first)
+- Sub-biome portal reachability: when Phase 15 Task 1 adds `SUB_EXIT` portal cells, `_validate_step_trap_reachability()` must include them as targets so there is always a step-trap-free path from the entrance to every sub-biome portal
 
 #### Task 4 — Wall-mounted decorations ✅ (code; awaits manual asset wiring)
 Paintings, torches, lanterns mounted on wall faces (a side of a floor cell that abuts a wall cell). No interaction; pure ambiance. Animated decorations (torches) supported via `SpriteFrames`.
