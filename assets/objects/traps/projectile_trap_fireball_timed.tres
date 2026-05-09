@@ -7,6 +7,7 @@
 script = ExtResource("1_jmvhx")
 name_key = "projectile_trap.fireball_timed.name"
 description_key = "projectile_trap.fireball_timed.description"
+max_escape_distance = 3
 launcher_texture = ExtResource("1_umsce")
 launcher_world_height = 2.0
 launcher_y_offset = -0.6
