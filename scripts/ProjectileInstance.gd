@@ -128,6 +128,33 @@ func _clamped_to_wall_face(wall_cell: Vector2i) -> Vector2:
 		p.y = float(wall_cell.y + 1)
 	return p
 
+# Returns true iff this projectile should apply damage to a player at
+# `player_cell` THIS frame. Sets `damage_latch = true` on success so a
+# follow-up call (next frame, or another caller in the same frame)
+# returns false — a single projectile damages once per flight, full
+# stop. Phase 8 Task 3 — Subtask C3.
+#
+# Game.gd polls this each frame after `tick()`, and when it returns
+# true calls `_apply_party_damage(data.damage)` (which handles all 3
+# party members + camera shake + screen flash + pain sound — same
+# pipeline spike traps use, so the feel is consistent).
+#
+# Pure: caller never has to remember to set the latch — that's the
+# whole point of the wrapper. Returning a bool keeps the call site a
+# single `if`. Variants with `damage <= 0` (harmless prop projectiles)
+# always return false, so the latch never trips and follow-up logic
+# in C5/C6 can reuse it without paying for those variants.
+func consume_damage_for_player(player_cell: Vector2i) -> bool:
+	if data == null or damage_latch:
+		return false
+	if data.damage <= 0:
+		return false
+	var pc := Vector2i(int(floor(cell_pos.x)), int(floor(cell_pos.y)))
+	if pc != player_cell:
+		return false
+	damage_latch = true
+	return true
+
 # Picks the camera-relative view of a projectile flying in `direction`
 # given a camera looking in `camera_forward_xz` (Vector2 of the
 # camera's forward direction projected onto the horizontal XZ plane,
