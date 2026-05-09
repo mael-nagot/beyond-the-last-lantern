@@ -42,6 +42,14 @@ func _ready() -> void:
 	var gen = LevelGenerator.new()
 	add_child(gen)
 	gen.configure(biome)
+	# Capture the level's RNG seed so the same layout can be
+	# reproduced (e.g. from a bug report). `randi()` reads the
+	# auto-randomized state Godot sets at startup; `seed()` then
+	# locks the rest of generation to that value, so re-running with
+	# the same seed produces an identical dungeon.
+	var level_seed: int = randi()
+	seed(level_seed)
+	print("[LevelGenerator] level seed = %d" % level_seed)
 	gen.generate()
 
 	dungeon_view.biome = biome
