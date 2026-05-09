@@ -2268,6 +2268,22 @@ func test_floor_items_reachable_without_step_traps() -> void:
 				assert_true(reachable.has(pos),
 					"floor item at %s must be reachable without step traps (seed %d)" % [pos, s])
 
+func test_levers_reachable_without_step_traps() -> void:
+	for s in [12345, 99999, 55555]:
+		var biome := _make_dense_step_trap_biome()
+		biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)]
+		var gen := _make_generator(biome, s)
+		var reachable := _bfs_no_step_traps(gen, gen.entrance_pos)
+		var levers := _all_lever_cells(gen)
+		for lever_pos in levers:
+			var adjacent_reachable := false
+			for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				if reachable.has(lever_pos + d):
+					adjacent_reachable = true
+					break
+			assert_true(adjacent_reachable,
+				"lever at %s must have a step-trap-free adjacent cell reachable from entrance (seed %d)" % [lever_pos, s])
+
 func test_step_trap_validator_preserves_high_trap_count() -> void:
 	var total_traps := 0
 	var runs := 5

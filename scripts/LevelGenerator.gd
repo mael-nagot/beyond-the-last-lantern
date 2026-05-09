@@ -1966,7 +1966,7 @@ func _validate_step_trap_reachability() -> void:
 			var pos := Vector2i(x, y)
 			if cell.object != null and cell.object.data != null:
 				var cat: int = cell.object.data.category
-				if cat == ObjectData.Category.CHEST:
+				if cat == ObjectData.Category.CHEST or cat == ObjectData.Category.LEVER:
 					# Blocking — find cheapest reachable 4-adjacent cell.
 					var best_n := Vector2i(-1, -1)
 					var best_cost := 999999
@@ -1977,9 +1977,6 @@ func _validate_step_trap_reachability() -> void:
 							best_n = n
 					if best_n != Vector2i(-1, -1):
 						targets.append(best_n)
-				elif cat == ObjectData.Category.LEVER:
-					if prev.has(pos) or pos == entrance_pos:
-						targets.append(pos)
 			if not cell.items.is_empty():
 				if prev.has(pos) or pos == entrance_pos:
 					targets.append(pos)
