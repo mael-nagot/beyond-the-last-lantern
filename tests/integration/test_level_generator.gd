@@ -2228,11 +2228,52 @@ func test_exit_reachable_without_step_traps() -> void:
 		assert_true(reachable.has(gen.exit_pos),
 			"exit should be reachable without stepping on step traps (seed %d)" % s)
 
-func test_exit_path_validator_preserves_high_trap_count() -> void:
+func test_chests_reachable_without_step_traps() -> void:
+	for s in [12345, 99999, 55555]:
+		var biome := _make_dense_step_trap_biome()
+		biome.objects = [_make_object_spawn(_make_chest(), 3, 3)]
+		var gen := _make_generator(biome, s)
+		var reachable := _bfs_no_step_traps(gen, gen.entrance_pos)
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				var cell: GridCell = gen.grid[x][y]
+				if cell.object == null or cell.object.data == null:
+					continue
+				if cell.object.data.category != ObjectData.Category.CHEST:
+					continue
+				var pos := Vector2i(x, y)
+				var adjacent_reachable := false
+				for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+					if reachable.has(pos + d):
+						adjacent_reachable = true
+						break
+				assert_true(adjacent_reachable,
+					"chest at %s must have a step-trap-free adjacent cell reachable from entrance (seed %d)" % [pos, s])
+
+func test_floor_items_reachable_without_step_traps() -> void:
+	var item := _make_item()
+	var loot := _make_loot_entry(item, 1, LootEntry.PLACEMENT_ANY)
+	for s in [12345, 99999, 55555]:
+		var biome := _make_dense_step_trap_biome()
+		biome.floor_loot = [loot]
+		biome.floor_items_min = 5
+		biome.floor_items_max = 8
+		var gen := _make_generator(biome, s)
+		var reachable := _bfs_no_step_traps(gen, gen.entrance_pos)
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				if gen.grid[x][y].items.is_empty():
+					continue
+				var pos := Vector2i(x, y)
+				assert_true(reachable.has(pos),
+					"floor item at %s must be reachable without step traps (seed %d)" % [pos, s])
+
+func test_step_trap_validator_preserves_high_trap_count() -> void:
 	var total_traps := 0
 	var runs := 5
 	for s in [12345, 99999, 55555, 31337, 42]:
 		var biome := _make_dense_step_trap_biome()
+		biome.objects = [_make_object_spawn(_make_chest(), 3, 3)]
 		var gen := _make_generator(biome, s)
 		total_traps += gen.traps.size()
 	var avg: float = float(total_traps) / float(runs)
@@ -2320,6 +2361,28 @@ func test_chest_lever_timed_adjacency_guarantees_safe_neighbour() -> void:
 						break
 				assert_true(has_safe,
 					"chest/lever at %s must have a non-timed-trap walkable neighbour (seed %d)" % [pos, s])
+
+func test_timed_trap_safe_distance_enforced_globally() -> void:
+	var biome := _make_biome()
+	var timed := _make_trap_data(TrapData.Trigger.TIMED)
+	var spawn := _make_trap_spawn(timed, 80, 80, ObjectSpawn.PLACEMENT_ANY)
+	spawn.corridor_segment_chance = 1.0
+	spawn.corridor_traps_per_run_min = 4
+	spawn.corridor_traps_per_run_max = 99
+	spawn.room_chance = 1.0
+	spawn.room_coverage_min_percent = 99.0
+	spawn.room_coverage_max_percent = 99.0
+	spawn.room_max_distance_to_safe_cell = 3
+	biome.trap_spawns = [spawn]
+	for s in [12345, 99999, 55555]:
+		var gen := _make_generator(biome, s)
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				var pos := Vector2i(x, y)
+				if not gen._is_walkable_cell(pos):
+					continue
+				assert_true(gen._has_safe_timed_cell_within(pos, 3),
+					"every walkable cell must have a non-timed-trap cell within 3 tiles (seed %d, pos %s)" % [s, pos])
 
 func test_step_traps_adjacent_to_chests_are_allowed() -> void:
 	var biome := _make_biome()

@@ -103,8 +103,9 @@ func generate() -> void:
 	_place_key_doors()
 	_place_traps()
 	_validate_chest_lever_timed_adjacency()
-	_validate_exit_path_step_traps()
+	_validate_timed_trap_safe_distance()
 	_place_items()
+	_validate_step_trap_reachability()
 	_place_wall_decorations()
 
 # -------------------------------------------------------
@@ -1906,16 +1907,16 @@ func _validate_chest_lever_timed_adjacency() -> void:
 					_remove_trap_at(n)
 					break
 
-func _validate_exit_path_step_traps() -> void:
-	# Dijkstra from entrance to exit. Step-trap cells cost 100, regular
-	# walkable cells cost 1. Blocking objects and walls are impassable.
-	# Doors are passable (openable by the player). The returned path
-	# minimises the number of step traps crossed; we then remove every
-	# step trap along it in one batch.
+func _validate_step_trap_reachability() -> void:
+	# Dijkstra from entrance to ALL reachable cells. Step-trap cells
+	# cost 100, regular walkable cells cost 1. Blocking objects and
+	# walls are impassable. Doors are passable (openable by the player).
+	# After Dijkstra, trace cheapest paths to exit + every chest (via
+	# an adjacent cell) + every lever + every floor-item cell and remove
+	# every step trap along those paths in one batch.
 	var STEP_COST := 100
 	var dist: Dictionary = {entrance_pos: 0}
 	var prev: Dictionary = {}
-	# Min-heap emulated via sorted insertion (grid is small — 31×31 max).
 	var open: Array = [[0, entrance_pos]]
 
 	while not open.is_empty():
@@ -1924,8 +1925,6 @@ func _validate_exit_path_step_traps() -> void:
 		var current: Vector2i = entry[1]
 		if cost > dist.get(current, 999999):
 			continue
-		if current == exit_pos:
-			break
 		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
 			var nx: int = current.x + d.x
 			var ny: int = current.y + d.y
@@ -1944,7 +1943,6 @@ func _validate_exit_path_step_traps() -> void:
 			if new_dist < dist.get(npos, 999999):
 				dist[npos] = new_dist
 				prev[npos] = current
-				# Binary-search insert to keep `open` sorted by cost.
 				var lo := 0
 				var hi := open.size()
 				while lo < hi:
@@ -1955,21 +1953,104 @@ func _validate_exit_path_step_traps() -> void:
 						hi = mid
 				open.insert(lo, [new_dist, npos])
 
-	if not prev.has(exit_pos):
+	# Collect all required targets: exit, chests (via adjacent cell),
+	# levers, floor-item cells.
+	var targets: Array = []
+	if prev.has(exit_pos):
+		targets.append(exit_pos)
+	else:
 		push_warning("LevelGenerator: no walkable path from entrance to exit — cannot clear step traps")
-		return
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var cell: GridCell = grid[x][y]
+			var pos := Vector2i(x, y)
+			if cell.object != null and cell.object.data != null:
+				var cat: int = cell.object.data.category
+				if cat == ObjectData.Category.CHEST:
+					# Blocking — find cheapest reachable 4-adjacent cell.
+					var best_n := Vector2i(-1, -1)
+					var best_cost := 999999
+					for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+						var n: Vector2i = pos + d
+						if dist.has(n) and dist[n] < best_cost:
+							best_cost = dist[n]
+							best_n = n
+					if best_n != Vector2i(-1, -1):
+						targets.append(best_n)
+				elif cat == ObjectData.Category.LEVER:
+					if prev.has(pos) or pos == entrance_pos:
+						targets.append(pos)
+			if not cell.items.is_empty():
+				if prev.has(pos) or pos == entrance_pos:
+					targets.append(pos)
 
-	# Walk the path back and collect step-trap positions.
-	var path_traps: Array = []
-	var cursor: Vector2i = exit_pos
-	while cursor != entrance_pos:
-		var cell: GridCell = grid[cursor.x][cursor.y]
-		if cell.trap != null and cell.trap.data != null and cell.trap.data.is_step():
-			path_traps.append(cursor)
-		cursor = prev[cursor]
+	# Trace back from each target and collect step-trap cells.
+	var traps_to_remove: Dictionary = {}
+	for target in targets:
+		var cursor: Vector2i = target
+		while cursor != entrance_pos:
+			if not prev.has(cursor):
+				break
+			var c: GridCell = grid[cursor.x][cursor.y]
+			if c.trap != null and c.trap.data != null and c.trap.data.is_step():
+				traps_to_remove[cursor] = true
+			cursor = prev[cursor]
 
-	for pos in path_traps:
+	for pos in traps_to_remove:
 		_remove_trap_at(pos)
+
+func _validate_timed_trap_safe_distance() -> void:
+	# Enforce room_max_distance_to_safe_cell globally (not just within
+	# rooms during placement). After all trap passes, corridor clusters
+	# meeting room edges can create long timed-trap runs that exceed the
+	# per-room guarantee. This pass removes timed traps until every
+	# walkable cell has a non-timed-trap walkable cell within K tiles.
+	var k := 0
+	for spawn in trap_spawns_pool:
+		if spawn != null and spawn.room_max_distance_to_safe_cell > k:
+			k = spawn.room_max_distance_to_safe_cell
+	if k <= 0:
+		return
+	var changed := true
+	while changed:
+		changed = false
+		for x in range(grid_width):
+			for y in range(grid_height):
+				var pos := Vector2i(x, y)
+				if not _is_walkable_cell(pos):
+					continue
+				if _has_safe_timed_cell_within(pos, k):
+					continue
+				# This cell is too far from any non-timed-trap walkable
+				# cell. If it has a timed trap, remove it.
+				var cell: GridCell = grid[x][y]
+				if cell.trap != null and cell.trap.data != null and cell.trap.data.is_timed():
+					_remove_trap_at(pos)
+					changed = true
+
+func _is_walkable_cell(pos: Vector2i) -> bool:
+	if not _in_bounds(pos.x, pos.y):
+		return false
+	var cell: GridCell = grid[pos.x][pos.y]
+	if cell.cell_type == GridCell.CellType.WALL:
+		return false
+	if cell.object != null and cell.object.data != null and cell.object.data.blocks_movement:
+		return false
+	return true
+
+func _has_safe_timed_cell_within(target: Vector2i, radius: int) -> bool:
+	for dx in range(-radius, radius + 1):
+		var max_dy: int = radius - abs(dx)
+		for dy in range(-max_dy, max_dy + 1):
+			var n := target + Vector2i(dx, dy)
+			if not _in_bounds(n.x, n.y):
+				continue
+			if not _is_walkable_cell(n):
+				continue
+			var nc: GridCell = grid[n.x][n.y]
+			if nc.trap == null or not nc.trap.data.is_timed():
+				return true
+	return false
 
 # -------------------------------------------------------
 # Items
