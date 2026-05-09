@@ -65,6 +65,7 @@ func test_room_density_defaults() -> void:
 	assert_eq(spawn.room_coverage_max_percent, 30.0)
 	assert_eq(spawn.room_min_spacing, 0)
 	assert_true(spawn.allow_mixed_room_traps)
+	assert_eq(spawn.room_max_distance_to_safe_cell, 0)
 
 func test_uses_room_density_false_by_default() -> void:
 	var spawn := TrapSpawn.new()

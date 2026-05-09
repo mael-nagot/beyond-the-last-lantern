@@ -1669,6 +1669,14 @@ func _place_room_traps(spawn: TrapSpawn, cells_by_type: Dictionary) -> void:
 				break
 			if _too_close_to_room_traps(pos, room, spawn.room_min_spacing):
 				continue
+			# Gameplay rule: every walkable cell (in or just outside
+			# the room) must have a non-trap walkable cell within
+			# `room_max_distance_to_safe_cell` Manhattan tiles. Caps
+			# realised coverage when the rule is set, so dense room
+			# rolls can't leave the player without a step-to-safety.
+			if spawn.room_max_distance_to_safe_cell > 0 \
+					and _placement_would_isolate_a_cell(pos, room, spawn.room_max_distance_to_safe_cell):
+				continue
 			var inst := TrapInstance.create(spawn.trap, pos)
 			grid[pos.x][pos.y].trap = inst
 			traps.append(inst)
@@ -1716,6 +1724,66 @@ func _too_close_to_room_traps(pos: Vector2i, room: Rect2i, min_spacing: int) -> 
 			continue
 		var d: int = abs(pos.x - inst.cell.x) + abs(pos.y - inst.cell.y)
 		if d < min_spacing:
+			return true
+	return false
+
+# Returns true iff committing a trap at `candidate` would leave at
+# least one walkable cell (inside the room OR within the buffer zone
+# around it — the corridor-adjacent cell counts as valid retreat) more
+# than `radius` Manhattan tiles from the nearest non-trap walkable
+# cell. Used as a pre-placement guard for the room-density pass to
+# enforce `TrapSpawn.room_max_distance_to_safe_cell`.
+func _placement_would_isolate_a_cell(candidate: Vector2i, room: Rect2i, radius: int) -> bool:
+	# Examine every walkable cell in the room AND a 1-cell margin around
+	# it. A cell just outside the room can also lose its safe neighbour
+	# if all its in-room neighbours are trapped, but checking a margin
+	# of `radius` would be excessive — a 1-cell margin captures the
+	# case where the corridor IS the retreat for an edge room cell.
+	var x0: int = room.position.x - 1
+	var y0: int = room.position.y - 1
+	var x1: int = room.position.x + room.size.x
+	var y1: int = room.position.y + room.size.y
+	for cx in range(x0, x1 + 1):
+		for cy in range(y0, y1 + 1):
+			if not _in_bounds(cx, cy):
+				continue
+			var cpos := Vector2i(cx, cy)
+			if not _is_walkable_room_cell(cpos):
+				continue
+			if not _has_safe_walkable_within(cpos, candidate, radius):
+				return true
+	return false
+
+# True when `pos` is a floor cell with no blocking object — i.e. a
+# cell the player could stand on. Trap presence is intentionally
+# ignored here; the safety check below handles "trapped vs. safe".
+func _is_walkable_room_cell(pos: Vector2i) -> bool:
+	if not _in_bounds(pos.x, pos.y):
+		return false
+	var cell: GridCell = grid[pos.x][pos.y]
+	if cell.cell_type != GridCell.CellType.FLOOR:
+		return false
+	if cell.object != null and cell.object.data != null and cell.object.data.blocks_movement:
+		return false
+	return true
+
+# Returns true iff at least one cell within `radius` Manhattan tiles
+# of `target` is a walkable, non-trap floor cell. `extra_trap` is the
+# tentative trap cell currently being evaluated — treated as trapped
+# during the scan even though it isn't yet committed to the grid.
+func _has_safe_walkable_within(target: Vector2i, extra_trap: Vector2i, radius: int) -> bool:
+	for dx in range(-radius, radius + 1):
+		var max_dy: int = radius - abs(dx)
+		for dy in range(-max_dy, max_dy + 1):
+			var n := target + Vector2i(dx, dy)
+			if not _in_bounds(n.x, n.y):
+				continue
+			if n == extra_trap:
+				continue
+			if not _is_walkable_room_cell(n):
+				continue
+			if grid[n.x][n.y].trap != null:
+				continue
 			return true
 	return false
 

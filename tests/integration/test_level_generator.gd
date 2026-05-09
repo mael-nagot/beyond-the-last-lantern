@@ -833,6 +833,55 @@ func test_room_density_skips_entrance_and_exit() -> void:
 	assert_null(gen.grid[gen.entrance_pos.x][gen.entrance_pos.y].trap)
 	assert_null(gen.grid[gen.exit_pos.x][gen.exit_pos.y].trap)
 
+func test_room_max_distance_to_safe_cell_keeps_retreat_within_radius() -> void:
+	# With safe-cell radius = 2 and aggressive coverage, every walkable
+	# cell in (or just outside) every room must have a non-trap
+	# walkable cell within 2 Manhattan tiles. The placer rejects
+	# candidates that would isolate any cell.
+	for seed_n in [101, 202, 303, 404, 505]:
+		var biome := _make_biome()
+		var spawn := _make_room_density_spawn(_make_trap_data(), 1.0, 70.0, 90.0, 0)
+		spawn.room_max_distance_to_safe_cell = 2
+		biome.trap_spawns = [spawn]
+		var gen := _make_generator(biome, seed_n)
+		for room_obj in gen._room_rects:
+			var room: Rect2i = room_obj as Rect2i
+			# Check every walkable cell in the room AND a 1-cell margin.
+			var x0: int = room.position.x - 1
+			var y0: int = room.position.y - 1
+			var x1: int = room.position.x + room.size.x
+			var y1: int = room.position.y + room.size.y
+			for cx in range(x0, x1 + 1):
+				for cy in range(y0, y1 + 1):
+					if cx < 0 or cx >= gen.grid_width or cy < 0 or cy >= gen.grid_height:
+						continue
+					var cpos := Vector2i(cx, cy)
+					var cell: GridCell = gen.grid[cx][cy]
+					if cell.cell_type != GridCell.CellType.FLOOR:
+						continue
+					if cell.object != null and cell.object.data != null and cell.object.data.blocks_movement:
+						continue
+					# Find a non-trap walkable cell within radius 2.
+					var found := false
+					for dx in range(-2, 3):
+						var max_dy: int = 2 - abs(dx)
+						for dy in range(-max_dy, max_dy + 1):
+							var n := cpos + Vector2i(dx, dy)
+							if n.x < 0 or n.x >= gen.grid_width or n.y < 0 or n.y >= gen.grid_height:
+								continue
+							var ncell: GridCell = gen.grid[n.x][n.y]
+							if ncell.cell_type != GridCell.CellType.FLOOR:
+								continue
+							if ncell.object != null and ncell.object.data != null and ncell.object.data.blocks_movement:
+								continue
+							if ncell.trap == null:
+								found = true
+								break
+						if found:
+							break
+					assert_true(found,
+						"seed %d: cell %s in/near room %s has no non-trap walkable cell within 2 Manhattan tiles" % [seed_n, cpos, room])
+
 func test_room_density_exclusivity_blocks_second_spawn() -> void:
 	# Two spawns targeting rooms. Spawn A (chance < 1) leaves some
 	# rooms untrapped — those remain available for spawn B. Spawn B

@@ -75,8 +75,21 @@ extends Resource
 # existing trap INSIDE THE SAME ROOM (cross-spawn — also respects
 # traps placed by earlier spawns). 0 = no spacing rule, traps may be
 # 4-adjacent to each other. 1 = no two adjacent (chess-king-style
-# spread). 2+ = visibly scattered.
+# spread). 2+ = visibly scattered. This is a VISUAL rule — it
+# controls how clustered the trap art looks.
 @export var room_min_spacing: int = 0
+# Max Manhattan distance from any walkable cell in the room to a
+# non-trap walkable cell. With high coverage rolls, dense rooms can
+# leave the player surrounded by traps with no foothold to retreat
+# to — this rule is the GAMEPLAY guarantee that a step-to-safety is
+# always within reach. 0 = disabled. 2 means every walkable cell has
+# a non-trap walkable cell within 2 Manhattan tiles. Enforced
+# pre-placement: a candidate trap that would violate the rule for any
+# walkable cell is rejected, so the placer naturally caps coverage at
+# whatever the rule allows. The check considers cells inside AND just
+# outside the room — corridor cells adjacent to the room count as
+# valid retreat (the player can step out).
+@export var room_max_distance_to_safe_cell: int = 0
 # When true, this spawn's room pass may add traps to a room that
 # already holds traps from an earlier spawn's pass — useful for
 # "this room has both step AND timed hazards" variety. When false,
