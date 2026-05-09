@@ -448,31 +448,19 @@ func test_items_avoid_trap_cells() -> void:
 			"items should not pile on trap cell (%d,%d)" % [trap.cell.x, trap.cell.y])
 
 func test_min_distance_keeps_traps_apart() -> void:
-	# Sweep seeds — Subtask B3's step-trap reachability validator may
-	# remove a trap on some seeds (if it blocks the entrance→exit
-	# path in the no-step-trap graph). We assert the distance rule on
-	# whatever traps survive across the sweep, and require at least
-	# one seed produces ≥2 traps so the inner loop fires.
-	var observed_assertions: bool = false
-	for seed_n in [12345, 67890, 11111, 22222, 33333, 44444, 55555]:
-		var biome := _make_biome()
-		var spawn := _make_trap_spawn(_make_trap_data(), 3, 3, ObjectSpawn.PLACEMENT_ANY)
-		spawn.min_distance_to_other_trap = 6
-		biome.trap_spawns = [spawn]
-		var gen := _make_generator(biome, seed_n)
-		var positions: Array = []
-		for trap in gen.traps:
-			positions.append(trap.cell)
-		if positions.size() < 2:
-			continue
-		observed_assertions = true
-		for i in range(positions.size()):
-			for j in range(i + 1, positions.size()):
-				var dist: int = abs(positions[i].x - positions[j].x) + abs(positions[i].y - positions[j].y)
-				assert_gte(dist, 6,
-					"seed %d: traps at %s and %s are %d apart (need >= 6)" % [seed_n, positions[i], positions[j], dist])
-	assert_true(observed_assertions,
-		"no seed in the sweep produced ≥2 traps after validators ran — validator may be too aggressive")
+	var biome := _make_biome()
+	var spawn := _make_trap_spawn(_make_trap_data(), 3, 3, ObjectSpawn.PLACEMENT_ANY)
+	spawn.min_distance_to_other_trap = 6
+	biome.trap_spawns = [spawn]
+	var gen := _make_generator(biome)
+	var positions: Array = []
+	for trap in gen.traps:
+		positions.append(trap.cell)
+	for i in range(positions.size()):
+		for j in range(i + 1, positions.size()):
+			var dist: int = abs(positions[i].x - positions[j].x) + abs(positions[i].y - positions[j].y)
+			assert_gte(dist, 6,
+				"traps at %s and %s are %d apart (need >= 6)" % [positions[i], positions[j], dist])
 
 func test_trap_instance_cell_matches_grid_position() -> void:
 	# TrapInstance.cell is set at placement time and used by the renderer
@@ -961,111 +949,8 @@ func test_room_density_allows_mixing_when_flag_true() -> void:
 		"no seed produced a room holding both spawns' traps — mixing didn't happen even with the flag enabled")
 
 # -------------------------------------------------------
-# Path-safety validators (Phase 8 Task 3 — Subtask B3)
+# Path-safety validator (Phase 8 Task 3 — Subtask B3)
 # -------------------------------------------------------
-
-func _bfs_no_step_traps_for_test(gen: LevelGenerator) -> Dictionary:
-	# Stand-alone BFS for tests — independent of LevelGenerator's
-	# private helper so we don't accidentally test the helper against
-	# itself.
-	var visited: Dictionary = {gen.entrance_pos: true}
-	var queue: Array = [gen.entrance_pos]
-	while not queue.is_empty():
-		var current: Vector2i = queue.pop_front()
-		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
-			var n: Vector2i = current + d
-			if n.x < 0 or n.x >= gen.grid_width or n.y < 0 or n.y >= gen.grid_height:
-				continue
-			if visited.has(n):
-				continue
-			var ncell: GridCell = gen.grid[n.x][n.y]
-			if ncell.is_blocked:
-				continue
-			if ncell.trap != null and ncell.trap.data != null and ncell.trap.data.is_step():
-				continue
-			visited[n] = true
-			queue.append(n)
-	return visited
-
-func _has_4_neighbour_in(pos: Vector2i, reachable: Dictionary) -> bool:
-	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
-		if reachable.has(pos + d):
-			return true
-	return false
-
-func test_step_trap_reachability_exit_always_reachable() -> void:
-	# Aggressive corridor cluster + room density on STEP traps. After
-	# generation, the exit must be reachable from entrance via a
-	# no-step-trap path.
-	for seed_n in [11, 22, 33, 44, 55]:
-		var biome := _make_biome()
-		var trap_data := _make_trap_data(TrapData.Trigger.STEP, 4)
-		var spawn := TrapSpawn.new()
-		spawn.trap = trap_data
-		spawn.count_min = 0
-		spawn.count_max = 0
-		spawn.placement = ObjectSpawn.PLACEMENT_ANY
-		spawn.corridor_segment_chance = 1.0
-		spawn.corridor_traps_per_run_min = 2
-		spawn.corridor_traps_per_run_max = 4
-		spawn.room_chance = 1.0
-		spawn.room_coverage_min_percent = 50.0
-		spawn.room_coverage_max_percent = 70.0
-		biome.trap_spawns = [spawn]
-		var gen := _make_generator(biome, seed_n)
-		var reachable: Dictionary = _bfs_no_step_traps_for_test(gen)
-		assert_true(reachable.has(gen.exit_pos),
-			"seed %d: exit at %s not reachable via no-step-trap path" % [seed_n, gen.exit_pos])
-
-func test_step_trap_reachability_chests_always_reachable() -> void:
-	# Every chest must be reachable directly OR via a 4-neighbour
-	# (chests may be blocking objects so the player approaches from
-	# an adjacent cell).
-	for seed_n in [101, 202, 303]:
-		var biome := _make_biome()
-		biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
-		var trap_data := _make_trap_data(TrapData.Trigger.STEP, 4)
-		var spawn := TrapSpawn.new()
-		spawn.trap = trap_data
-		spawn.count_min = 0
-		spawn.count_max = 0
-		spawn.placement = ObjectSpawn.PLACEMENT_ANY
-		spawn.corridor_segment_chance = 1.0
-		spawn.corridor_traps_per_run_min = 2
-		spawn.corridor_traps_per_run_max = 4
-		biome.trap_spawns = [spawn]
-		var gen := _make_generator(biome, seed_n)
-		var reachable: Dictionary = _bfs_no_step_traps_for_test(gen)
-		for x in range(gen.grid_width):
-			for y in range(gen.grid_height):
-				var cell: GridCell = gen.grid[x][y]
-				if cell.object == null or not cell.object.is_chest():
-					continue
-				var pos := Vector2i(x, y)
-				var ok: bool = reachable.has(pos) or _has_4_neighbour_in(pos, reachable)
-				assert_true(ok,
-					"seed %d: chest at %s not step-trap-reachable (cell or any neighbour)" % [seed_n, pos])
-
-func test_step_trap_reachability_holds_under_aggressive_clusters() -> void:
-	# With chance 1.0 + long runs, the placer can produce levels where
-	# a corridor is fully clogged with step traps. The validator must
-	# remove enough traps to keep the exit reachable from entrance.
-	for seed_n in [777, 888, 999, 1010, 1111]:
-		var biome := _make_biome()
-		var trap_data := _make_trap_data(TrapData.Trigger.STEP, 4)
-		var spawn := TrapSpawn.new()
-		spawn.trap = trap_data
-		spawn.count_min = 0
-		spawn.count_max = 0
-		spawn.placement = ObjectSpawn.PLACEMENT_CORRIDOR
-		spawn.corridor_segment_chance = 1.0
-		spawn.corridor_traps_per_run_min = 4
-		spawn.corridor_traps_per_run_max = 99
-		biome.trap_spawns = [spawn]
-		var gen := _make_generator(biome, seed_n)
-		var reachable: Dictionary = _bfs_no_step_traps_for_test(gen)
-		assert_true(reachable.has(gen.exit_pos),
-			"seed %d: validator failed — exit unreachable post-rollback" % seed_n)
 
 func test_chest_lever_timed_adjacency_holds_after_validation() -> void:
 	# Aggressive timed corridor clusters around chests. After

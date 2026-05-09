@@ -20,7 +20,7 @@
 [ext_resource type="Resource" uid="uid://mtigjawa2y3e" path="res://assets/loot_tables/forest_chest_1.tres" id="11_bq1p8"]
 [ext_resource type="Resource" uid="uid://b0furuompokno" path="res://assets/objects/door/door_forest.tres" id="13_bq1p8"]
 [ext_resource type="Script" uid="uid://bpkkmcjv0jnht" path="res://scripts/TrapSpawn.gd" id="20_obsjo"]
-[ext_resource type="Resource" uid="uid://df3vqllijxj7l" path="res://assets/objects/traps/trap_spike_timed.tres" id="21_3vyya"]
+[ext_resource type="Resource" uid="uid://4k7l5777hvlj" path="res://assets/objects/traps/trap_spike_step.tres" id="21_3vyya"]
 [ext_resource type="Script" uid="uid://c4fbuyttq7iik" path="res://scripts/WallDecorationSpawn.gd" id="21_evnw4"]
 [ext_resource type="Resource" uid="uid://bcwekrkc5e52" path="res://assets/decorations/torch01.tres" id="22_obsjo"]
 [ext_resource type="Texture2D" uid="uid://b0mt2xvmng0ww" path="res://assets/textures/biomes/forest/walls/forest_wall_02_big_tree.jpg" id="23_evnw4"]
@@ -95,13 +95,14 @@ metadata/_custom_type_script = "uid://q2yc7peloed8"
 [sub_resource type="Resource" id="Resource_1qwx2"]
 script = ExtResource("20_obsjo")
 trap = ExtResource("21_3vyya")
-count_min = 0
-count_max = 0
-placement = 3
-corridor_traps_per_run_min = 2
+count_min = 150
+count_max = 150
+corridor_segment_chance = 1.0
+corridor_traps_per_run_min = 4
+corridor_traps_per_run_max = 99
 room_chance = 0.506
-room_coverage_min_percent = 74.368
-room_coverage_max_percent = 80.575
+room_coverage_min_percent = 99.0
+room_coverage_max_percent = 99.0
 room_max_distance_to_safe_cell = 3
 allow_mixed_room_traps = false
 metadata/_custom_type_script = "uid://bpkkmcjv0jnht"

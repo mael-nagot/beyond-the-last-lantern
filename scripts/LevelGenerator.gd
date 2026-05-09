@@ -103,10 +103,11 @@ func generate() -> void:
 	_place_key_doors()
 	_place_traps()
 	_place_items()
-	# Subtask B3 path-safety validators run AFTER all placement so
-	# they see the final scene the player will navigate. Each may
-	# remove traps to satisfy its rule (playability beats density).
-	_validate_step_trap_reachability()
+	# Subtask B3 path-safety validator runs AFTER all placement so
+	# it sees the final scene the player will navigate. May remove
+	# traps to satisfy its rule (playability beats density). Step
+	# traps don't need a strict reachability rule — they damage but
+	# don't block; the player can walk through with HP cost.
 	_validate_chest_lever_timed_adjacency()
 	_place_wall_decorations()
 
@@ -1881,74 +1882,25 @@ func _too_close_to_existing_trap(pos: Vector2i, min_distance: int) -> bool:
 	return false
 
 # -------------------------------------------------------
-# Trap path-safety validators (Phase 8 Task 3 — Subtask B3)
+# Trap path-safety validator (Phase 8 Task 3 — Subtask B3)
 #
-# Run after all trap placement passes AND after items have been
-# placed (so the validators see the final scene the player will
-# actually navigate). Both validators MAY remove traps to satisfy
-# their rules — playability beats raw configured density. The
-# corridor cluster + room density placers are not perfect, and
-# adversarial designer configs (very high coverage, tight rooms)
-# can produce levels where the player has no foothold or no
-# trap-free path; these validators are the safety net.
+# Runs after all trap placement passes AND after items have been
+# placed (so the validator sees the final scene the player will
+# actually navigate). MAY remove traps to satisfy its rule —
+# playability beats raw configured density.
+#
+# The original B3 design also included a strict step-trap-free
+# reachability rule (BFS from entrance must reach exit + every chest
+# + every lever + every item without crossing step traps). It was
+# removed: with aggressive trap configs the rule forced removal of
+# nearly every step trap, leaving levels visually empty even on
+# extremes the designer specifically configured. Step traps damage
+# the player but don't BLOCK reachability — walking through is
+# always possible. The cost (HP) is a designed feature, not a bug.
+# Only the chest/lever adjacency rule remains: every interactable
+# cell-bound object needs at least one foothold the player can stand
+# on without standing on a continuously-cycling timed trap.
 # -------------------------------------------------------
-
-# Rule: there must be a path from entrance to the exit, every chest,
-# every lever, and every floor-item cell that DOES NOT cross any STEP
-# trap. Iteratively remove STEP traps on the boundary of the reachable
-# region until the rule holds. Bounded by `traps.size()` iterations —
-# each iteration either expands reachability or runs out of removable
-# step traps.
-#
-# Chests can be blocking objects (the player interacts from a
-# neighbour cell), so for chests / levers the rule is satisfied by
-# the cell itself OR any 4-neighbour being reachable. Floor items
-# always sit on walkable cells, so the cell itself must be reachable.
-#
-# Doors are treated as ALWAYS PASSABLE here — they're openable by
-# the player (chain reachability already verified locked-door keys
-# / lever puzzles are solvable). The only obstacles this BFS cares
-# about are walls, blocking objects, and STEP traps.
-func _validate_step_trap_reachability() -> void:
-	var max_iterations: int = traps.size() + 1
-	for _i in range(max_iterations):
-		var reachable: Dictionary = _bfs_excluding_step_traps()
-		if _step_trap_reachability_satisfied(reachable):
-			return
-		var trap_to_remove: TrapInstance = _find_boundary_step_trap(reachable)
-		if trap_to_remove == null:
-			push_warning("LevelGenerator: step-trap reachability cannot be fully satisfied — required cells isolated by walls / objects, not by step traps.")
-			return
-		_remove_trap_at(trap_to_remove.cell)
-
-# True iff every required target (exit, every chest/lever, every
-# floor-item cell) is reachable via the no-step-trap graph. Chests/
-# levers count as satisfied if the cell OR any 4-neighbour is
-# reachable (chests can be blocking — the player interacts from
-# adjacent cells).
-func _step_trap_reachability_satisfied(reachable: Dictionary) -> bool:
-	if exit_pos != Vector2i.ZERO and not reachable.has(exit_pos):
-		return false
-	for x in range(grid_width):
-		for y in range(grid_height):
-			var pos := Vector2i(x, y)
-			var cell: GridCell = grid[x][y]
-			if cell.object != null and _is_chest_or_lever(cell.object):
-				if reachable.has(pos):
-					continue
-				if _has_step_reachable_4_neighbour(pos, reachable):
-					continue
-				return false
-			if not cell.items.is_empty() and cell.cell_type == GridCell.CellType.FLOOR:
-				if not reachable.has(pos):
-					return false
-	return true
-
-func _has_step_reachable_4_neighbour(pos: Vector2i, reachable: Dictionary) -> bool:
-	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
-		if reachable.has(pos + d):
-			return true
-	return false
 
 # Rule: every chest cell and every lever cell has at least one
 # 4-adjacent walkable cell that is FREE OF TIMED TRAPS. Step traps
@@ -1976,69 +1928,6 @@ func _validate_chest_lever_timed_adjacency() -> void:
 			var removed: bool = _remove_one_timed_trap_neighbour(pos)
 			if not removed or not _has_timed_safe_4_neighbour(pos):
 				push_warning("LevelGenerator: chest/lever at %s has no walkable timed-trap-free neighbour after rollback. Surrounded by walls / blocking objects, not by removable traps." % pos)
-
-# BFS from entrance treating step-trap cells as walls. Doors are
-# treated as passable (player can open them). Returns the dict of
-# reachable cells.
-func _bfs_excluding_step_traps() -> Dictionary:
-	var visited: Dictionary = {entrance_pos: true}
-	var queue: Array = [entrance_pos]
-	while not queue.is_empty():
-		var current: Vector2i = queue.pop_front()
-		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
-			var n: Vector2i = current + d
-			if not _in_bounds(n.x, n.y):
-				continue
-			if visited.has(n):
-				continue
-			if not _is_walkable_excluding_step_traps(n):
-				continue
-			visited[n] = true
-			queue.append(n)
-	return visited
-
-func _is_walkable_excluding_step_traps(pos: Vector2i) -> bool:
-	var cell: GridCell = grid[pos.x][pos.y]
-	if cell.is_blocked:
-		return false
-	if cell.trap != null and cell.trap.data != null and cell.trap.data.is_step():
-		return false
-	return true
-
-# Pick a step trap whose removal would expand the reachable set.
-# Prefer "bridge" traps (with both reachable AND non-reachable
-# walkable neighbours) — those connect the BFS frontier to a new
-# region. Fall back to traps with any reachable neighbour (those
-# at least make their own cell reachable).
-func _find_boundary_step_trap(reachable: Dictionary) -> TrapInstance:
-	var bridges: Array = []
-	var fallbacks: Array = []
-	for trap in traps:
-		if trap == null or trap.data == null or not trap.data.is_step():
-			continue
-		var reach_n: bool = false
-		var bridge_n: bool = false
-		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
-			var n: Vector2i = trap.cell + d
-			if not _in_bounds(n.x, n.y):
-				continue
-			if reachable.has(n):
-				reach_n = true
-				continue
-			# Non-reachable neighbour — is it walkable (potentially
-			# reachable once the trap is gone)?
-			var ncell: GridCell = grid[n.x][n.y]
-			if not ncell.is_blocked:
-				bridge_n = true
-		if reach_n and bridge_n:
-			bridges.append(trap)
-		elif reach_n:
-			fallbacks.append(trap)
-	if not bridges.is_empty():
-		return bridges[0]
-	if not fallbacks.is_empty():
-		return fallbacks[0]
-	return null
 
 func _is_chest_or_lever(obj: ObjectInstance) -> bool:
 	if obj == null:
