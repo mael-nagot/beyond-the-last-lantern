@@ -28,3 +28,11 @@ trap.spike_step.name,Spike Trap
 trap.spike_step.description,Hidden floor spikes that snap up when stepped on.
 trap.spike_timed.name,Cycling Spike Trap
 trap.spike_timed.description,Floor spikes that periodically extend and retract.
+projectile_trap.dart_timed.name,Dart Launcher
+projectile_trap.dart_timed.description,A wall-mounted mechanism that periodically fires darts.
+projectile_trap.dart_plate.name,Dart Trap
+projectile_trap.dart_plate.description,Stepping on the floor plate triggers a volley of darts.
+projectile_trap.fireball_timed.name,Fireball Launcher
+projectile_trap.fireball_timed.description,A wall-mounted device that periodically launches fireballs.
+projectile_trap.poison_dart.name,Poison Dart Launcher
+projectile_trap.poison_dart.description,Wall-mounted darts tipped with a virulent poison.

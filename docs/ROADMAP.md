@@ -360,8 +360,33 @@ Split into three incremental sub-PRs so each one has something testable in-engin
 6. ✅ Tests: integration (`test_level_generator` extended — exit reachable without step traps across 5 seeds with dense configs, chests reachable via adjacent cell, floor items reachable, average trap count stays high >50, `_remove_trap_at` clears cell + list + cluster_cells, traps never share cells with floor items, chest/lever timed adjacency guaranteed, timed-trap safe distance enforced globally, step traps adjacent to chests are allowed).
 7. ⏳ Manual playtest (developer): run in-engine with `forest.tres` using step trap variant, verify: (a) there's always a damage-free path to exit, chests, levers, and items, (b) trap density is visually high, (c) chests near timed traps have a safe waiting spot, (d) room-to-corridor transitions don't create excessively long timed-trap runs.
 
-#### Task 3 follow-ups (after Subtask B)
-- Fireball trap (pressure plate or continuous)
+#### Task 3 follow-up — Projectile traps (wall-mounted launchers)
+
+Generalised from "fireball trap" to a full projectile system — the data resource controls what the launcher fires (dart = damage, poison dart = damage + poison status, fireball = heavy damage + burn, ice shard = damage + slow). Split into 3 subtasks.
+
+##### Subtask A — Data model + state machine + projectile flight ✅ (code)
+1. ✅ `ProjectileTrapData.gd` Resource — `trigger: enum { TIMED, PRESSURE_PLATE }`, `damage`, `status_effect: enum { NONE, POISON, BURN, SLOW }` (field exists, application deferred to Phase 10 status system), `status_duration`, `status_damage_per_tick`. Projectile art: `projectile_sprite`, `projectile_speed` (cells/sec), `projectile_world_height`, `projectile_y_offset`. Launcher art: `launcher_sprite`, `launcher_world_height`, `launcher_x_offset`, `launcher_y_offset`, `launcher_depth_offset`. Plate art (PRESSURE_PLATE only): `plate_sprite`, `plate_world_size`. TIMED timing: `timed_interval`, `timed_initial_offset`. General: `cooldown_after_impact`. Audio: `launch_sound`, `impact_sound`, `plate_sound`, `hearing_distance`.
+2. ✅ `Projectile.gd` (RefCounted) — pure trajectory tracker. Continuous `position: Vector2` in grid-cell coordinates, axis-aligned `direction`, `speed`. `tick(delta)` advances position. `get_cell()` returns current cell via `roundi`. `cells_entered_this_tick()` returns all new cells crossed since last tick (handles multi-cell jumps at high speed / low fps). `has_hit_player` latch prevents double-damage per flight (projectile passes through player and keeps flying to wall).
+3. ✅ `ProjectileTrapInstance.gd` (RefCounted) — state machine: IDLE → FIRING → COOLDOWN → IDLE. Owns `launcher_cell`, `wall_dir`, `fire_direction` (= -wall_dir), optional `plate_cell`, and `active_projectile`. `tick(delta, is_passable, player_cell)` drives the full lifecycle: creates projectile on TIMED interval expiry, advances it, detects wall hits (via `is_passable` callable) and player hits (via `player_cell` + latch). Returns bitmask of `EVENT_LAUNCHED / EVENT_PLAYER_HIT / EVENT_IMPACT`. `on_plate_stepped()` triggers PRESSURE_PLATE traps; returns false if projectile already in flight (no-refire guard).
+4. ✅ `ProjectileTrapSpawn.gd` Resource — corridor: `corridor_segment_chance`, `max_escape_distance`, `max_per_corridor_segment`. Room: `room_chance`, `max_per_room`. Plate: `max_plate_to_junction_distance`, `min_plate_to_launcher_distance`. Spreading: `min_distance_to_other_projectile_trap`.
+5. ✅ `BiomeData.projectile_trap_spawns: Array[ProjectileTrapSpawn]`
+6. ✅ Localization: `projectile_trap.dart_timed.{name,description}`, `projectile_trap.dart_plate.{name,description}`, `projectile_trap.fireball_timed.{name,description}`, `projectile_trap.poison_dart.{name,description}`
+7. ✅ Tests: unit — `test_projectile_trap_data` (defaults, predicates, display, status enum), `test_projectile` (creation, tick, cell tracking, multi-cell jump, edge cases), `test_projectile_trap_instance` (TIMED lifecycle, PRESSURE_PLATE lifecycle, player hit, no-refire, cooldown, null safety), `test_projectile_trap_spawn` (defaults, predicates)
+
+##### Subtask B — Placement algorithm
+1. `LevelGenerator._place_projectile_traps()` — runs after `_place_traps()`, before `_place_items()`
+2. Corridor placement: launcher at segment extremity wall, other end adjacent to junction, segment length ≤ `max_escape_distance`. PRESSURE_PLATE: plate on a cell satisfying `max_plate_to_junction_distance` from nearest junction and `min_plate_to_launcher_distance` from launcher. Plate must be in the projectile's path.
+3. Room placement: launcher on eligible wall face. Full projectile path traced — rejected if any cell is not a room cell (prevents projectiles from exiting rooms into corridors). `max_per_room` cap. PRESSURE_PLATE: plate on a room floor cell in the projectile path, `min_plate_to_launcher_distance` from launcher.
+4. `projectile_traps: Array[ProjectileTrapInstance]` on LevelGenerator (flat list for Game.gd tick iteration)
+
+##### Subtask C — Rendering + game logic + map
+1. Launcher rendering: wall-mounted Sprite3D (non-billboarded, same positioning as wall decorations) under `ProjectileTrapsRoot`
+2. Pressure plate rendering: floor decal quad (same technique as spike hole decals)
+3. Projectile in-flight rendering: Sprite3D (BILLBOARD_FIXED_Y) with per-frame position update — first moving entity in the dungeon
+4. Game.gd: `_process` tick loop for ProjectileTrapInstances, EVENT_LAUNCHED/PLAYER_HIT/IMPACT handling, `_on_player_entered_cell` plate-step detection
+5. MapPopup: `debug_show_projectile_traps: bool = false` — draws launcher positions as small arrows pointing in fire direction on explored cells
+
+#### Task 3 remaining follow-ups
 - Immobilize trap (player can't move, can turn and attack)
 - Alert trap (aggros enemies in 10-tile radius — needs Phase 10 enemies first)
 - Sub-biome portal reachability: when Phase 15 Task 1 adds `SUB_EXIT` portal cells, `_validate_step_trap_reachability()` must include them as targets so there is always a step-trap-free path from the entrance to every sub-biome portal

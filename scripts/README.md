@@ -34,7 +34,7 @@ Tests for these scripts live in `res://tests/`. See `res://tests/README.md` for 
 ### BiomeData.gd
 **Type:** Resource (data only, loaded as .tres files)
 **Purpose:** Defines all visual, environmental, level generation, and loot properties of a biome. Holds arrays of `BiomeTextureEntry` for wall/floor/ceiling surfaces (each entry holds an albedo + placement flags + weight + min-distance rules so the renderer picks variants per cell type), fog settings, ambient light settings, triplanar mapping toggles, wall height, all dungeon generation parameters (grid size, maze behavior, corridor width, room placement, entrance/exit rules), and the floor loot pool (Array of LootEntry + min/max items per level). Loaded at runtime and passed to both DungeonView (appearance) and LevelGenerator (generation + item placement).
-**Key exports:** wall_textures, floor_textures, ceiling_textures, fog_enabled, fog_color, fog_density, fog_aerial, ambient_color, ambient_energy, use_triplanar, triplanar_sharpness, triplanar_y_offset, grid_width, grid_height, maze_bias, wiggle, corridor_min_width, corridor_max_width, width_change_chance, room_count, room_min_size, room_max_size, entrance_at_dead_end, exit_at_dead_end, min_exit_distance, floor_loot, floor_items_min, floor_items_max, objects, linked_objects, key_door_spawns, trap_spawns, wall_decorations, move_sounds
+**Key exports:** wall_textures, floor_textures, ceiling_textures, fog_enabled, fog_color, fog_density, fog_aerial, ambient_color, ambient_energy, use_triplanar, triplanar_sharpness, triplanar_y_offset, grid_width, grid_height, maze_bias, wiggle, corridor_min_width, corridor_max_width, width_change_chance, room_count, room_min_size, room_max_size, entrance_at_dead_end, exit_at_dead_end, min_exit_distance, floor_loot, floor_items_min, floor_items_max, objects, linked_objects, key_door_spawns, trap_spawns, projectile_trap_spawns, wall_decorations, move_sounds
 
 ### BiomeTextureEntry.gd
 **Type:** Resource (data only, used inside `BiomeData.{wall,floor,ceiling}_textures`)
@@ -145,6 +145,32 @@ Modes are fully additive. Set `count_min = count_max = 0` to disable scattered; 
 
 **Key exports:** trap, count_min, count_max, placement, min_distance_to_other_trap, corridor_segment_chance, corridor_traps_per_run_min, corridor_traps_per_run_max, room_chance, room_coverage_min_percent, room_coverage_max_percent, room_min_spacing, room_max_distance_to_safe_cell, allow_mixed_room_traps
 **Key methods:** allows(placement_type) → bool, uses_corridor_clusters() → bool, uses_room_density() → bool
+
+### ProjectileTrapData.gd
+**Type:** Resource (data only, loaded as .tres files in `res://assets/objects/`)
+**Purpose:** Template for a wall-mounted projectile trap (Phase 8 Task 3 follow-up). Distinct from `TrapData` because these traps are wall-mounted (not cell-bound), fire a projectile that travels cell-by-cell until hitting a wall, and use a corridor-extremity / room-wall placement model. Two trigger modes: `TIMED` (fires at `timed_interval` intervals; `timed_initial_offset` phase-shifts so multiple launchers don't sync) and `PRESSURE_PLATE` (fires when the player steps on a linked floor plate; won't re-fire while a projectile is in flight). `damage` applies to all party members on hit. `status_effect` (NONE / POISON / BURN / SLOW) + `status_duration` + `status_damage_per_tick` define the hit payload — the status effect system is deferred to Phase 10 but fields exist now for forward-compat. Launcher art: `launcher_sprite` renders on the wall face with `launcher_x_offset` / `launcher_y_offset` / `launcher_depth_offset` for positioning. Projectile art: `projectile_sprite` is a Sprite3D billboard that moves at `projectile_speed` cells/sec. Plate art: `plate_sprite` renders as a floor decal (PRESSURE_PLATE only). `cooldown_after_impact` adds a delay between wall hit and re-arm. Audio: `launch_sound`, `impact_sound`, `plate_sound`, `hearing_distance` (gates TIMED audio by Manhattan distance).
+**Key exports:** name_key, description_key, trigger, damage, status_effect, status_duration, status_damage_per_tick, projectile_sprite, projectile_speed, projectile_world_height, projectile_y_offset, launcher_sprite, launcher_world_height, launcher_x_offset, launcher_y_offset, launcher_depth_offset, plate_sprite, plate_world_size, timed_interval, timed_initial_offset, cooldown_after_impact, launch_sound, impact_sound, plate_sound, hearing_distance
+**Key methods:** get_display_name(), get_display_description(), is_timed(), is_pressure_plate()
+
+### Projectile.gd
+**Type:** RefCounted (runtime data)
+**Purpose:** A single projectile in flight. Pure trajectory — no game logic, no node access. Tracks a continuous `position: Vector2` in grid-cell coordinates, advancing each `tick(delta)` by `direction * speed * delta`. Direction is always axis-aligned (one of the 4 cardinals). `get_cell()` returns the current cell via `roundi`. `cells_entered_this_tick()` returns every new cell crossed since the last tick, in travel order — handles the rare multi-cell jump at high speed / low frame rate. `has_hit_player` is a latch the owning `ProjectileTrapInstance` sets true after the first player-hit so a single flight never deals damage twice (the projectile passes through the player and keeps flying until hitting a wall).
+**Key fields:** direction, speed, position, has_hit_player
+**Key static methods:** Projectile.create(position, direction, speed)
+**Key methods:** tick(delta), get_cell(), cells_entered_this_tick()
+
+### ProjectileTrapInstance.gd
+**Type:** RefCounted (runtime data)
+**Purpose:** Runtime state for one wall-mounted projectile trap — the launcher, optional pressure plate, and in-flight projectile. State machine: `IDLE` (counting toward next launch for TIMED, or waiting for plate step for PRESSURE_PLATE) → `FIRING` (projectile in flight, advancing each tick) → `COOLDOWN` (optional delay after wall hit) → `IDLE`. `tick(delta, is_passable, player_cell)` drives the full lifecycle: creates the projectile on TIMED interval expiry, advances it, detects wall hits (via `is_passable` callable) and player hits (via `player_cell`), and cleans up on impact. Returns a bitmask of `EVENT_LAUNCHED / EVENT_PLAYER_HIT / EVENT_IMPACT` so the caller can react to simultaneous events (e.g. player standing next to a wall = hit + impact on the same tick). `on_plate_stepped()` triggers PRESSURE_PLATE traps manually — returns false if a projectile is already in flight (no re-fire guard). The projectile starts 0.4 cells from cell centre toward the wall (at the launcher sprite) and travels in `fire_direction` (opposite of `wall_dir`).
+**Key fields:** data, launcher_cell, wall_dir, fire_direction, plate_cell, state (IDLE / FIRING / COOLDOWN), timer, active_projectile
+**Key static methods:** ProjectileTrapInstance.create(data, launcher_cell, wall_dir, plate_cell)
+**Key methods:** on_plate_stepped() → bool, tick(delta, is_passable, player_cell) → int (event bitmask), has_active_projectile(), is_idle()
+
+### ProjectileTrapSpawn.gd
+**Type:** Resource (data only, used inside `BiomeData.projectile_trap_spawns`)
+**Purpose:** A biome's projectile-trap pool entry. Controls WHERE and HOW MANY wall-mounted launchers are placed. Two placement modes (additive): **Corridor** — launcher at one extremity of a corridor segment, firing toward a junction; `corridor_segment_chance` rolls per segment, `max_escape_distance` caps segment length so the player can reach the junction in time, `max_per_corridor_segment` (usually 1). **Room** — launcher on an eligible wall face; `room_chance` rolls per room, `max_per_room` caps count; the full projectile path is traced and faces where the projectile would exit the room into a corridor are rejected. For PRESSURE_PLATE traps: `max_plate_to_junction_distance` keeps the plate near an escape route, `min_plate_to_launcher_distance` ensures the player has reaction time. `min_distance_to_other_projectile_trap` provides anti-clustering.
+**Key exports:** trap, corridor_segment_chance, max_escape_distance, max_per_corridor_segment, room_chance, max_per_room, max_plate_to_junction_distance, min_plate_to_launcher_distance, min_distance_to_other_projectile_trap
+**Key methods:** uses_corridor_placement(), uses_room_placement()
 
 ### DamageFlash.gd
 **Type:** ColorRect (full-rect overlay, created programmatically by `Hud.gd`)

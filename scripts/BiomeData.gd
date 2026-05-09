@@ -87,6 +87,12 @@ extends Resource
 # count_min..count_max single-cell trap placements.
 @export var trap_spawns: Array[TrapSpawn] = []
 
+# Wall-mounted projectile traps (Phase 8 Task 3 follow-up). Placed
+# AFTER floor traps. Each entry controls corridor and/or room
+# placement of launchers that fire projectiles along corridors or
+# across rooms.
+@export var projectile_trap_spawns: Array[ProjectileTrapSpawn] = []
+
 # Wall-mounted decorations (paintings, torches, lanterns). Placed
 # LAST among scenery — they don't gate or interact with anything,
 # they just dress wall faces. Each entry attaches its decoration to
