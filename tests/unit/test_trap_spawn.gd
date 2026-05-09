@@ -54,3 +54,33 @@ func test_uses_corridor_clusters_false_when_max_zero() -> void:
 	spawn.corridor_segment_chance = 1.0
 	spawn.corridor_traps_per_run_max = 0
 	assert_false(spawn.uses_corridor_clusters())
+
+# --- Room density fields (Subtask B2) ---
+
+func test_room_density_defaults() -> void:
+	# Defaults must keep B1's behaviour intact — room density opts in.
+	var spawn := TrapSpawn.new()
+	assert_eq(spawn.room_chance, 0.0)
+	assert_eq(spawn.room_coverage_min_percent, 10.0)
+	assert_eq(spawn.room_coverage_max_percent, 30.0)
+	assert_eq(spawn.room_min_spacing, 0)
+	assert_true(spawn.allow_mixed_room_traps)
+	assert_eq(spawn.room_max_distance_to_safe_cell, 0)
+
+func test_uses_room_density_false_by_default() -> void:
+	var spawn := TrapSpawn.new()
+	assert_false(spawn.uses_room_density())
+
+func test_uses_room_density_when_chance_set() -> void:
+	var spawn := TrapSpawn.new()
+	spawn.room_chance = 0.5
+	assert_true(spawn.uses_room_density())
+
+func test_uses_room_density_false_when_max_coverage_zero() -> void:
+	# A designer setting max coverage = 0 explicitly disables the room
+	# pass even with a non-zero chance — guards against rolling rooms
+	# that produce zero traps.
+	var spawn := TrapSpawn.new()
+	spawn.room_chance = 1.0
+	spawn.room_coverage_max_percent = 0.0
+	assert_false(spawn.uses_room_density())

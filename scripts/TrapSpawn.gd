@@ -59,6 +59,47 @@ extends Resource
 @export var corridor_traps_per_run_min: int = 1
 @export var corridor_traps_per_run_max: int = 3
 
+@export_group("Room density placement (per-room)")
+# Probability in [0, 1] that any given room receives traps from THIS
+# spawn. Rolled per room, per spawn — multiple spawns can share a
+# room (e.g. STEP + TIMED mixed in one room for variety). 0 disables
+# the room pass entirely.
+@export_range(0.0, 1.0) var room_chance: float = 0.0
+# When a room is chosen, the placer rolls a target percentage of
+# eligible room cells in [min, max] and tries to place that many
+# traps. Graceful-degrade: if `room_min_spacing` makes the target
+# unreachable, places as many as fit and stops.
+@export_range(0.0, 100.0) var room_coverage_min_percent: float = 10.0
+@export_range(0.0, 100.0) var room_coverage_max_percent: float = 30.0
+# Manhattan distance (in tiles) every new trap must keep from any
+# existing trap INSIDE THE SAME ROOM (cross-spawn — also respects
+# traps placed by earlier spawns). 0 = no spacing rule, traps may be
+# 4-adjacent to each other. 1 = no two adjacent (chess-king-style
+# spread). 2+ = visibly scattered. This is a VISUAL rule — it
+# controls how clustered the trap art looks.
+@export var room_min_spacing: int = 0
+# Max Manhattan distance from any walkable cell in the room to a
+# non-trap walkable cell. With high coverage rolls, dense rooms can
+# leave the player surrounded by traps with no foothold to retreat
+# to — this rule is the GAMEPLAY guarantee that a step-to-safety is
+# always within reach. 0 = disabled. 2 means every walkable cell has
+# a non-trap walkable cell within 2 Manhattan tiles. Enforced
+# pre-placement: a candidate trap that would violate the rule for any
+# walkable cell is rejected, so the placer naturally caps coverage at
+# whatever the rule allows. The check considers cells inside AND just
+# outside the room — corridor cells adjacent to the room count as
+# valid retreat (the player can step out).
+@export var room_max_distance_to_safe_cell: int = 0
+# When true, this spawn's room pass may add traps to a room that
+# already holds traps from an earlier spawn's pass — useful for
+# "this room has both step AND timed hazards" variety. When false,
+# the room pass skips any room that already has traps, giving each
+# room a single-spawn identity (analogous to the one-spawn-per-
+# corridor-segment rule used by clusters). The cross-spawn
+# `room_min_spacing` rule still applies in the mixed case so the
+# shared room doesn't oversaturate.
+@export var allow_mixed_room_traps: bool = true
+
 func allows(placement_type: int) -> bool:
 	return (placement & placement_type) != 0
 
@@ -68,3 +109,8 @@ func allows(placement_type: int) -> bool:
 # only want scattered traps).
 func uses_corridor_clusters() -> bool:
 	return corridor_segment_chance > 0.0 and corridor_traps_per_run_max > 0
+
+# True iff this spawn requests any room-density placement. Used by
+# LevelGenerator to skip the room pass when chance is zero.
+func uses_room_density() -> bool:
+	return room_chance > 0.0 and room_coverage_max_percent > 0.0

@@ -1408,13 +1408,17 @@ func _is_any_door_endpoint(pos: Vector2i) -> bool:
 # don't affect chain reachability — no BFS validation needed at this
 # layer.
 #
-# Two placement modes per spawn (additive):
-#   1. Corridor clusters (Subtask B) — runs first. For each corridor
+# Three placement modes per spawn (additive — combine freely):
+#   1. Corridor clusters (Subtask B1) — runs first. For each corridor
 #      segment, roll `corridor_segment_chance`; on hit, lay a contiguous
 #      run of N trap cells inside that segment. Segments that already
 #      hold traps from an earlier spawn's pass are skipped so two
 #      spawns don't fight over the same corridor.
-#   2. Scattered (Subtask A) — runs second. The legacy per-cell mode:
+#   2. Room density (Subtask B2) — runs second. For each room, roll
+#      `room_chance`; on hit, place N traps inside the room where N
+#      is a percentage of the room's eligible cells, with optional
+#      Manhattan spacing between them.
+#   3. Scattered (Subtask A) — runs last. The legacy per-cell mode:
 #      lay `count_min..count_max` individual traps with a distance
 #      preference between them.
 # -------------------------------------------------------
@@ -1429,9 +1433,11 @@ func _place_traps() -> void:
 		if spawn == null or spawn.trap == null:
 			continue
 		# Corridor clusters first — they consume cells in bulk, which
-		# the scattered pass then implicitly avoids via `cell.trap`.
+		# the room + scattered passes implicitly avoid via `cell.trap`.
 		if spawn.uses_corridor_clusters() and spawn.allows(ObjectSpawn.PLACEMENT_CORRIDOR):
 			_place_corridor_traps(spawn, segments, cells_by_type)
+		if spawn.uses_room_density() and spawn.allows(ObjectSpawn.PLACEMENT_ROOM):
+			_place_room_traps(spawn, cells_by_type)
 		var count := randi_range(max(0, spawn.count_min), max(spawn.count_min, spawn.count_max))
 		for _i in range(count):
 			_try_place_trap(spawn, cells_by_type)
@@ -1632,6 +1638,154 @@ func _gather_run_in_segment(eligible: Array, target_n: int) -> Array:
 			visited[n] = true
 			queue.append(n)
 	return result
+
+func _place_room_traps(spawn: TrapSpawn, cells_by_type: Dictionary) -> void:
+	for room_obj in _room_rects:
+		var room: Rect2i = room_obj as Rect2i
+		if randf() >= spawn.room_chance:
+			continue
+		# Exclusivity — when this spawn opts out of sharing, skip any
+		# room that already has traps from an earlier spawn's pass.
+		# Designer choice: gives a room a single-spawn identity
+		# ("this room is poison-spike trapped") instead of mixed
+		# variety ("this room has both step AND timed hazards").
+		if not spawn.allow_mixed_room_traps and _room_has_any_trap(room):
+			continue
+		var room_cells: Array = _eligible_room_cells(room)
+		if room_cells.is_empty():
+			continue
+		var coverage_min: float = clamp(spawn.room_coverage_min_percent, 0.0, 100.0)
+		var coverage_max: float = clamp(spawn.room_coverage_max_percent, coverage_min, 100.0)
+		var coverage_pct: float = randf_range(coverage_min, coverage_max) / 100.0
+		var target_count: int = max(1, int(ceil(room_cells.size() * coverage_pct)))
+		# Random walk the eligible set, placing traps that satisfy the
+		# spacing rule, until the target is hit or no candidate fits.
+		# Graceful degrade: if spacing over-constrains coverage we
+		# stop early rather than crashing or warning.
+		room_cells.shuffle()
+		var placed_count: int = 0
+		for pos in room_cells:
+			if placed_count >= target_count:
+				break
+			if _too_close_to_room_traps(pos, room, spawn.room_min_spacing):
+				continue
+			# Gameplay rule: every walkable cell (in or just outside
+			# the room) must have a non-trap walkable cell within
+			# `room_max_distance_to_safe_cell` Manhattan tiles. Caps
+			# realised coverage when the rule is set, so dense room
+			# rolls can't leave the player without a step-to-safety.
+			if spawn.room_max_distance_to_safe_cell > 0 \
+					and _placement_would_isolate_a_cell(pos, room, spawn.room_max_distance_to_safe_cell):
+				continue
+			var inst := TrapInstance.create(spawn.trap, pos)
+			grid[pos.x][pos.y].trap = inst
+			traps.append(inst)
+			placed_count += 1
+			# Keep cells_by_type in sync so the scattered pass won't
+			# re-pick this cell.
+			cells_by_type[classify_cell(pos)].erase(pos)
+
+func _eligible_room_cells(room: Rect2i) -> Array:
+	var result: Array = []
+	for x in range(room.position.x, room.position.x + room.size.x):
+		for y in range(room.position.y, room.position.y + room.size.y):
+			if not _in_bounds(x, y):
+				continue
+			var cell: GridCell = grid[x][y]
+			if cell.cell_type != GridCell.CellType.FLOOR:
+				continue
+			var pos := Vector2i(x, y)
+			if pos == entrance_pos or pos == exit_pos:
+				continue
+			if cell.object != null:
+				continue
+			if cell.trap != null:
+				continue
+			result.append(pos)
+	return result
+
+func _room_has_any_trap(room: Rect2i) -> bool:
+	for inst in traps:
+		if inst == null:
+			continue
+		if room.has_point(inst.cell):
+			return true
+	return false
+
+func _too_close_to_room_traps(pos: Vector2i, room: Rect2i, min_spacing: int) -> bool:
+	if min_spacing <= 0:
+		return false
+	for inst in traps:
+		if inst == null:
+			continue
+		# Only enforce spacing against traps inside the same room —
+		# corridor cluster cells outside the room rect are unrelated.
+		if not room.has_point(inst.cell):
+			continue
+		var d: int = abs(pos.x - inst.cell.x) + abs(pos.y - inst.cell.y)
+		if d < min_spacing:
+			return true
+	return false
+
+# Returns true iff committing a trap at `candidate` would leave at
+# least one walkable cell (inside the room OR within the buffer zone
+# around it — the corridor-adjacent cell counts as valid retreat) more
+# than `radius` Manhattan tiles from the nearest non-trap walkable
+# cell. Used as a pre-placement guard for the room-density pass to
+# enforce `TrapSpawn.room_max_distance_to_safe_cell`.
+func _placement_would_isolate_a_cell(candidate: Vector2i, room: Rect2i, radius: int) -> bool:
+	# Examine every walkable cell in the room AND a 1-cell margin around
+	# it. A cell just outside the room can also lose its safe neighbour
+	# if all its in-room neighbours are trapped, but checking a margin
+	# of `radius` would be excessive — a 1-cell margin captures the
+	# case where the corridor IS the retreat for an edge room cell.
+	var x0: int = room.position.x - 1
+	var y0: int = room.position.y - 1
+	var x1: int = room.position.x + room.size.x
+	var y1: int = room.position.y + room.size.y
+	for cx in range(x0, x1 + 1):
+		for cy in range(y0, y1 + 1):
+			if not _in_bounds(cx, cy):
+				continue
+			var cpos := Vector2i(cx, cy)
+			if not _is_walkable_room_cell(cpos):
+				continue
+			if not _has_safe_walkable_within(cpos, candidate, radius):
+				return true
+	return false
+
+# True when `pos` is a floor cell with no blocking object — i.e. a
+# cell the player could stand on. Trap presence is intentionally
+# ignored here; the safety check below handles "trapped vs. safe".
+func _is_walkable_room_cell(pos: Vector2i) -> bool:
+	if not _in_bounds(pos.x, pos.y):
+		return false
+	var cell: GridCell = grid[pos.x][pos.y]
+	if cell.cell_type != GridCell.CellType.FLOOR:
+		return false
+	if cell.object != null and cell.object.data != null and cell.object.data.blocks_movement:
+		return false
+	return true
+
+# Returns true iff at least one cell within `radius` Manhattan tiles
+# of `target` is a walkable, non-trap floor cell. `extra_trap` is the
+# tentative trap cell currently being evaluated — treated as trapped
+# during the scan even though it isn't yet committed to the grid.
+func _has_safe_walkable_within(target: Vector2i, extra_trap: Vector2i, radius: int) -> bool:
+	for dx in range(-radius, radius + 1):
+		var max_dy: int = radius - abs(dx)
+		for dy in range(-max_dy, max_dy + 1):
+			var n := target + Vector2i(dx, dy)
+			if not _in_bounds(n.x, n.y):
+				continue
+			if n == extra_trap:
+				continue
+			if not _is_walkable_room_cell(n):
+				continue
+			if grid[n.x][n.y].trap != null:
+				continue
+			return true
+	return false
 
 func _try_place_trap(spawn: TrapSpawn, cells_by_type: Dictionary) -> void:
 	var base_candidates := _trap_candidates_for_spawn(spawn, cells_by_type)

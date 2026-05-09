@@ -741,6 +741,214 @@ func test_corridor_clusters_skip_segments_with_existing_traps() -> void:
 		"no seed produced traps from both spawns — disjoint check was never exercised")
 
 # -------------------------------------------------------
+# Room density placement (Phase 8 Task 3 — Subtask B2)
+# -------------------------------------------------------
+
+func _make_room_density_spawn(trap: TrapData, chance: float, cov_min: float, cov_max: float, spacing: int = 0) -> TrapSpawn:
+	# Scattered count is zero so the only traps placed come from the
+	# room pass — keeps assertions clean.
+	var spawn := _make_trap_spawn(trap, 0, 0, ObjectSpawn.PLACEMENT_ROOM)
+	spawn.room_chance = chance
+	spawn.room_coverage_min_percent = cov_min
+	spawn.room_coverage_max_percent = cov_max
+	spawn.room_min_spacing = spacing
+	return spawn
+
+func _is_in_any_room(gen: LevelGenerator, pos: Vector2i) -> bool:
+	for room in gen._room_rects:
+		if (room as Rect2i).has_point(pos):
+			return true
+	return false
+
+func test_room_density_zero_chance_places_nothing() -> void:
+	var biome := _make_biome()
+	biome.trap_spawns = [_make_room_density_spawn(_make_trap_data(), 0.0, 30.0, 50.0)]
+	var gen := _make_generator(biome)
+	assert_eq(gen.traps.size(), 0)
+
+func test_room_density_only_in_room_cells() -> void:
+	# Every trap placed by the room pass must sit inside one of the
+	# generated room rects.
+	var biome := _make_biome()
+	biome.trap_spawns = [_make_room_density_spawn(_make_trap_data(), 1.0, 30.0, 50.0)]
+	var gen := _make_generator(biome)
+	for inst in gen.traps:
+		assert_true(_is_in_any_room(gen, inst.cell),
+			"room-pass trap at %s landed outside every room rect" % inst.cell)
+
+func test_room_density_respects_min_spacing() -> void:
+	# With min_spacing = 2, no two traps inside the SAME room may sit
+	# within 2 Manhattan tiles of each other.
+	for seed_n in [42, 99, 1337]:
+		var biome := _make_biome()
+		biome.trap_spawns = [_make_room_density_spawn(_make_trap_data(), 1.0, 50.0, 80.0, 2)]
+		var gen := _make_generator(biome, seed_n)
+		# Group traps by which room they landed in.
+		for room_obj in gen._room_rects:
+			var room: Rect2i = room_obj as Rect2i
+			var positions: Array = []
+			for inst in gen.traps:
+				if room.has_point(inst.cell):
+					positions.append(inst.cell)
+			for i in range(positions.size()):
+				for j in range(i + 1, positions.size()):
+					var d: int = abs(positions[i].x - positions[j].x) + abs(positions[i].y - positions[j].y)
+					assert_gte(d, 2,
+						"seed %d: traps in room %s at %s and %s are %d apart (need >= 2)" % [seed_n, room, positions[i], positions[j], d])
+
+func test_room_density_coverage_within_target_range() -> void:
+	# When chance = 1.0, each room receives a fraction of cells in the
+	# rolled coverage range, capped by graceful-degrade. With no
+	# spacing constraint, the realised count should fall within
+	# [floor(min%), ceil(max%)] of each room's eligible cell count.
+	var biome := _make_biome()
+	biome.trap_spawns = [_make_room_density_spawn(_make_trap_data(), 1.0, 25.0, 40.0)]
+	var gen := _make_generator(biome, 4242)
+	for room_obj in gen._room_rects:
+		var room: Rect2i = room_obj as Rect2i
+		var room_cells: Array = gen._eligible_room_cells(room)
+		var trap_count: int = 0
+		for inst in gen.traps:
+			if room.has_point(inst.cell):
+				trap_count += 1
+		# Eligible-cell count must be the SUM of trap_count + remaining
+		# room cells. Compute against total room footprint (excluding
+		# entrance / exit / object cells the helper already filters).
+		var total_room_cells: int = trap_count + room_cells.size()
+		if total_room_cells == 0:
+			continue  # tiny room with all cells excluded — no assertion
+		var min_expected: int = int(floor(total_room_cells * 0.25))
+		var max_expected: int = int(ceil(total_room_cells * 0.40))
+		assert_gte(trap_count, max(1, min_expected),
+			"room %s: trap_count %d below expected min %d (total %d)" % [room, trap_count, min_expected, total_room_cells])
+		assert_lte(trap_count, max_expected,
+			"room %s: trap_count %d above expected max %d (total %d)" % [room, trap_count, max_expected, total_room_cells])
+
+func test_room_density_skips_entrance_and_exit() -> void:
+	var biome := _make_biome()
+	# Aggressive coverage so the room pass would pick the entrance/exit
+	# cell if it weren't explicitly excluded.
+	biome.trap_spawns = [_make_room_density_spawn(_make_trap_data(), 1.0, 80.0, 100.0)]
+	var gen := _make_generator(biome)
+	assert_null(gen.grid[gen.entrance_pos.x][gen.entrance_pos.y].trap)
+	assert_null(gen.grid[gen.exit_pos.x][gen.exit_pos.y].trap)
+
+func test_room_max_distance_to_safe_cell_keeps_retreat_within_radius() -> void:
+	# With safe-cell radius = 2 and aggressive coverage, every walkable
+	# cell in (or just outside) every room must have a non-trap
+	# walkable cell within 2 Manhattan tiles. The placer rejects
+	# candidates that would isolate any cell.
+	for seed_n in [101, 202, 303, 404, 505]:
+		var biome := _make_biome()
+		var spawn := _make_room_density_spawn(_make_trap_data(), 1.0, 70.0, 90.0, 0)
+		spawn.room_max_distance_to_safe_cell = 2
+		biome.trap_spawns = [spawn]
+		var gen := _make_generator(biome, seed_n)
+		for room_obj in gen._room_rects:
+			var room: Rect2i = room_obj as Rect2i
+			# Check every walkable cell in the room AND a 1-cell margin.
+			var x0: int = room.position.x - 1
+			var y0: int = room.position.y - 1
+			var x1: int = room.position.x + room.size.x
+			var y1: int = room.position.y + room.size.y
+			for cx in range(x0, x1 + 1):
+				for cy in range(y0, y1 + 1):
+					if cx < 0 or cx >= gen.grid_width or cy < 0 or cy >= gen.grid_height:
+						continue
+					var cpos := Vector2i(cx, cy)
+					var cell: GridCell = gen.grid[cx][cy]
+					if cell.cell_type != GridCell.CellType.FLOOR:
+						continue
+					if cell.object != null and cell.object.data != null and cell.object.data.blocks_movement:
+						continue
+					# Find a non-trap walkable cell within radius 2.
+					var found := false
+					for dx in range(-2, 3):
+						var max_dy: int = 2 - abs(dx)
+						for dy in range(-max_dy, max_dy + 1):
+							var n := cpos + Vector2i(dx, dy)
+							if n.x < 0 or n.x >= gen.grid_width or n.y < 0 or n.y >= gen.grid_height:
+								continue
+							var ncell: GridCell = gen.grid[n.x][n.y]
+							if ncell.cell_type != GridCell.CellType.FLOOR:
+								continue
+							if ncell.object != null and ncell.object.data != null and ncell.object.data.blocks_movement:
+								continue
+							if ncell.trap == null:
+								found = true
+								break
+						if found:
+							break
+					assert_true(found,
+						"seed %d: cell %s in/near room %s has no non-trap walkable cell within 2 Manhattan tiles" % [seed_n, cpos, room])
+
+func test_room_density_exclusivity_blocks_second_spawn() -> void:
+	# Two spawns targeting rooms. Spawn A (chance < 1) leaves some
+	# rooms untrapped — those remain available for spawn B. Spawn B
+	# has allow_mixed_room_traps = false, so it should ONLY land in
+	# rooms A skipped, never in rooms A trapped first.
+	var trap_a := _make_trap_data(TrapData.Trigger.STEP, 3)
+	var trap_b := _make_trap_data(TrapData.Trigger.TIMED, 3)
+	var observed_b_landed: bool = false
+	for seed_n in [10, 20, 30, 40, 50, 60, 70, 80]:
+		# Fresh spawn instances per iteration — spawn objects carry no
+		# generator state, but constructing them inside the loop matches
+		# the pattern in other multi-seed tests.
+		var spawn_a := _make_room_density_spawn(trap_a, 0.5, 25.0, 40.0)
+		var spawn_b := _make_room_density_spawn(trap_b, 1.0, 25.0, 40.0)
+		spawn_b.allow_mixed_room_traps = false
+		var biome := _make_biome()
+		biome.trap_spawns = [spawn_a, spawn_b]
+		var gen := _make_generator(biome, seed_n)
+		for room_obj in gen._room_rects:
+			var room: Rect2i = room_obj as Rect2i
+			var has_a: bool = false
+			var has_b: bool = false
+			for inst in gen.traps:
+				if not room.has_point(inst.cell):
+					continue
+				if inst.data == trap_a:
+					has_a = true
+				elif inst.data == trap_b:
+					has_b = true
+			if has_b:
+				observed_b_landed = true
+				assert_false(has_a,
+					"seed %d: room %s holds traps from both spawns — spawn_b should have skipped (allow_mixed = false)" % [seed_n, room])
+	assert_true(observed_b_landed,
+		"no seed produced any spawn_b traps — exclusivity rule was never exercised")
+
+func test_room_density_allows_mixing_when_flag_true() -> void:
+	# Sibling test of exclusivity: with allow_mixed_room_traps = true
+	# on both spawns, a room CAN hold traps from both. Just confirm
+	# at least one seed in the sweep produces a mixed room.
+	var trap_a := _make_trap_data(TrapData.Trigger.STEP, 3)
+	var trap_b := _make_trap_data(TrapData.Trigger.TIMED, 3)
+	var observed_mixed: bool = false
+	for seed_n in [11, 22, 33, 44, 55, 66]:
+		var biome := _make_biome()
+		biome.trap_spawns = [
+			_make_room_density_spawn(trap_a, 1.0, 25.0, 40.0),
+			_make_room_density_spawn(trap_b, 1.0, 25.0, 40.0),
+		]
+		var gen := _make_generator(biome, seed_n)
+		for room_obj in gen._room_rects:
+			var room: Rect2i = room_obj as Rect2i
+			var has_a: bool = false
+			var has_b: bool = false
+			for inst in gen.traps:
+				if not room.has_point(inst.cell):
+					continue
+				if inst.data == trap_a:
+					has_a = true
+				elif inst.data == trap_b:
+					has_b = true
+			if has_a and has_b:
+				observed_mixed = true
+	assert_true(observed_mixed,
+		"no seed produced a room holding both spawns' traps — mixing didn't happen even with the flag enabled")
+
+# -------------------------------------------------------
 # Door placement (Phase 8 Task 2a)
 # -------------------------------------------------------
 
