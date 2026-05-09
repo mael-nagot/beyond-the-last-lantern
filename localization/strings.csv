@@ -28,3 +28,5 @@ trap.spike_step.name,Spike Trap
 trap.spike_step.description,Hidden floor spikes that snap up when stepped on.
 trap.spike_timed.name,Cycling Spike Trap
 trap.spike_timed.description,Floor spikes that periodically extend and retract.
+projectile_trap.fireball_timed.name,Fireball Launcher
+projectile_trap.fireball_timed.description,A wall-mounted launcher that fires fireballs at fixed intervals.

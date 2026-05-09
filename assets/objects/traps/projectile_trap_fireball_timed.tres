@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ProjectileTrapData" format=3 uid="uid://cxpqvvvbx6foo"]
+
+[ext_resource type="Script" uid="uid://cam2dc4t0qvmv" path="res://scripts/ProjectileTrapData.gd" id="1_jmvhx"]
+[ext_resource type="Texture2D" uid="uid://dnb4874j2x0lw" path="res://assets/textures/objects/traps/fireball_launcher.png" id="1_umsce"]
+
+[resource]
+script = ExtResource("1_jmvhx")
+name_key = "projectile_trap.fireball_timed.name"
+description_key = "projectile_trap.fireball_timed.description"
+max_escape_distance = 3
+launcher_texture = ExtResource("1_umsce")
+launcher_world_height = 2.0
+launcher_y_offset = -0.6
+metadata/_custom_type_script = "uid://cam2dc4t0qvmv"

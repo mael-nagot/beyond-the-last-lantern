@@ -87,6 +87,14 @@ extends Resource
 # count_min..count_max single-cell trap placements.
 @export var trap_spawns: Array[TrapSpawn] = []
 
+# Projectile traps (Phase 8 Task 3 — Subtask C). Wall-mounted
+# launchers that fire across cells. Placed AFTER spike traps and
+# BEFORE wall decorations so the shared `_wall_faces_used` registry
+# blocks decorations from claiming a launcher's wall face. Separate
+# system from `trap_spawns` — projectile traps live on wall faces,
+# not floor cells.
+@export var projectile_trap_spawns: Array[ProjectileTrapSpawn] = []
+
 # Wall-mounted decorations (paintings, torches, lanterns). Placed
 # LAST among scenery — they don't gate or interact with anything,
 # they just dress wall faces. Each entry attaches its decoration to
