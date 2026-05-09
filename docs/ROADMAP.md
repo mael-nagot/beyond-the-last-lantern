@@ -373,11 +373,12 @@ Generalised from "fireball trap" to a full projectile system — the data resour
 6. ✅ Localization: `projectile_trap.dart_timed.{name,description}`, `projectile_trap.dart_plate.{name,description}`, `projectile_trap.fireball_timed.{name,description}`, `projectile_trap.poison_dart.{name,description}`
 7. ✅ Tests: unit — `test_projectile_trap_data` (defaults, predicates, display, status enum), `test_projectile` (creation, tick, cell tracking, multi-cell jump, edge cases), `test_projectile_trap_instance` (TIMED lifecycle, PRESSURE_PLATE lifecycle, player hit, no-refire, cooldown, null safety), `test_projectile_trap_spawn` (defaults, predicates)
 
-##### Subtask B — Placement algorithm
-1. `LevelGenerator._place_projectile_traps()` — runs after `_place_traps()`, before `_place_items()`
-2. Corridor placement: launcher at segment extremity wall, other end adjacent to junction, segment length ≤ `max_escape_distance`. PRESSURE_PLATE: plate on a cell satisfying `max_plate_to_junction_distance` from nearest junction and `min_plate_to_launcher_distance` from launcher. Plate must be in the projectile's path.
-3. Room placement: launcher on eligible wall face. Full projectile path traced — rejected if any cell is not a room cell (prevents projectiles from exiting rooms into corridors). `max_per_room` cap. PRESSURE_PLATE: plate on a room floor cell in the projectile path, `min_plate_to_launcher_distance` from launcher.
-4. `projectile_traps: Array[ProjectileTrapInstance]` on LevelGenerator (flat list for Game.gd tick iteration)
+##### Subtask B — Placement algorithm ✅ (code)
+1. ✅ `LevelGenerator._place_projectile_traps()` — runs after `_place_traps()`, before `_place_items()`. Detects corridor segments and junctions, then iterates `projectile_trap_spawns_pool`.
+2. ✅ Corridor placement: `_place_corridor_projectile_traps()` — launcher at segment extremity wall face, fire direction must reach a junction (escape route), segment length ≤ `max_escape_distance`. `_find_corridor_launcher_candidates()` builds (cell, wall_dir) pairs from segment extremities. PRESSURE_PLATE: `_find_corridor_plate_cell()` walks the fire path to find a cell satisfying `max_plate_to_junction_distance` from nearest junction and `min_plate_to_launcher_distance` from launcher. Plate must be in the projectile's path. Launcher wall face is registered in `_wall_faces_used` so decorations can't overlap.
+3. ✅ Room placement: `_place_room_projectile_traps()` — launcher on eligible wall face inside room. `_projectile_path_stays_in_room()` traces the full projectile path — rejected if any cell exits the room before hitting a wall. `max_per_room` cap per room. PRESSURE_PLATE: `_find_room_plate_cell()` walks the fire path within the room for a cell at `min_plate_to_launcher_distance` from launcher.
+4. ✅ `projectile_traps: Array[ProjectileTrapInstance]` on LevelGenerator (flat list for Game.gd tick iteration). `_too_close_to_existing_projectile_trap()` enforces `min_distance_to_other_projectile_trap` spreading.
+5. ✅ Tests: integration — empty spawns produce nothing, corridor/room placement produces traps across seeds, launcher on wall face, fire direction opposes wall, not on entrance/exit, min distance honoured, wall face not reused by decorations, room path stays in room, max_per_room honoured, pressure plate distance/path constraints.
 
 ##### Subtask C — Rendering + game logic + map
 1. Launcher rendering: wall-mounted Sprite3D (non-billboarded, same positioning as wall decorations) under `ProjectileTrapsRoot`

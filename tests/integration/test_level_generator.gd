@@ -2425,3 +2425,212 @@ func test_step_traps_adjacent_to_chests_are_allowed() -> void:
 						found_step_adjacent = true
 	assert_true(found_step_adjacent,
 		"step traps adjacent to chests should be allowed (timed adjacency rule only applies to TIMED traps)")
+
+# -------------------------------------------------------
+# Projectile trap placement (Phase 8 Task 3 follow-up B)
+# -------------------------------------------------------
+
+func _make_projectile_trap_data(trigger: int = ProjectileTrapData.Trigger.TIMED) -> ProjectileTrapData:
+	var data := ProjectileTrapData.new()
+	data.trigger = trigger
+	data.projectile_speed = 5.0
+	data.damage = 5
+	data.name_key = "test.proj_trap"
+	return data
+
+func _make_projectile_trap_spawn(trap: ProjectileTrapData, corridor_chance: float = 0.0, room_chance: float = 0.0) -> ProjectileTrapSpawn:
+	var spawn := ProjectileTrapSpawn.new()
+	spawn.trap = trap
+	spawn.corridor_segment_chance = corridor_chance
+	spawn.room_chance = room_chance
+	return spawn
+
+func test_projectile_traps_empty_when_no_spawns() -> void:
+	var biome := _make_biome()
+	var gen := _make_generator(biome)
+	assert_eq(gen.projectile_traps.size(), 0)
+
+func test_projectile_traps_corridor_placement_produces_traps() -> void:
+	var spawn := _make_projectile_trap_spawn(_make_projectile_trap_data(), 1.0)
+	spawn.max_escape_distance = 20
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [spawn]
+	var found := false
+	for s in [100, 200, 300, 400, 500]:
+		var gen := _make_generator(biome, s)
+		if gen.projectile_traps.size() > 0:
+			found = true
+			break
+	assert_true(found, "corridor placement with 100% chance should produce at least one trap across 5 seeds")
+
+func test_projectile_trap_launcher_is_on_wall_face() -> void:
+	var spawn := _make_projectile_trap_spawn(_make_projectile_trap_data(), 1.0)
+	spawn.max_escape_distance = 20
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [spawn]
+	for s in [100, 200, 300]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			var wall_n: Vector2i = inst.launcher_cell + inst.wall_dir
+			assert_true(
+				gen.grid[wall_n.x][wall_n.y].cell_type == GridCell.CellType.WALL,
+				"launcher at %s with wall_dir %s: neighbour %s should be WALL" % [inst.launcher_cell, inst.wall_dir, wall_n])
+			var cell: GridCell = gen.grid[inst.launcher_cell.x][inst.launcher_cell.y]
+			assert_eq(cell.cell_type, GridCell.CellType.FLOOR,
+				"launcher cell %s should be FLOOR" % inst.launcher_cell)
+
+func test_projectile_trap_fire_direction_opposes_wall() -> void:
+	var spawn := _make_projectile_trap_spawn(_make_projectile_trap_data(), 1.0)
+	spawn.max_escape_distance = 20
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [spawn]
+	for s in [100, 200]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			assert_eq(inst.fire_direction, -inst.wall_dir,
+				"fire direction should be opposite of wall_dir")
+
+func test_projectile_trap_not_on_entrance_or_exit() -> void:
+	var spawn := _make_projectile_trap_spawn(_make_projectile_trap_data(), 1.0)
+	spawn.max_escape_distance = 20
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [spawn]
+	for s in [100, 200, 300]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			assert_ne(inst.launcher_cell, gen.entrance_pos,
+				"launcher should not be on entrance")
+			assert_ne(inst.launcher_cell, gen.exit_pos,
+				"launcher should not be on exit")
+
+func test_projectile_trap_min_distance_honoured() -> void:
+	var spawn := _make_projectile_trap_spawn(_make_projectile_trap_data(), 1.0)
+	spawn.max_escape_distance = 20
+	spawn.min_distance_to_other_projectile_trap = 5
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [spawn]
+	for s in [100, 200, 300]:
+		var gen := _make_generator(biome, s)
+		for i in range(gen.projectile_traps.size()):
+			for j in range(i + 1, gen.projectile_traps.size()):
+				var a: Vector2i = gen.projectile_traps[i].launcher_cell
+				var b: Vector2i = gen.projectile_traps[j].launcher_cell
+				var dist := abs(a.x - b.x) + abs(a.y - b.y)
+				assert_gte(dist, 5,
+					"projectile traps at %s and %s are %d apart (need >= 5)" % [a, b, dist])
+
+func test_projectile_trap_wall_face_not_reused_by_decorations() -> void:
+	var spawn := _make_projectile_trap_spawn(_make_projectile_trap_data(), 1.0)
+	spawn.max_escape_distance = 20
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [spawn]
+	for s in [100, 200]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			var face := WallDecorationInstance.face_key(inst.launcher_cell, inst.wall_dir)
+			for deco in gen.wall_decorations:
+				assert_ne(deco.get_face_key(), face,
+					"launcher face %s conflicts with decoration" % face)
+
+func test_projectile_trap_room_placement_produces_traps() -> void:
+	var spawn := _make_projectile_trap_spawn(_make_projectile_trap_data(), 0.0, 1.0)
+	spawn.max_per_room = 4
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [spawn]
+	var found := false
+	for s in [100, 200, 300, 400, 500]:
+		var gen := _make_generator(biome, s)
+		if gen.projectile_traps.size() > 0:
+			found = true
+			break
+	assert_true(found, "room placement with 100% chance should produce at least one trap across 5 seeds")
+
+func test_projectile_trap_room_path_stays_in_room() -> void:
+	var spawn := _make_projectile_trap_spawn(_make_projectile_trap_data(), 0.0, 1.0)
+	spawn.max_per_room = 4
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [spawn]
+	for s in [100, 200, 300]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			if not gen._is_in_room(inst.launcher_cell):
+				continue
+			var room: Rect2i = Rect2i()
+			for r in gen._room_rects:
+				if (r as Rect2i).has_point(inst.launcher_cell):
+					room = r as Rect2i
+					break
+			# Walk the entire path and verify it stays in the room until wall.
+			var cur: Vector2i = inst.launcher_cell + inst.fire_direction
+			while true:
+				if not gen._in_bounds(cur.x, cur.y):
+					break
+				var cell: GridCell = gen.grid[cur.x][cur.y]
+				if cell.cell_type == GridCell.CellType.WALL:
+					break
+				assert_true(room.has_point(cur),
+					"projectile from %s passes through %s which is outside room %s" % [inst.launcher_cell, cur, room])
+				cur = cur + inst.fire_direction
+
+func test_projectile_trap_room_max_per_room_honoured() -> void:
+	var spawn := _make_projectile_trap_spawn(_make_projectile_trap_data(), 0.0, 1.0)
+	spawn.max_per_room = 1
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [spawn]
+	for s in [100, 200, 300]:
+		var gen := _make_generator(biome, s)
+		for r in gen._room_rects:
+			var room: Rect2i = r as Rect2i
+			var count := 0
+			for inst in gen.projectile_traps:
+				if room.has_point(inst.launcher_cell):
+					count += 1
+			assert_lte(count, 1,
+				"room %s has %d projectile traps (max_per_room = 1)" % [room, count])
+
+func test_pressure_plate_placement_corridor() -> void:
+	var spawn := _make_projectile_trap_spawn(
+		_make_projectile_trap_data(ProjectileTrapData.Trigger.PRESSURE_PLATE), 1.0)
+	spawn.max_escape_distance = 20
+	spawn.min_plate_to_launcher_distance = 2
+	spawn.max_plate_to_junction_distance = 10
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [spawn]
+	var found := false
+	for s in [100, 200, 300, 400, 500]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			found = true
+			assert_ne(inst.plate_cell, Vector2i(-1, -1),
+				"pressure plate trap should have a plate_cell")
+			var dist_to_launcher := abs(inst.plate_cell.x - inst.launcher_cell.x) + abs(inst.plate_cell.y - inst.launcher_cell.y)
+			assert_gte(dist_to_launcher, 2,
+				"plate at %s is %d from launcher at %s (need >= 2)" % [inst.plate_cell, dist_to_launcher, inst.launcher_cell])
+	assert_true(found, "pressure plate corridor placement should produce at least one trap across 5 seeds")
+
+func test_pressure_plate_on_projectile_path() -> void:
+	var spawn := _make_projectile_trap_spawn(
+		_make_projectile_trap_data(ProjectileTrapData.Trigger.PRESSURE_PLATE), 1.0, 1.0)
+	spawn.max_escape_distance = 20
+	spawn.min_plate_to_launcher_distance = 2
+	spawn.max_plate_to_junction_distance = 10
+	spawn.max_per_room = 4
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [spawn]
+	for s in [100, 200, 300]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			if inst.plate_cell == Vector2i(-1, -1):
+				continue
+			# The plate must lie on the line from launcher in fire_direction.
+			var diff: Vector2i = inst.plate_cell - inst.launcher_cell
+			if inst.fire_direction.x != 0:
+				assert_eq(diff.y, 0,
+					"plate %s should be on same row as launcher %s (fire east/west)" % [inst.plate_cell, inst.launcher_cell])
+				assert_true(sign(diff.x) == sign(inst.fire_direction.x),
+					"plate %s should be in fire direction from launcher %s" % [inst.plate_cell, inst.launcher_cell])
+			else:
+				assert_eq(diff.x, 0,
+					"plate %s should be on same column as launcher %s (fire north/south)" % [inst.plate_cell, inst.launcher_cell])
+				assert_true(sign(diff.y) == sign(inst.fire_direction.y),
+					"plate %s should be in fire direction from launcher %s" % [inst.plate_cell, inst.launcher_cell])

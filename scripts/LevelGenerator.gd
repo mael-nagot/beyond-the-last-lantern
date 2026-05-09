@@ -21,6 +21,7 @@ var objects_pool: Array[ObjectSpawn] = []
 var linked_objects_pool: Array[LinkedObjectSpawn] = []
 var key_door_spawns_pool: Array[KeyDoorSpawn] = []
 var trap_spawns_pool: Array[TrapSpawn] = []
+var projectile_trap_spawns_pool: Array[ProjectileTrapSpawn] = []
 var wall_decorations_pool: Array[WallDecorationSpawn] = []
 
 var grid: Array = []
@@ -46,6 +47,7 @@ var _wall_faces_used: Dictionary = {}  # face_key (String) -> true
 # whole grid each frame. Subtask A places single-cell traps; Subtask
 # B layers corridor clusters / room density.
 var traps: Array[TrapInstance] = []
+var projectile_traps: Array[ProjectileTrapInstance] = []
 # Subset of trap cells produced by the corridor-cluster pass (Subtask
 # B1). The scattered pass uses this to exclude its candidates from
 # being 4-adjacent to a cluster cell — without it, a 5-cell segment
@@ -78,6 +80,7 @@ func configure(biome: BiomeData) -> void:
 	linked_objects_pool = biome.linked_objects
 	key_door_spawns_pool = biome.key_door_spawns
 	trap_spawns_pool = biome.trap_spawns
+	projectile_trap_spawns_pool = biome.projectile_trap_spawns
 	wall_decorations_pool = biome.wall_decorations
 
 func generate() -> void:
@@ -87,6 +90,7 @@ func generate() -> void:
 	wall_decorations.clear()
 	_wall_faces_used.clear()
 	traps.clear()
+	projectile_traps.clear()
 	_cluster_cells.clear()
 	if room_count > 0:
 		_place_rooms()
@@ -102,6 +106,7 @@ func generate() -> void:
 	_place_linked_objects()
 	_place_key_doors()
 	_place_traps()
+	_place_projectile_traps()
 	_validate_chest_lever_timed_adjacency()
 	_validate_timed_trap_safe_distance()
 	_place_items()
@@ -2081,6 +2086,227 @@ func _place_items() -> void:
 				grid[pos.x][pos.y].items.append(ItemInstance.create(entry.item, 1))
 				break
 			distance -= 1
+
+# -------------------------------------------------------
+# Projectile traps (wall-mounted launchers)
+# -------------------------------------------------------
+func _place_projectile_traps() -> void:
+	if projectile_trap_spawns_pool.is_empty():
+		return
+	var segments: Array = _detect_corridor_segments()
+	var junctions: Dictionary = _detect_junctions()
+	for spawn in projectile_trap_spawns_pool:
+		if spawn == null or spawn.trap == null:
+			continue
+		if spawn.uses_corridor_placement():
+			_place_corridor_projectile_traps(spawn, segments, junctions)
+		if spawn.uses_room_placement():
+			_place_room_projectile_traps(spawn, junctions)
+
+func _detect_junctions() -> Dictionary:
+	var result: Dictionary = {}
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var pos := Vector2i(x, y)
+			var cell: GridCell = grid[x][y]
+			if cell.cell_type != GridCell.CellType.FLOOR:
+				continue
+			if classify_cell(pos) != ObjectSpawn.PLACEMENT_CORRIDOR:
+				continue
+			var corridor_n := 0
+			for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				var n: Vector2i = pos + d
+				if not _in_bounds(n.x, n.y):
+					continue
+				if grid[n.x][n.y].cell_type != GridCell.CellType.FLOOR:
+					continue
+				if classify_cell(n) == ObjectSpawn.PLACEMENT_CORRIDOR:
+					corridor_n += 1
+			if corridor_n >= 3:
+				result[pos] = true
+	return result
+
+func _place_corridor_projectile_traps(spawn: ProjectileTrapSpawn, segments: Array, junctions: Dictionary) -> void:
+	var shuffled_segments := segments.duplicate()
+	shuffled_segments.shuffle()
+	for segment in shuffled_segments:
+		if randf() >= spawn.corridor_segment_chance:
+			continue
+		# Segment must be short enough for the player to escape.
+		if segment.size() > spawn.max_escape_distance:
+			continue
+		# Find extremity cells — segment cells that are adjacent to a wall
+		# on one side and adjacent to a junction on the other.
+		var placed_in_segment := 0
+		var attempts: Array = _find_corridor_launcher_candidates(segment, junctions)
+		attempts.shuffle()
+		for candidate in attempts:
+			if placed_in_segment >= spawn.max_per_corridor_segment:
+				break
+			var launcher_cell: Vector2i = candidate[0]
+			var wall_dir: Vector2i = candidate[1]
+			if _too_close_to_existing_projectile_trap(launcher_cell, spawn.min_distance_to_other_projectile_trap):
+				continue
+			# For PRESSURE_PLATE, find a valid plate cell before committing.
+			var plate_cell := Vector2i(-1, -1)
+			if spawn.trap.is_pressure_plate():
+				plate_cell = _find_corridor_plate_cell(launcher_cell, -wall_dir, segment, junctions, spawn)
+				if plate_cell == Vector2i(-1, -1):
+					continue
+			var inst := ProjectileTrapInstance.create(spawn.trap, launcher_cell, wall_dir, plate_cell)
+			projectile_traps.append(inst)
+			_wall_faces_used[WallDecorationInstance.face_key(launcher_cell, wall_dir)] = true
+			placed_in_segment += 1
+
+func _find_corridor_launcher_candidates(segment: Array, junctions: Dictionary) -> Array:
+	var seg_set: Dictionary = {}
+	for pos in segment:
+		seg_set[pos] = true
+	var result: Array = []
+	for pos in segment:
+		if pos == entrance_pos or pos == exit_pos:
+			continue
+		# Check each wall direction — the launcher must be on a wall face.
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			var wall_n: Vector2i = pos + d
+			if not _in_bounds(wall_n.x, wall_n.y):
+				continue
+			if grid[wall_n.x][wall_n.y].cell_type != GridCell.CellType.WALL:
+				continue
+			if _wall_faces_used.has(WallDecorationInstance.face_key(pos, d)):
+				continue
+			# The cell must be at a segment extremity: one end has the
+			# wall, the other direction along the fire path must
+			# eventually reach a junction (escape route).
+			var fire_dir: Vector2i = -d
+			if _path_reaches_junction(pos, fire_dir, seg_set, junctions):
+				result.append([pos, d])
+	return result
+
+func _path_reaches_junction(start: Vector2i, direction: Vector2i, seg_set: Dictionary, junctions: Dictionary) -> bool:
+	var cur: Vector2i = start + direction
+	while true:
+		if junctions.has(cur):
+			return true
+		if not seg_set.has(cur):
+			return false
+		cur = cur + direction
+	return false
+
+func _find_corridor_plate_cell(launcher_cell: Vector2i, fire_dir: Vector2i, segment: Array, junctions: Dictionary, spawn: ProjectileTrapSpawn) -> Vector2i:
+	var seg_set: Dictionary = {}
+	for pos in segment:
+		seg_set[pos] = true
+	# Walk along the fire path and collect candidate plate cells.
+	var candidates: Array[Vector2i] = []
+	var cur: Vector2i = launcher_cell + fire_dir
+	while seg_set.has(cur) or junctions.has(cur):
+		var dist_to_launcher := _manhattan(cur, launcher_cell)
+		if dist_to_launcher < spawn.min_plate_to_launcher_distance:
+			cur = cur + fire_dir
+			continue
+		var dist_to_junction := _distance_to_nearest_junction(cur, junctions)
+		if dist_to_junction <= spawn.max_plate_to_junction_distance:
+			candidates.append(cur)
+		cur = cur + fire_dir
+	if candidates.is_empty():
+		return Vector2i(-1, -1)
+	return candidates[randi() % candidates.size()]
+
+func _distance_to_nearest_junction(pos: Vector2i, junctions: Dictionary) -> int:
+	var best := 999
+	for jpos in junctions:
+		var d := _manhattan(pos, jpos as Vector2i)
+		if d < best:
+			best = d
+	return best
+
+func _place_room_projectile_traps(spawn: ProjectileTrapSpawn, junctions: Dictionary) -> void:
+	for room_obj in _room_rects:
+		var room: Rect2i = room_obj as Rect2i
+		if randf() >= spawn.room_chance:
+			continue
+		var placed_in_room := 0
+		var candidates := _find_room_launcher_candidates(room)
+		candidates.shuffle()
+		for candidate in candidates:
+			if placed_in_room >= spawn.max_per_room:
+				break
+			var launcher_cell: Vector2i = candidate[0]
+			var wall_dir: Vector2i = candidate[1]
+			if _too_close_to_existing_projectile_trap(launcher_cell, spawn.min_distance_to_other_projectile_trap):
+				continue
+			# Trace projectile path — reject if it exits the room.
+			if not _projectile_path_stays_in_room(launcher_cell, -wall_dir, room):
+				continue
+			# For PRESSURE_PLATE, find a valid plate cell.
+			var plate_cell := Vector2i(-1, -1)
+			if spawn.trap.is_pressure_plate():
+				plate_cell = _find_room_plate_cell(launcher_cell, -wall_dir, room, spawn)
+				if plate_cell == Vector2i(-1, -1):
+					continue
+			var inst := ProjectileTrapInstance.create(spawn.trap, launcher_cell, wall_dir, plate_cell)
+			projectile_traps.append(inst)
+			_wall_faces_used[WallDecorationInstance.face_key(launcher_cell, wall_dir)] = true
+			placed_in_room += 1
+
+func _find_room_launcher_candidates(room: Rect2i) -> Array:
+	var result: Array = []
+	for x in range(room.position.x, room.position.x + room.size.x):
+		for y in range(room.position.y, room.position.y + room.size.y):
+			if not _in_bounds(x, y):
+				continue
+			var pos := Vector2i(x, y)
+			var cell: GridCell = grid[x][y]
+			if cell.cell_type != GridCell.CellType.FLOOR:
+				continue
+			if pos == entrance_pos or pos == exit_pos:
+				continue
+			for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				if not _is_decoratable_wall(pos, d):
+					continue
+				result.append([pos, d])
+	return result
+
+func _projectile_path_stays_in_room(launcher_cell: Vector2i, fire_dir: Vector2i, room: Rect2i) -> bool:
+	var cur: Vector2i = launcher_cell + fire_dir
+	while true:
+		if not _in_bounds(cur.x, cur.y):
+			return true
+		var cell: GridCell = grid[cur.x][cur.y]
+		if cell.cell_type == GridCell.CellType.WALL:
+			return true
+		if not room.has_point(cur):
+			return false
+		cur = cur + fire_dir
+	return true
+
+func _find_room_plate_cell(launcher_cell: Vector2i, fire_dir: Vector2i, room: Rect2i, spawn: ProjectileTrapSpawn) -> Vector2i:
+	var candidates: Array[Vector2i] = []
+	var cur: Vector2i = launcher_cell + fire_dir
+	while true:
+		if not _in_bounds(cur.x, cur.y):
+			break
+		var cell: GridCell = grid[cur.x][cur.y]
+		if cell.cell_type == GridCell.CellType.WALL:
+			break
+		if not room.has_point(cur):
+			break
+		var dist_to_launcher := _manhattan(cur, launcher_cell)
+		if dist_to_launcher >= spawn.min_plate_to_launcher_distance:
+			candidates.append(cur)
+		cur = cur + fire_dir
+	if candidates.is_empty():
+		return Vector2i(-1, -1)
+	return candidates[randi() % candidates.size()]
+
+func _too_close_to_existing_projectile_trap(pos: Vector2i, min_distance: int) -> bool:
+	if min_distance <= 0:
+		return false
+	for inst in projectile_traps:
+		if _manhattan(pos, inst.launcher_cell) < min_distance:
+			return true
+	return false
 
 # -------------------------------------------------------
 # Wall decorations (paintings, torches, lanterns)
