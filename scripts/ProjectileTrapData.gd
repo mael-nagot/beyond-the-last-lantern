@@ -16,9 +16,9 @@ extends Resource
 #     pressure-plate cell linkage).
 #
 # One .tres per variant lives in `res://assets/objects/`. Different
-# variants (dart timed, poison dart, fireball, ice shard) share this
-# resource type but configure damage / sprites / sounds / status
-# effects independently — no code branches per variant.
+# variants (fireball timed, poison dart, fireball pressure, ice shard)
+# share this resource type but configure damage / sprites / sounds /
+# status effects independently — no code branches per variant.
 #
 # **Subtask scope:** C1 lands the data fields, corridor placement, and
 # static launcher rendering. The flight phase (C2), damage (C3),
