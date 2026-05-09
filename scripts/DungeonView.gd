@@ -40,10 +40,19 @@ var _doors_root: Node3D
 var _decorations_root: Node3D
 var _traps_root: Node3D
 # Wall-mounted projectile-trap launchers (Phase 8 Task 3 — Subtask C).
-# Subtask C1 renders the launcher sprite statically (no firing yet).
-# Future subtasks add the projectile-flight subtree (C2) and a plate
-# decal subtree (C4) under the same root.
+# Subtask C1 renders the launcher sprite statically. Subtask C2 adds
+# in-flight projectile sprites under `_projectiles_root` (separate
+# root so projectile churn doesn't disturb the launcher subtree). C4
+# will add a plate decal subtree.
 var _projectile_traps_root: Node3D
+var _projectiles_root: Node3D
+# ProjectileInstance → Sprite3D. DungeonView spawns one Sprite3D per
+# active projectile in `spawn_projectile_visual`, syncs its position
+# and per-camera-angle texture in `update_projectile_visual` (called
+# every frame by Game.gd while the projectile is in flight), and
+# frees it in `despawn_projectile_visual` on impact. The dictionary
+# keeps the lookup O(1) without scanning the scene tree.
+var _projectile_visuals: Dictionary = {}
 # TrapInstance → Dictionary { "root": Node3D, "spikes_root": Node3D }
 # Lookup so update_trap_visual / _refresh_trap_spike_positions can
 # touch the spike subtree without walking the scene tree. The floor
@@ -79,6 +88,7 @@ func setup(gen: LevelGenerator) -> void:
 	_ensure_decorations_root()
 	_ensure_traps_root()
 	_ensure_projectile_traps_root()
+	_ensure_projectiles_root()
 	_ensure_drop_target()
 	_build_mesh()
 	_build_objects()
@@ -86,6 +96,7 @@ func setup(gen: LevelGenerator) -> void:
 	_build_items()
 	_build_traps()
 	_build_projectile_traps()
+	_clear_projectile_visuals()
 	_build_wall_decorations()
 	_place_camera_at_entrance()
 	_apply_biome_environment()
@@ -133,6 +144,25 @@ func _ensure_projectile_traps_root() -> void:
 	_projectile_traps_root = Node3D.new()
 	_projectile_traps_root.name = "ProjectileTrapsRoot"
 	sub_viewport.add_child(_projectile_traps_root)
+
+func _ensure_projectiles_root() -> void:
+	if _projectiles_root != null and is_instance_valid(_projectiles_root):
+		return
+	_projectiles_root = Node3D.new()
+	_projectiles_root.name = "ProjectilesRoot"
+	sub_viewport.add_child(_projectiles_root)
+
+# Frees every active projectile sprite and resets the lookup dict.
+# Called from `setup()` so a level transition doesn't leak in-flight
+# projectile sprites from the previous level (the projectile list on
+# `LevelGenerator` is also cleared in `generate()`, so the two stay
+# in sync).
+func _clear_projectile_visuals() -> void:
+	for proj in _projectile_visuals.keys():
+		var sprite: Node = _projectile_visuals[proj]
+		if is_instance_valid(sprite):
+			sprite.queue_free()
+	_projectile_visuals.clear()
 
 func _ensure_drop_target() -> void:
 	if drop_target != null and is_instance_valid(drop_target):
@@ -977,6 +1007,82 @@ func _projectile_launcher_y_rotation_deg(inst: ProjectileTrapInstance) -> float:
 	if inst.wall_dir == Vector2i(1, 0):   # east wall
 		return 270.0
 	return 0.0
+
+# -------------------------------------------------------
+# In-flight projectile rendering (Phase 8 Task 3 — Subtask C2)
+# -------------------------------------------------------
+#
+# One Sprite3D per active projectile under `ProjectilesRoot`. Game.gd
+# calls `spawn_projectile_visual` when a launcher fires,
+# `update_projectile_visual` every frame the projectile is alive
+# (syncs world position from `ProjectileInstance.cell_pos` and re-picks
+# the texture for the current camera angle), and
+# `despawn_projectile_visual` on impact. The 4-direction sprite picker
+# is a static method on `ProjectileInstance` so its logic is unit-
+# testable without a scene tree.
+
+func spawn_projectile_visual(proj: ProjectileInstance) -> void:
+	if proj == null or proj.data == null:
+		return
+	_ensure_projectiles_root()
+	var sprite := Sprite3D.new()
+	sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+	_projectiles_root.add_child(sprite)
+	_projectile_visuals[proj] = sprite
+	# Set initial position + texture in one call so the sprite never
+	# renders at world origin for a frame before the first update.
+	update_projectile_visual(proj)
+
+func update_projectile_visual(proj: ProjectileInstance) -> void:
+	if proj == null or not _projectile_visuals.has(proj):
+		return
+	var sprite: Sprite3D = _projectile_visuals[proj]
+	if not is_instance_valid(sprite):
+		_projectile_visuals.erase(proj)
+		return
+	# World position from continuous cell coordinates. Y sits at the
+	# corridor mid-height + designer y-offset so a thrown projectile
+	# clears the floor and stays visible.
+	var x: float = proj.cell_pos.x * CELL_SIZE
+	var z: float = proj.cell_pos.y * CELL_SIZE
+	var y: float = wall_height * 0.5 + proj.data.projectile_y_offset
+	sprite.position = Vector3(x, y, z)
+	# Re-pick the texture each frame against the camera's current
+	# forward direction. The camera in this game only rotates in
+	# 90° steps, so most frames the picked view doesn't change and
+	# the if-different guard below avoids a redundant texture set.
+	var view: int = _projectile_view_for(proj)
+	var tex: Texture2D = proj.data.projectile_sprite_for(view)
+	if tex == null:
+		# A misconfigured variant — bail without crashing. The sprite
+		# stays invisible until the variant is fixed.
+		return
+	if sprite.texture != tex:
+		sprite.texture = tex
+		var tex_h: int = max(1, tex.get_height())
+		sprite.pixel_size = proj.data.projectile_world_height / float(tex_h)
+
+func despawn_projectile_visual(proj: ProjectileInstance) -> void:
+	if proj == null or not _projectile_visuals.has(proj):
+		return
+	var sprite: Node = _projectile_visuals[proj]
+	if is_instance_valid(sprite):
+		sprite.queue_free()
+	_projectile_visuals.erase(proj)
+
+func _projectile_view_for(proj: ProjectileInstance) -> int:
+	# Camera forward vector projected onto the horizontal XZ plane.
+	# In Godot, the camera looks down -Z, so forward = -basis.z. Cell-
+	# space x maps to world x and cell-space y maps to world z, so we
+	# can compare the camera's (x, z) with the projectile's
+	# (direction.x, direction.y) directly.
+	if camera == null:
+		return ProjectileInstance.CameraView.FRONT
+	var fwd_3d: Vector3 = -camera.global_transform.basis.z
+	var fwd_xz: Vector2 = Vector2(fwd_3d.x, fwd_3d.z)
+	return ProjectileInstance.view_for_camera(proj.direction, fwd_xz)
 
 func _build_items() -> void:
 	for child in _items_root.get_children():

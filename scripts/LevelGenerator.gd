@@ -61,6 +61,11 @@ var _cluster_cells: Dictionary = {}
 # decoration and a launcher. Authoritative list — DungeonView iterates
 # this for rendering and Game ticks each entry's firing logic (C2).
 var projectile_traps: Array[ProjectileTrapInstance] = []
+# Active in-flight projectiles (Phase 8 Task 3 — Subtask C2). Spawned
+# by launcher tick rollovers and removed on IMPACT. Game.gd advances
+# every entry each frame and DungeonView mirrors them as Sprite3D
+# billboards under `ProjectilesRoot`.
+var projectiles: Array[ProjectileInstance] = []
 # Every cell that lies on the projectile path of an already-placed
 # launcher (from the cell directly opposite the wall up to and
 # including the cell where the projectile dies — past the escape
@@ -108,6 +113,7 @@ func generate() -> void:
 	traps.clear()
 	_cluster_cells.clear()
 	projectile_traps.clear()
+	projectiles.clear()
 	_projectile_path_cells.clear()
 	if room_count > 0:
 		_place_rooms()
@@ -2220,6 +2226,16 @@ func _place_corridor_projectile_traps(spawn: ProjectileTrapSpawn, segments: Arra
 			if _too_close_to_existing_projectile_trap(pos, spawn.trap.min_distance_to_other_projectile_trap):
 				continue
 			var inst := ProjectileTrapInstance.create(spawn.trap, pos, wall_dir)
+			# Per-instance phase shift on top of the data's base offset
+			# so multiple TIMED launchers placed in the same area don't
+			# fire in lockstep. Rolled here (rather than in `create()`)
+			# so unit tests constructing instances directly stay
+			# deterministic — only the placer, which already runs under
+			# a seeded RNG, picks a random phase.
+			if spawn.trap.is_timed():
+				var period: float = max(0.001, spawn.trap.timed_period)
+				inst.timed_offset = fposmod(spawn.trap.timed_initial_offset + randf() * period, period)
+				inst.timer = inst.timed_offset
 			projectile_traps.append(inst)
 			_wall_faces_used[face_key] = true
 			for p in path:

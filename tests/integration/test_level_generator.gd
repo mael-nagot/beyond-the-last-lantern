@@ -2766,6 +2766,44 @@ func test_projectile_paths_never_overlap() -> void:
 	assert_true(any_pair_seen,
 		"no seed produced 2+ launchers — path-overlap test scenario broken")
 
+func test_projectile_placer_randomises_timed_phase_per_instance() -> void:
+	# Phase 8 Task 3 — Subtask C2. Multiple TIMED launchers in the same
+	# level must NOT share their phase — otherwise they'd fire in
+	# lockstep and the player would face a barrage every period. The
+	# placer rolls `randf() * period` per instance on top of the data's
+	# base offset; this test asserts the resulting `timed_offset`
+	# values are not all equal.
+	var biome := _make_biome()
+	# Configure the data with a non-trivial period so randomisation has
+	# meaningful range.
+	var trap_data := _make_projectile_trap_data(8, 0)
+	trap_data.timed_period = 4.0
+	# Bias the placer to produce many launchers so the chance of all
+	# instances rolling the same phase by accident is negligible.
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(trap_data, 1.0, 5)]
+	var gen := _make_generator(biome, 12345)
+	if gen.projectile_traps.size() < 2:
+		# This biome / seed produced < 2 launchers — the test scenario
+		# can't differentiate desync from coincidence. Try a few more
+		# seeds before bailing.
+		for s in [99999, 55555, 42, 31337]:
+			gen = _make_generator(biome, s)
+			if gen.projectile_traps.size() >= 2:
+				break
+	assert_gte(gen.projectile_traps.size(), 2, "test scenario broken: need 2+ launchers for desync to be meaningful")
+	var offsets: Array = []
+	for inst in gen.projectile_traps:
+		offsets.append(inst.timed_offset)
+	# At least two different values across all instances. The
+	# probability of every randf() roll producing the same value at
+	# floating-point precision is effectively zero, so any failure here
+	# means the placer skipped the random component.
+	var unique_values: Dictionary = {}
+	for o in offsets:
+		unique_values[o] = true
+	assert_gte(unique_values.size(), 2,
+		"all %d launchers share the same timed_offset (%s) — placer's per-instance phase shift not applied" % [offsets.size(), offsets])
+
 func test_projectile_at_most_one_launcher_per_segment_cross_spawn() -> void:
 	# Rule: even when multiple `ProjectileTrapSpawn` entries are
 	# configured, every corridor segment holds AT MOST ONE launcher
