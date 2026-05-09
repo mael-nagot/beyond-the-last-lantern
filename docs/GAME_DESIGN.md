@@ -39,6 +39,25 @@ Each level is a procedurally generated grid using a **Growing Tree** maze algori
 
 Levels are closed with a solid wall border. There is one entrance and one or two exits (additional exits unlocked via Grimoire Pages).
 
+### Sub-Levels
+
+A level can contain one or more **sub-level portals** — special floor tiles that transport the player into a smaller, self-contained level generated from a different `BiomeData`. The player can explore the sub-level and return to the parent level at the same portal they entered. This is distinct from the main EXIT, which advances the run to the next biome without return.
+
+**Examples:**
+- A hidden cave entrance in a forest biome leads to a small cave sub-level with its own loot, traps, and enemies.
+- A house door in a town leads to a single-room interior with an NPC or shop.
+
+**Rules:**
+- A level can have **multiple sub-level portals**, each leading to a different sub-biome (e.g., a town with several enterable houses).
+- Sub-level portals are two-way: the sub-level's entrance tile returns the player to the parent level.
+- The parent level is preserved in memory while the player is in the sub-level — all state (explored tiles, opened chests, pulled levers, picked-up items) is intact on return.
+- Sub-levels do NOT nest further (one depth only). A sub-level never contains its own sub-level portals.
+- Sub-levels use the same generation pipeline as regular levels — they are just smaller (smaller `grid_width`/`grid_height` on their `BiomeData`) and have no main EXIT.
+- The main EXIT in the parent level advances the run to the next biome as usual, regardless of whether the player has visited any sub-levels.
+
+**Town buildings as sub-levels:**
+Towns use this system for enterable buildings. Each building (shop, inn, NPC house) is a sub-level portal on the town grid leading to a small interior level. This keeps towns and dungeons on the same architectural foundation.
+
 ---
 
 ## Core Mechanics
@@ -374,6 +393,8 @@ Towns appear between boss fights. They serve as safe zones where the player can:
 - Manage inventory
 - Interact with NPCs for lore and quests
 - Access the Grimoire
+
+Towns are generated from a town-specific `BiomeData` (open layout, no enemies, no traps). Buildings (shops, inns, NPC houses) are **sub-level portals** — the player steps on a building entrance tile and enters a small interior sub-level generated from an interior `BiomeData`. Exiting the interior returns the player to the town at the building entrance. This keeps towns on the same architectural foundation as dungeons (see Sub-Levels under Level Progression).
 
 ---
 
