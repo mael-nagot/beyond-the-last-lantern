@@ -2515,7 +2515,7 @@ func test_projectile_trap_min_distance_honoured() -> void:
 			for j in range(i + 1, gen.projectile_traps.size()):
 				var a: Vector2i = gen.projectile_traps[i].launcher_cell
 				var b: Vector2i = gen.projectile_traps[j].launcher_cell
-				var dist := abs(a.x - b.x) + abs(a.y - b.y)
+				var dist: int = abs(a.x - b.x) + abs(a.y - b.y)
 				assert_gte(dist, 5,
 					"projectile traps at %s and %s are %d apart (need >= 5)" % [a, b, dist])
 
@@ -2603,7 +2603,7 @@ func test_pressure_plate_placement_corridor() -> void:
 			found = true
 			assert_ne(inst.plate_cell, Vector2i(-1, -1),
 				"pressure plate trap should have a plate_cell")
-			var dist_to_launcher := abs(inst.plate_cell.x - inst.launcher_cell.x) + abs(inst.plate_cell.y - inst.launcher_cell.y)
+			var dist_to_launcher: int = abs(inst.plate_cell.x - inst.launcher_cell.x) + abs(inst.plate_cell.y - inst.launcher_cell.y)
 			assert_gte(dist_to_launcher, 2,
 				"plate at %s is %d from launcher at %s (need >= 2)" % [inst.plate_cell, dist_to_launcher, inst.launcher_cell])
 	assert_true(found, "pressure plate corridor placement should produce at least one trap across 5 seeds")

@@ -2214,9 +2214,10 @@ func _find_corridor_plate_cell(launcher_cell: Vector2i, fire_dir: Vector2i, segm
 	return candidates[randi() % candidates.size()]
 
 func _distance_to_nearest_junction(pos: Vector2i, junctions: Dictionary) -> int:
-	var best := 999
-	for jpos in junctions:
-		var d := _manhattan(pos, jpos as Vector2i)
+	var best: int = 999
+	for jpos_key in junctions:
+		var jpos: Vector2i = jpos_key
+		var d: int = _manhattan(pos, jpos)
 		if d < best:
 			best = d
 	return best
