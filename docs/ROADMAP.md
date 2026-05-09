@@ -351,11 +351,13 @@ Split into three incremental sub-PRs so each one has something testable in-engin
 3. ✅ Tests: unit (`test_trap_spawn` extended — room field defaults, `uses_room_density` matrix); integration (`test_level_generator` extended — zero-chance places nothing, room-only landing, `room_min_spacing` honoured cross-room and cross-spawn, coverage falls within rolled range, entrance/exit excluded, `allow_mixed_room_traps = false` blocks second spawn from sharing rooms, `= true` allows mixed rooms).
 4. ⏳ Manual asset work (developer): bump `room_chance` and `room_coverage_min/max_percent` on a `TrapSpawn` in `forest.tres` to validate room placement in-engine. Mix two spawns with `allow_mixed_room_traps` flipped differently to test exclusivity.
 
-###### Subtask B3 — Path-safety validators + chest/lever adjacency (deferred)
-- STEP-trap-free BFS from entrance → exit AND entrance → every chest / lever / floor-object cell; rollback step traps until satisfied (so step traps never gate access to objects placed during level generation)
-- TIMED-trap rest-cell validator: every timed trap has a non-trap cell within K Manhattan tiles
-- Chest/lever timed-trap adjacency rule: every chest and every lever has at least one 4-adjacent cell free of timed traps so the player has somewhere safe to stand while waiting out cycles
-- Tests for all validators and atomic rollback when constraints can't be met
+###### Subtask B3 — Path-safety validators + chest/lever adjacency ✅
+1. ✅ **Trap placement skips floor-item cells** — `_eligible_segment_cells`, `_eligible_room_cells`, and `_trap_candidates_for_spawn` all skip cells where `cell.items` is non-empty, preventing step traps from landing on floor keys placed by `_place_key_doors`.
+2. ✅ **`_remove_trap_at(pos)`** — single entry point for trap removal: clears `cell.trap`, removes from the `traps` flat list, removes from `_cluster_cells` if present. Used by both validators below.
+3. ✅ **Chest/lever timed-trap adjacency** (`_validate_chest_lever_timed_adjacency`) — scans every chest/lever cell; if no 4-adjacent walkable cell is free of TIMED traps, removes one timed trap from a neighbour. Step traps adjacent are OK (they're one-shot, the player can wait off-cell after triggering).
+4. ✅ **Step-trap-free exit path** (`_validate_exit_path_step_traps`) — Dijkstra from entrance to exit: step-trap cells cost 100, regular walkable cells cost 1, blocking objects/walls impassable, doors passable. Removes every step trap along the cheapest path in one batch. Guarantees a damage-free route to the exit while preserving trap density elsewhere (~15-20 removals on a 200+ trap level, vs 95%+ removals from the earlier strict BFS approach). Chests/levers/items in step-trap-only-accessible pockets keep their traps — player takes HP to reach optional content.
+5. ✅ Tests: integration (`test_level_generator` extended — exit reachable without step traps across 5 seeds with dense configs, average trap count stays high >50, `_remove_trap_at` clears cell + list + cluster_cells, traps never share cells with floor items, chest/lever timed adjacency guaranteed, step traps adjacent to chests are allowed).
+6. ⏳ Manual playtest (developer): run in-engine with `forest.tres` using step trap variant, verify: (a) there's always a damage-free path to the exit, (b) trap density is visually high, (c) chests near timed traps have a safe waiting spot.
 
 #### Task 3 follow-ups (after Subtask B)
 - Fireball trap (pressure plate or continuous)

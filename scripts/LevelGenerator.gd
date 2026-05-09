@@ -102,6 +102,8 @@ func generate() -> void:
 	_place_linked_objects()
 	_place_key_doors()
 	_place_traps()
+	_validate_chest_lever_timed_adjacency()
+	_validate_exit_path_step_traps()
 	_place_items()
 	_place_wall_decorations()
 
@@ -1609,6 +1611,8 @@ func _eligible_segment_cells(segment: Array) -> Array:
 			continue
 		if cell.trap != null:
 			continue
+		if not cell.items.is_empty():
+			continue
 		result.append(pos)
 	return result
 
@@ -1700,6 +1704,8 @@ func _eligible_room_cells(room: Rect2i) -> Array:
 			if cell.object != null:
 				continue
 			if cell.trap != null:
+				continue
+			if not cell.items.is_empty():
 				continue
 			result.append(pos)
 	return result
@@ -1819,26 +1825,15 @@ func _trap_candidates_for_spawn(spawn: TrapSpawn, cells_by_type: Dictionary) -> 
 		if not spawn.allows(placement_bit):
 			continue
 		for pos in cells_by_type[placement_bit]:
-			# Don't drop traps on the entrance / exit (the player
-			# spawns there or wins by reaching there — neither should
-			# get hit by a Phase 8 trap).
 			if pos == entrance_pos or pos == exit_pos:
 				continue
-			# A cell with an object already (chest, lever) is excluded
-			# so the player can interact without standing on a trap.
-			# `_classify_floor_cells` already skips blocked cells, but
-			# levers are non-blocking objects — explicit guard anyway.
 			var cell: GridCell = grid[pos.x][pos.y]
 			if cell.object != null:
 				continue
 			if cell.trap != null:
 				continue
-			# Subtask B1: scattered traps must not sit 4-adjacent to a
-			# corridor-cluster cell. Without this, a cluster of run_max
-			# cells can be extended by scattered traps in the same
-			# segment, producing a contiguous run that exceeds the
-			# per-segment cluster cap. The cluster's edge needs to read
-			# as the END of the trapped run.
+			if not cell.items.is_empty():
+				continue
 			if _is_adjacent_to_cluster(pos):
 				continue
 			result.append(pos)
@@ -1862,6 +1857,119 @@ func _too_close_to_existing_trap(pos: Vector2i, min_distance: int) -> bool:
 		if d < min_distance:
 			return true
 	return false
+
+# -------------------------------------------------------
+# Trap removal + post-placement validators (Subtask B3)
+# -------------------------------------------------------
+
+func _remove_trap_at(pos: Vector2i) -> void:
+	var cell: GridCell = grid[pos.x][pos.y]
+	if cell.trap == null:
+		return
+	var inst: TrapInstance = cell.trap
+	cell.trap = null
+	traps.erase(inst)
+	_cluster_cells.erase(pos)
+
+func _validate_chest_lever_timed_adjacency() -> void:
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var cell: GridCell = grid[x][y]
+			if cell.object == null:
+				continue
+			var cat: int = cell.object.data.category if cell.object.data != null else -1
+			if cat != ObjectData.Category.CHEST and cat != ObjectData.Category.LEVER:
+				continue
+			var pos := Vector2i(x, y)
+			var has_safe := false
+			for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				var n: Vector2i = pos + d
+				if not _in_bounds(n.x, n.y):
+					continue
+				var nc: GridCell = grid[n.x][n.y]
+				if nc.is_blocked:
+					continue
+				if nc.trap == null or not nc.trap.data.is_timed():
+					has_safe = true
+					break
+			if has_safe:
+				continue
+			# No safe adjacent cell — remove a timed trap from a neighbour.
+			for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				var n: Vector2i = pos + d
+				if not _in_bounds(n.x, n.y):
+					continue
+				var nc: GridCell = grid[n.x][n.y]
+				if nc.is_blocked:
+					continue
+				if nc.trap != null and nc.trap.data.is_timed():
+					_remove_trap_at(n)
+					break
+
+func _validate_exit_path_step_traps() -> void:
+	# Dijkstra from entrance to exit. Step-trap cells cost 100, regular
+	# walkable cells cost 1. Blocking objects and walls are impassable.
+	# Doors are passable (openable by the player). The returned path
+	# minimises the number of step traps crossed; we then remove every
+	# step trap along it in one batch.
+	var STEP_COST := 100
+	var dist: Dictionary = {entrance_pos: 0}
+	var prev: Dictionary = {}
+	# Min-heap emulated via sorted insertion (grid is small — 31×31 max).
+	var open: Array = [[0, entrance_pos]]
+
+	while not open.is_empty():
+		var entry: Array = open.pop_front()
+		var cost: int = entry[0]
+		var current: Vector2i = entry[1]
+		if cost > dist.get(current, 999999):
+			continue
+		if current == exit_pos:
+			break
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			var nx: int = current.x + d.x
+			var ny: int = current.y + d.y
+			if not _in_bounds(nx, ny):
+				continue
+			var npos := Vector2i(nx, ny)
+			var ncell: GridCell = grid[nx][ny]
+			if ncell.cell_type == GridCell.CellType.WALL:
+				continue
+			if ncell.object != null and ncell.object.data != null and ncell.object.data.blocks_movement:
+				continue
+			var edge_cost := 1
+			if ncell.trap != null and ncell.trap.data != null and ncell.trap.data.is_step():
+				edge_cost = STEP_COST
+			var new_dist: int = cost + edge_cost
+			if new_dist < dist.get(npos, 999999):
+				dist[npos] = new_dist
+				prev[npos] = current
+				# Binary-search insert to keep `open` sorted by cost.
+				var lo := 0
+				var hi := open.size()
+				while lo < hi:
+					var mid := (lo + hi) / 2
+					if open[mid][0] < new_dist:
+						lo = mid + 1
+					else:
+						hi = mid
+				open.insert(lo, [new_dist, npos])
+
+	if not prev.has(exit_pos):
+		push_warning("LevelGenerator: no walkable path from entrance to exit — cannot clear step traps")
+		return
+
+	# Walk the path back and collect step-trap positions.
+	var path_traps: Array = []
+	var cursor: Vector2i = exit_pos
+	while cursor != entrance_pos:
+		var cell: GridCell = grid[cursor.x][cursor.y]
+		if cell.trap != null and cell.trap.data != null and cell.trap.data.is_step():
+			path_traps.append(cursor)
+		cursor = prev[cursor]
+
+	for pos in path_traps:
+		_remove_trap_at(pos)
 
 # -------------------------------------------------------
 # Items

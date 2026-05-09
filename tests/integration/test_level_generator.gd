@@ -2180,3 +2180,169 @@ func test_classify_wall_face_non_dead_end_matches_cell_classification() -> void:
 					"wall face at %s dir %s should match cell classification" % [pos, d])
 			return  # one cell is enough to prove the rule
 	fail_test("expected at least one non-dead-end floor cell")
+
+# -------------------------------------------------------
+# Subtask B3 — trap path-safety validators
+# -------------------------------------------------------
+
+func _make_dense_step_trap_biome() -> BiomeData:
+	var biome := _make_biome()
+	var trap := _make_trap_data(TrapData.Trigger.STEP)
+	var spawn := _make_trap_spawn(trap, 150, 150, ObjectSpawn.PLACEMENT_ANY)
+	spawn.corridor_segment_chance = 1.0
+	spawn.corridor_traps_per_run_min = 4
+	spawn.corridor_traps_per_run_max = 99
+	spawn.room_chance = 0.5
+	spawn.room_coverage_min_percent = 99.0
+	spawn.room_coverage_max_percent = 99.0
+	biome.trap_spawns = [spawn]
+	return biome
+
+func _bfs_no_step_traps(gen: LevelGenerator, start: Vector2i) -> Dictionary:
+	var visited: Dictionary = {start: true}
+	var queue: Array = [start]
+	while not queue.is_empty():
+		var current: Vector2i = queue.pop_front()
+		for d in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			var next: Vector2i = current + d
+			if next.x < 0 or next.x >= gen.grid_width or next.y < 0 or next.y >= gen.grid_height:
+				continue
+			if visited.has(next):
+				continue
+			var cell: GridCell = gen.grid[next.x][next.y]
+			if cell.cell_type == GridCell.CellType.WALL:
+				continue
+			if cell.object != null and cell.object.data != null and cell.object.data.blocks_movement:
+				continue
+			if cell.trap != null and cell.trap.data != null and cell.trap.data.is_step():
+				continue
+			visited[next] = true
+			queue.append(next)
+	return visited
+
+func test_exit_reachable_without_step_traps() -> void:
+	for s in [12345, 99999, 55555, 31337, 42]:
+		var biome := _make_dense_step_trap_biome()
+		var gen := _make_generator(biome, s)
+		var reachable := _bfs_no_step_traps(gen, gen.entrance_pos)
+		assert_true(reachable.has(gen.exit_pos),
+			"exit should be reachable without stepping on step traps (seed %d)" % s)
+
+func test_exit_path_validator_preserves_high_trap_count() -> void:
+	var total_traps := 0
+	var runs := 5
+	for s in [12345, 99999, 55555, 31337, 42]:
+		var biome := _make_dense_step_trap_biome()
+		var gen := _make_generator(biome, s)
+		total_traps += gen.traps.size()
+	var avg: float = float(total_traps) / float(runs)
+	assert_true(avg > 50.0,
+		"average trap count across seeds should remain high (got %.1f)" % avg)
+
+func test_remove_trap_at_clears_cell_and_list() -> void:
+	var biome := _make_biome()
+	biome.trap_spawns = [_make_trap_spawn(_make_trap_data(), 5, 5)]
+	var gen := _make_generator(biome)
+	if gen.traps.is_empty():
+		pass_test("no traps to test removal on")
+		return
+	var trap_pos: Vector2i = gen.traps[0].cell
+	var before_count: int = gen.traps.size()
+	gen._remove_trap_at(trap_pos)
+	assert_eq(gen.traps.size(), before_count - 1,
+		"traps list should shrink by 1")
+	assert_null(gen.grid[trap_pos.x][trap_pos.y].trap,
+		"grid cell should have null trap after removal")
+
+func test_remove_trap_at_clears_cluster_cells() -> void:
+	var biome := _make_biome()
+	var spawn := _make_corridor_cluster_spawn(_make_trap_data(), 1.0, 3, 5)
+	biome.trap_spawns = [spawn]
+	var gen := _make_generator(biome)
+	var cluster_pos: Vector2i = Vector2i.ZERO
+	var found := false
+	for pos in gen._cluster_cells:
+		cluster_pos = pos
+		found = true
+		break
+	if not found:
+		pass_test("no cluster cells to test")
+		return
+	gen._remove_trap_at(cluster_pos)
+	assert_false(gen._cluster_cells.has(cluster_pos),
+		"cluster cell should be removed from _cluster_cells after _remove_trap_at")
+
+func test_traps_never_placed_on_cells_with_items() -> void:
+	var item := _make_item()
+	var loot := _make_loot_entry(item, 1, LootEntry.PLACEMENT_ANY)
+	var biome := _make_biome([loot], 10, 15)
+	biome.trap_spawns = [_make_trap_spawn(_make_trap_data(), 8, 8)]
+	# Items are placed AFTER traps in pipeline, but floor keys from
+	# _place_key_doors land BEFORE traps. To test the exclusion, we
+	# need to verify no trap sits on a cell that already has items.
+	# Since the standard pipeline places items after traps, we test
+	# the inverse: no item cell has a trap.
+	for s in [12345, 77777]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.traps:
+			var cell: GridCell = gen.grid[inst.cell.x][inst.cell.y]
+			assert_true(cell.items.is_empty(),
+				"trap at %s should not share a cell with floor items (seed %d)" % [inst.cell, s])
+
+func test_chest_lever_timed_adjacency_guarantees_safe_neighbour() -> void:
+	var biome := _make_biome()
+	biome.objects = [_make_object_spawn(_make_chest(), 4, 4)]
+	var timed_trap := _make_trap_data(TrapData.Trigger.TIMED)
+	biome.trap_spawns = [_make_trap_spawn(timed_trap, 30, 30, ObjectSpawn.PLACEMENT_ANY)]
+	for s in [12345, 99999, 55555]:
+		var gen := _make_generator(biome, s)
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				var cell: GridCell = gen.grid[x][y]
+				if cell.object == null:
+					continue
+				if cell.object.data == null:
+					continue
+				var cat: int = cell.object.data.category
+				if cat != ObjectData.Category.CHEST and cat != ObjectData.Category.LEVER:
+					continue
+				var pos := Vector2i(x, y)
+				var has_safe := false
+				for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+					var n: Vector2i = pos + d
+					if n.x < 0 or n.x >= gen.grid_width or n.y < 0 or n.y >= gen.grid_height:
+						continue
+					var nc: GridCell = gen.grid[n.x][n.y]
+					if nc.is_blocked:
+						continue
+					if nc.trap == null or not nc.trap.data.is_timed():
+						has_safe = true
+						break
+				assert_true(has_safe,
+					"chest/lever at %s must have a non-timed-trap walkable neighbour (seed %d)" % [pos, s])
+
+func test_step_traps_adjacent_to_chests_are_allowed() -> void:
+	var biome := _make_biome()
+	biome.objects = [_make_object_spawn(_make_chest(), 3, 3)]
+	var step_trap := _make_trap_data(TrapData.Trigger.STEP)
+	biome.trap_spawns = [_make_trap_spawn(step_trap, 20, 20, ObjectSpawn.PLACEMENT_ANY)]
+	var found_step_adjacent := false
+	for s in [12345, 99999, 55555, 42, 31337]:
+		var gen := _make_generator(biome, s)
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				var cell: GridCell = gen.grid[x][y]
+				if cell.object == null or cell.object.data == null:
+					continue
+				if cell.object.data.category != ObjectData.Category.CHEST:
+					continue
+				var pos := Vector2i(x, y)
+				for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+					var n: Vector2i = pos + d
+					if n.x < 0 or n.x >= gen.grid_width or n.y < 0 or n.y >= gen.grid_height:
+						continue
+					var nc: GridCell = gen.grid[n.x][n.y]
+					if nc.trap != null and nc.trap.data.is_step():
+						found_step_adjacent = true
+	assert_true(found_step_adjacent,
+		"step traps adjacent to chests should be allowed (timed adjacency rule only applies to TIMED traps)")
