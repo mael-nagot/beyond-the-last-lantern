@@ -12,7 +12,7 @@ extends Control
 # `debug_show_traps` — off by default in shipping, flipped on in the
 # Inspector to validate Subtask C placement (corridor coverage,
 # escape distance, fire direction toward junctions).
-@export var debug_show_projectile_traps: bool = false
+@export var debug_show_projectile_traps: bool = true
 
 var map_data: MapData
 var generator: LevelGenerator
@@ -376,21 +376,31 @@ func _draw_trap_marker(rect_pos: Vector2, rect_size: Vector2, cell_size: float, 
 		map_draw.draw_line(triangle[i], triangle[(i + 1) % 3], border, lw)
 
 func _draw_projectile_trap_marker(rect_pos: Vector2, cell_size: float, ptrap: ProjectileTrapInstance) -> void:
-	# Small arrow inside the host cell pointing in the projectile's
-	# fire direction (= -wall_dir). Tip touches the cell edge on the
-	# wall-opposite side, base sits at the wall side. Cyan-ish so it's
-	# distinct from spike-trap triangles (red/orange) and the player
-	# arrow (red).
+	# Small arrow drawn ON THE WALL EDGE between the host cell and the
+	# wall the launcher is mounted on, pointing in the projectile's
+	# fire direction (= -wall_dir, i.e. INTO the host cell and on into
+	# the corridor). The arrow's BASE sits on the wall edge so the
+	# marker reads as "the launcher is on this wall, firing this way"
+	# rather than "the launcher is on the floor". Cyan-ish so it's
+	# distinct from spike-trap triangles (red/orange), door slabs
+	# (brown), and the player arrow (red).
 	var fire: Vector2i = ptrap.fire_direction()
-	var center: Vector2 = rect_pos + Vector2(cell_size * 0.5, cell_size * 0.5)
-	var dir := Vector2(float(fire.x), float(fire.y))
-	if dir.length_squared() < 0.0001:
+	var wall_dir: Vector2i = ptrap.wall_dir
+	if fire == Vector2i.ZERO:
 		return
-	dir = dir.normalized()
+	# Wall-edge midpoint = cell centre shifted half a cell toward the
+	# wall the launcher is mounted on.
+	var center: Vector2 = rect_pos + Vector2(cell_size * 0.5, cell_size * 0.5)
+	var edge_mid: Vector2 = center + Vector2(float(wall_dir.x), float(wall_dir.y)) * cell_size * 0.5
+	var dir := Vector2(float(fire.x), float(fire.y)).normalized()
 	var perp := Vector2(-dir.y, dir.x)
-	var tip: Vector2 = center + dir * cell_size * 0.40
-	var base_l: Vector2 = center - dir * cell_size * 0.20 + perp * cell_size * 0.18
-	var base_r: Vector2 = center - dir * cell_size * 0.20 - perp * cell_size * 0.18
+	# Arrow tip extends from the wall edge in the fire direction. Length
+	# is most of a cell so the arrow is readable at typical map zoom.
+	var tip: Vector2 = edge_mid + dir * cell_size * 0.75
+	# Base sits ON the wall edge, splayed perpendicular to the fire
+	# direction (= along the wall axis).
+	var base_l: Vector2 = edge_mid + perp * cell_size * 0.22
+	var base_r: Vector2 = edge_mid - perp * cell_size * 0.22
 	var color := Color(0.20, 0.65, 0.85)  # launcher cyan — distinct from spike red/orange
 	var poly := PackedVector2Array([tip, base_l, base_r])
 	map_draw.draw_colored_polygon(poly, color)

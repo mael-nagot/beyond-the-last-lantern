@@ -19,6 +19,8 @@
 [ext_resource type="Resource" uid="uid://d01cmd6cq5v2o" path="res://assets/objects/chest/chest_wooden.tres" id="11_00k5e"]
 [ext_resource type="Resource" uid="uid://mtigjawa2y3e" path="res://assets/loot_tables/forest_chest_1.tres" id="11_bq1p8"]
 [ext_resource type="Resource" uid="uid://b0furuompokno" path="res://assets/objects/door/door_forest.tres" id="13_bq1p8"]
+[ext_resource type="Script" uid="uid://bqw57pqm6wjbx" path="res://scripts/ProjectileTrapSpawn.gd" id="19_1qwx2"]
+[ext_resource type="Resource" uid="uid://cxpqvvvbx6foo" path="res://assets/objects/traps/projectile_trap_fireball_timed.tres" id="20_28y6b"]
 [ext_resource type="Script" uid="uid://bpkkmcjv0jnht" path="res://scripts/TrapSpawn.gd" id="20_obsjo"]
 [ext_resource type="Resource" uid="uid://df3vqllijxj7l" path="res://assets/objects/traps/trap_spike_timed.tres" id="21_3vyya"]
 [ext_resource type="Script" uid="uid://c4fbuyttq7iik" path="res://scripts/WallDecorationSpawn.gd" id="21_evnw4"]
@@ -92,18 +94,25 @@ placement = 1
 min_distance_to_other_object = 3
 metadata/_custom_type_script = "uid://q2yc7peloed8"
 
+[sub_resource type="Resource" id="Resource_213mq"]
+script = ExtResource("19_1qwx2")
+trap = ExtResource("20_28y6b")
+placement = 1
+corridor_chance = 1.0
+metadata/_custom_type_script = "uid://bqw57pqm6wjbx"
+
 [sub_resource type="Resource" id="Resource_1qwx2"]
 script = ExtResource("20_obsjo")
 trap = ExtResource("21_3vyya")
-count_min = 150
-count_max = 150
+count_min = 5
+count_max = 5
 placement = 3
-corridor_segment_chance = 0.597
+corridor_segment_chance = 0.218
 corridor_traps_per_run_min = 3
 corridor_traps_per_run_max = 4
-room_chance = 0.529
-room_coverage_min_percent = 73.653
-room_coverage_max_percent = 81.724
+room_chance = 0.241
+room_coverage_min_percent = 20.779
+room_coverage_max_percent = 31.149
 room_max_distance_to_safe_cell = 2
 allow_mixed_room_traps = false
 metadata/_custom_type_script = "uid://bpkkmcjv0jnht"
@@ -144,5 +153,6 @@ objects = Array[ExtResource("10_nhtug")]([SubResource("Resource_bq1p8"), SubReso
 linked_objects = Array[ExtResource("7_fvx5y")]([SubResource("Resource_ivfat")])
 key_door_spawns = Array[ExtResource("7_w7wxy")]([SubResource("Resource_evnw4")])
 trap_spawns = Array[ExtResource("20_obsjo")]([SubResource("Resource_1qwx2")])
+projectile_trap_spawns = Array[ExtResource("19_1qwx2")]([SubResource("Resource_213mq")])
 wall_decorations = Array[ExtResource("21_evnw4")]([SubResource("Resource_3vyya")])
 move_sounds = Array[AudioStream]([ExtResource("7_sstbg"), ExtResource("8_0wobd"), ExtResource("9_nhtug")])

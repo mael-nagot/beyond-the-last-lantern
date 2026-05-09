@@ -2153,6 +2153,17 @@ func _place_corridor_projectile_traps(spawn: ProjectileTrapSpawn, segments: Arra
 	for segment in segments:
 		if randf() >= spawn.corridor_chance:
 			continue
+		# Cross-spawn cap: a corridor segment must hold AT MOST ONE
+		# launcher across all `ProjectileTrapSpawn` entries combined.
+		# Without this rule, two spawns each contributing one launcher
+		# could place them at opposite ends of the same corridor — the
+		# player walks into a corridor with launchers firing toward
+		# each other from both extremities, which reads as crossfire
+		# and undermines the "fire toward the junction" escape
+		# guarantee. (The per-spawn `corridor_max_per_segment` check
+		# below still applies on top, but only within the same spawn.)
+		if _segment_has_projectile_trap(segment):
+			continue
 		# Build the candidate (cell, wall_dir) pool for this segment.
 		# A candidate is valid when:
 		#   - cell.x/y are in the segment (so the launcher's host cell
@@ -2163,6 +2174,11 @@ func _place_corridor_projectile_traps(spawn: ProjectileTrapSpawn, segments: Arra
 		#   - tracing forward in fire_direction = -wall_dir reaches a
 		#     junction within `max_escape_distance` tiles without
 		#     hitting a wall first (the player's escape route)
+		#   - no cell along the projectile path (host cell + fire_dir
+		#     up to and including the junction) is the EXIT, holds a
+		#     CHEST, or holds a LEVER — projectiles crossing those
+		#     cells force the player to take damage on the way to a
+		#     reward / interactive point, which feels unfair
 		#   - the wall face isn't already in `_wall_faces_used`
 		#     (decorations register here too — a decoration could land
 		#     here later, but at this point the registry only holds
@@ -2211,13 +2227,21 @@ func _place_corridor_projectile_traps(spawn: ProjectileTrapSpawn, segments: Arra
 
 # A wall face is launchable iff:
 #   - the wall_dir neighbour is a WALL (mount point)
-#   - the OPPOSITE neighbour (-wall_dir) is a corridor floor (first
-#     cell of projectile flight)
-#   - tracing forward in fire_direction = -wall_dir reaches a junction
-#     within `max_escape_distance` tiles, with every traversed cell
-#     being a corridor floor (no walls / room cells / non-corridor
-#     surprises along the way)
+#   - tracing forward in fire_direction = -wall_dir, the FULL path
+#     until the projectile hits a wall stays entirely on corridor
+#     floor cells (no rooms, no entrance, no exit) and crosses no
+#     CHEST or LEVER object — projectiles crossing those cells would
+#     force the player to take damage on their way to a reward /
+#     interactive point. Junctions count as corridor.
+#   - somewhere on that path within `max_escape_distance` tiles there
+#     is a junction (corridor cell with 3+ corridor neighbours) — the
+#     player's escape route from the firing line
 #   - the face isn't already claimed
+#
+# The path is traced past the escape junction all the way to the
+# terminating wall: the projectile in C2 will fly the entire way, and
+# a chest / lever / exit anywhere along the flight is a problem
+# regardless of how far past the junction it sits.
 func _is_launchable_wall(cell: Vector2i, wall_dir: Vector2i, junctions: Dictionary, max_escape: int) -> bool:
 	var wx: int = cell.x + wall_dir.x
 	var wy: int = cell.y + wall_dir.y
@@ -2226,31 +2250,72 @@ func _is_launchable_wall(cell: Vector2i, wall_dir: Vector2i, junctions: Dictiona
 	if grid[wx][wy].cell_type != GridCell.CellType.WALL:
 		return false
 	var fire_dir: Vector2i = -wall_dir
-	# Walk forward until junction (success), wall (fail), out of bounds
-	# (fail), or escape budget exhausted (fail).
-	for step in range(1, max_escape + 1):
+	var found_junction_within_escape: bool = false
+	# Hard cap on iterations as a safety net — every projectile must
+	# eventually hit a wall (the grid border is wall), so this loop
+	# terminates naturally; the cap just protects against ever
+	# producing an infinite trace from a malformed grid.
+	var step_limit: int = grid_width + grid_height + 2
+	var step: int = 1
+	while step <= step_limit:
 		var nx: int = cell.x + fire_dir.x * step
 		var ny: int = cell.y + fire_dir.y * step
 		if not _in_bounds(nx, ny):
 			return false
 		var nc: GridCell = grid[nx][ny]
+		# Wall terminates projectile flight — natural end of path.
+		if nc.cell_type == GridCell.CellType.WALL:
+			break
+		# Exit on path — projectiles fly onto the exit cell, forcing
+		# damage on the player as they leave the level.
+		if nc.cell_type == GridCell.CellType.EXIT:
+			return false
+		# Any other non-FLOOR cell type (e.g. ENTRANCE) — bail.
 		if nc.cell_type != GridCell.CellType.FLOOR:
 			return false
 		var npos := Vector2i(nx, ny)
-		if junctions.has(npos):
-			# Found the escape junction within budget.
-			# Reject if the face is already claimed (registry check
-			# late so we don't waste cycles on doomed candidates that
-			# pass the geometry check too).
-			if _wall_faces_used.has(ProjectileTrapInstance.face_key(cell, wall_dir)):
-				return false
-			return true
-		# Must be a corridor cell to keep walking — a room cell would
-		# mean the projectile fires out of the corridor into a room,
-		# which can become an unavoidable hazard since the room is
-		# typically open. Subtask C5 handles room placement separately.
+		# Path must stay in corridors. A projectile flying out of the
+		# corridor into a room could become unavoidable since rooms
+		# are open spaces. Junctions still classify as PLACEMENT_CORRIDOR.
+		# Subtask C5 handles room placement (where the projectile is
+		# constrained to stay inside the room instead).
 		if classify_cell(npos) != ObjectSpawn.PLACEMENT_CORRIDOR:
 			return false
+		# Reject if the path crosses an interactive object — chests
+		# and levers are reward / interactive points the player has
+		# to walk to deliberately, and being shot on the way feels
+		# unfair. Doors live on EDGES (not on `cell.object`), so they
+		# don't trip this check; a projectile passing through a door
+		# cell is fine geometrically.
+		if nc.object != null and nc.object.data != null:
+			var cat: int = nc.object.data.category
+			if cat == ObjectData.Category.CHEST or cat == ObjectData.Category.LEVER:
+				return false
+		# Track junction-within-escape-budget. Continue past it — the
+		# projectile keeps flying, and chests / levers past the junction
+		# matter too.
+		if junctions.has(npos) and step <= max_escape:
+			found_junction_within_escape = true
+		step += 1
+	if not found_junction_within_escape:
+		return false
+	if _wall_faces_used.has(ProjectileTrapInstance.face_key(cell, wall_dir)):
+		return false
+	return true
+
+# True iff any cell in `segment` already hosts a placed projectile-trap
+# launcher. Used to enforce the cross-spawn one-launcher-per-segment
+# rule — without it, two spawns each contributing a launcher to the
+# same corridor produce crossfire at opposite ends.
+func _segment_has_projectile_trap(segment: Array) -> bool:
+	if projectile_traps.is_empty():
+		return false
+	var seg_set: Dictionary = {}
+	for pos in segment:
+		seg_set[pos] = true
+	for inst in projectile_traps:
+		if seg_set.has(inst.cell):
+			return true
 	return false
 
 func _too_close_to_existing_projectile_trap(pos: Vector2i, min_distance: int) -> bool:

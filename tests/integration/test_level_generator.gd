@@ -2633,3 +2633,131 @@ func test_projectile_fire_direction_is_opposite_wall_dir() -> void:
 	var gen := _make_generator(biome, 12345)
 	for inst in gen.projectile_traps:
 		assert_eq(inst.fire_direction(), -inst.wall_dir)
+
+# Walks the projectile's path from `inst.cell` in fire direction until
+# it hits a wall (or runs off the grid as a safety bail). Returns the
+# array of `Vector2i` cells the projectile would cross — the same set
+# the placement validator checks against.
+func _projectile_path_until_wall(gen: LevelGenerator, inst) -> Array:
+	var path: Array = []
+	var fire: Vector2i = inst.fire_direction()
+	var step: int = 1
+	var step_limit: int = gen.grid_width + gen.grid_height + 2
+	while step <= step_limit:
+		var p: Vector2i = inst.cell + fire * step
+		if p.x < 0 or p.x >= gen.grid_width or p.y < 0 or p.y >= gen.grid_height:
+			break
+		var c: GridCell = gen.grid[p.x][p.y]
+		if c.cell_type == GridCell.CellType.WALL:
+			break
+		path.append(p)
+		step += 1
+	return path
+
+func test_projectile_path_does_not_cross_chests_or_levers() -> void:
+	# Rule: a launcher's projectile path (the FULL flight, all the way
+	# until it hits a wall — not just up to the escape junction) must
+	# not cross any cell that holds a CHEST or LEVER. We pump the
+	# level full of chests + levers and high projectile-trap chance,
+	# then verify across multiple seeds that no placed launcher's
+	# path passes through one.
+	var biome := _make_biome()
+	biome.objects = [
+		_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY),
+	]
+	# Levers come from linked-objects pairs — produce a few so the
+	# corridor pool has lever cells to potentially cross.
+	biome.linked_objects = [_make_linked_spawn(_make_lever_data(), _make_door(), 2, 2)]
+	var trap_data := _make_projectile_trap_data(6, 0)
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(trap_data, 1.0, 3, ObjectSpawn.PLACEMENT_CORRIDOR)]
+	var any_launcher_seen: bool = false
+	var any_chest_or_lever_seen: bool = false
+	for s in [12345, 99999, 55555, 42, 31337]:
+		var gen := _make_generator(biome, s)
+		if not gen.projectile_traps.is_empty():
+			any_launcher_seen = true
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				var c: GridCell = gen.grid[x][y]
+				if c.object == null or c.object.data == null:
+					continue
+				if c.object.data.category == ObjectData.Category.CHEST \
+						or c.object.data.category == ObjectData.Category.LEVER:
+					any_chest_or_lever_seen = true
+		for inst in gen.projectile_traps:
+			for p in _projectile_path_until_wall(gen, inst):
+				var c: GridCell = gen.grid[p.x][p.y]
+				if c.object == null or c.object.data == null:
+					continue
+				var cat: int = c.object.data.category
+				assert_ne(cat, ObjectData.Category.CHEST,
+					"launcher at %s fires across chest at %s (seed %d)" % [inst.cell, p, s])
+				assert_ne(cat, ObjectData.Category.LEVER,
+					"launcher at %s fires across lever at %s (seed %d)" % [inst.cell, p, s])
+	# Without these the test would pass vacuously if either spawn type
+	# silently produced nothing — defeating the rule under test.
+	assert_true(any_launcher_seen, "no projectile launchers placed across 5 seeds — test scenario broken")
+	assert_true(any_chest_or_lever_seen, "no chests or levers placed across 5 seeds — test scenario broken")
+
+func test_projectile_path_does_not_cross_exit_cell() -> void:
+	# Rule: a launcher's projectile path must not cross the EXIT cell.
+	# The exit is where the player heads to leave the level — being
+	# shot on the way out feels punitive.
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(_make_projectile_trap_data(8), 1.0, 5)]
+	for s in [12345, 99999, 55555]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			# Walk the FULL path to the wall (not just up to escape).
+			# The exit is its own cell type so it terminates the path
+			# helper, but if it appeared on the path we'd also see it
+			# in `_projectile_path_until_wall` — except that helper
+			# stops at the wall (= non-FLOOR). EXIT is non-FLOOR. So
+			# we walk separately here.
+			var fire := inst.fire_direction()
+			var step: int = 1
+			var step_limit: int = gen.grid_width + gen.grid_height + 2
+			while step <= step_limit:
+				var p: Vector2i = inst.cell + fire * step
+				if p.x < 0 or p.x >= gen.grid_width or p.y < 0 or p.y >= gen.grid_height:
+					break
+				assert_ne(p, gen.exit_pos,
+					"launcher at %s fires across exit at %s (seed %d)" % [inst.cell, p, s])
+				var c: GridCell = gen.grid[p.x][p.y]
+				if c.cell_type == GridCell.CellType.WALL:
+					break
+				step += 1
+
+func test_projectile_at_most_one_launcher_per_segment_cross_spawn() -> void:
+	# Rule: even when multiple `ProjectileTrapSpawn` entries are
+	# configured, every corridor segment holds AT MOST ONE launcher
+	# in total. Without this rule, two spawns each contributing one
+	# launcher could place them at opposite ends of the same corridor,
+	# producing crossfire.
+	var biome := _make_biome()
+	# Two spawns that would each independently want to fill segments.
+	# `min_distance_to_other_projectile_trap = 0` so the spreading
+	# rule doesn't accidentally hide the segment-cap rule under test.
+	var trap_a := _make_projectile_trap_data(8, 0)
+	var trap_b := _make_projectile_trap_data(8, 0)
+	biome.projectile_trap_spawns = [
+		_make_projectile_trap_spawn(trap_a, 1.0, 1),
+		_make_projectile_trap_spawn(trap_b, 1.0, 1),
+	]
+	for s in [12345, 99999, 55555, 42]:
+		var gen := _make_generator(biome, s)
+		var segments: Array = gen._detect_corridor_segments()
+		var cell_to_seg: Dictionary = {}
+		for i in range(segments.size()):
+			for pos in segments[i]:
+				cell_to_seg[pos] = i
+		var per_segment: Dictionary = {}
+		for inst in gen.projectile_traps:
+			if not cell_to_seg.has(inst.cell):
+				continue
+			var seg: int = cell_to_seg[inst.cell]
+			per_segment[seg] = per_segment.get(seg, 0) + 1
+		for k in per_segment.keys():
+			assert_lte(per_segment[k], 1,
+				"segment %d holds %d launchers across 2 spawns (cross-spawn cap = 1, seed %d)"
+				% [k, per_segment[k], s])
