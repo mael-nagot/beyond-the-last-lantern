@@ -364,6 +364,7 @@ Split into three incremental sub-PRs so each one has something testable in-engin
 - Fireball trap (pressure plate or continuous)
 - Immobilize trap (player can't move, can turn and attack)
 - Alert trap (aggros enemies in 10-tile radius — needs Phase 10 enemies first)
+- Sub-biome portal reachability: when Phase 15 Task 1 adds `SUB_EXIT` portal cells, `_validate_step_trap_reachability()` must include them as targets so there is always a step-trap-free path from the entrance to every sub-biome portal
 
 #### Task 4 — Wall-mounted decorations ✅ (code; awaits manual asset wiring)
 Paintings, torches, lanterns mounted on wall faces (a side of a floor cell that abuts a wall cell). No interaction; pure ambiance. Animated decorations (torches) supported via `SpriteFrames`.
