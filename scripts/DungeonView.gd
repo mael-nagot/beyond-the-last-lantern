@@ -39,6 +39,11 @@ var _objects_root: Node3D
 var _doors_root: Node3D
 var _decorations_root: Node3D
 var _traps_root: Node3D
+# Wall-mounted projectile-trap launchers (Phase 8 Task 3 — Subtask C).
+# Subtask C1 renders the launcher sprite statically (no firing yet).
+# Future subtasks add the projectile-flight subtree (C2) and a plate
+# decal subtree (C4) under the same root.
+var _projectile_traps_root: Node3D
 # TrapInstance → Dictionary { "root": Node3D, "spikes_root": Node3D }
 # Lookup so update_trap_visual / _refresh_trap_spike_positions can
 # touch the spike subtree without walking the scene tree. The floor
@@ -73,12 +78,14 @@ func setup(gen: LevelGenerator) -> void:
 	_ensure_doors_root()
 	_ensure_decorations_root()
 	_ensure_traps_root()
+	_ensure_projectile_traps_root()
 	_ensure_drop_target()
 	_build_mesh()
 	_build_objects()
 	_build_doors()
 	_build_items()
 	_build_traps()
+	_build_projectile_traps()
 	_build_wall_decorations()
 	_place_camera_at_entrance()
 	_apply_biome_environment()
@@ -119,6 +126,13 @@ func _ensure_traps_root() -> void:
 	_traps_root = Node3D.new()
 	_traps_root.name = "TrapsRoot"
 	sub_viewport.add_child(_traps_root)
+
+func _ensure_projectile_traps_root() -> void:
+	if _projectile_traps_root != null and is_instance_valid(_projectile_traps_root):
+		return
+	_projectile_traps_root = Node3D.new()
+	_projectile_traps_root.name = "ProjectileTrapsRoot"
+	sub_viewport.add_child(_projectile_traps_root)
 
 func _ensure_drop_target() -> void:
 	if drop_target != null and is_instance_valid(drop_target):
@@ -488,6 +502,11 @@ func rebuild_traps() -> void:
 	if _traps_root == null:
 		return
 	_build_traps()
+
+func rebuild_projectile_traps() -> void:
+	if _projectile_traps_root == null:
+		return
+	_build_projectile_traps()
 
 # Cheap per-tick path: flip the spike subtree's `visible` flag without
 # rebuilding the trap. Game.gd calls this on each ACTIVATED /
@@ -871,6 +890,84 @@ func _wall_decoration_y_rotation_deg(inst: WallDecorationInstance) -> float:
 	# Match the wall mesh's own y_rotation so the decoration sits flush
 	# with the wall and faces the same way (visible side toward the
 	# corridor). Mapping mirrors `_build_mesh`'s wall_offsets table.
+	if inst.wall_dir == Vector2i(0, -1):  # north wall
+		return 0.0
+	if inst.wall_dir == Vector2i(0, 1):   # south wall
+		return 180.0
+	if inst.wall_dir == Vector2i(-1, 0):  # west wall
+		return 90.0
+	if inst.wall_dir == Vector2i(1, 0):   # east wall
+		return 270.0
+	return 0.0
+
+# Phase 8 Task 3 — Subtask C1: static launcher rendering. Each launcher
+# is a single Sprite3D anchored at the wall-face midpoint, Y-rotated to
+# face into the corridor. Subtask C2 will add per-launcher projectile
+# spawning and an in-flight projectile subtree under this same root;
+# Subtask C4 will add the pressure-plate floor decal.
+func _build_projectile_traps() -> void:
+	for child in _projectile_traps_root.get_children():
+		child.queue_free()
+	if generator == null:
+		return
+	for inst in generator.projectile_traps:
+		if inst == null or inst.data == null:
+			continue
+		var node := _make_projectile_trap_node(inst)
+		if node != null:
+			_projectile_traps_root.add_child(node)
+
+func _make_projectile_trap_node(inst: ProjectileTrapInstance) -> Node3D:
+	var data: ProjectileTrapData = inst.data
+	if data.launcher_texture == null:
+		return null
+	var sprite := Sprite3D.new()
+	sprite.texture = data.launcher_texture
+	var tex_h: int = max(1, data.launcher_texture.get_height())
+	sprite.pixel_size = data.launcher_world_height / float(tex_h)
+	sprite.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+	var root := Node3D.new()
+	root.position = _projectile_launcher_position(inst)
+	root.rotation_degrees = Vector3(0.0, _projectile_launcher_y_rotation_deg(inst), 0.0)
+	root.add_child(sprite)
+	return root
+
+func _projectile_launcher_position(inst: ProjectileTrapInstance) -> Vector3:
+	# Cell centre, then shift by half a cell along `wall_dir` to land on
+	# the wall face, then pull back toward the corridor by
+	# `launcher_depth_offset` so the sprite doesn't Z-fight the wall
+	# texture beneath. Vertical = wall midheight + `launcher_y_offset`.
+	# `launcher_horizontal_offset` shifts along the wall's tangent axis
+	# (perpendicular to wall_dir in the horizontal plane) so designers
+	# can nudge a launcher with one-sided art into visual centre.
+	var data: ProjectileTrapData = inst.data
+	var cx: float = inst.cell.x * CELL_SIZE + CELL_SIZE * 0.5
+	var cz: float = inst.cell.y * CELL_SIZE + CELL_SIZE * 0.5
+	var face_x: float = cx + float(inst.wall_dir.x) * CELL_SIZE * 0.5
+	var face_z: float = cz + float(inst.wall_dir.y) * CELL_SIZE * 0.5
+	var pulled_x: float = face_x - float(inst.wall_dir.x) * data.launcher_depth_offset
+	var pulled_z: float = face_z - float(inst.wall_dir.y) * data.launcher_depth_offset
+	# Wall tangent — perpendicular to wall_dir in the XZ plane.
+	# wall_dir=(0,-1) [north]  → tangent=(1,0)  → shift along X
+	# wall_dir=(0, 1) [south]  → tangent=(-1,0) → shift along -X
+	# wall_dir=(-1,0) [west]   → tangent=(0,-1) → shift along -Z
+	# wall_dir=(1, 0) [east]   → tangent=(0, 1) → shift along  Z
+	# (The signs flip when the wall is on the opposite side so a
+	# positive `launcher_horizontal_offset` always shifts to the
+	# launcher's RIGHT as seen from in front of it.)
+	var tan_x: float = float(-inst.wall_dir.y)
+	var tan_z: float = float(inst.wall_dir.x)
+	var shifted_x: float = pulled_x + tan_x * data.launcher_horizontal_offset
+	var shifted_z: float = pulled_z + tan_z * data.launcher_horizontal_offset
+	var y_centre: float = wall_height * 0.5 + data.launcher_y_offset
+	return Vector3(shifted_x, y_centre, shifted_z)
+
+func _projectile_launcher_y_rotation_deg(inst: ProjectileTrapInstance) -> float:
+	# Same wall-face → Y-rotation mapping wall decorations use, so the
+	# launcher sprite sits flush with the wall mesh and its visible
+	# side points into the corridor (toward the player).
 	if inst.wall_dir == Vector2i(0, -1):  # north wall
 		return 0.0
 	if inst.wall_dir == Vector2i(0, 1):   # south wall

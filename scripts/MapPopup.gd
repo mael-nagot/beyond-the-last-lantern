@@ -7,6 +7,12 @@ extends Control
 # info to the player. Flip on in the Inspector while validating Phase 8
 # Task 3 trap placement (Subtask B).
 @export var debug_show_traps: bool = true
+# When true, draws a small arrow on every explored projectile-trap
+# launcher cell, pointing in the projectile's fire direction. Mirrors
+# `debug_show_traps` — off by default in shipping, flipped on in the
+# Inspector to validate Subtask C placement (corridor coverage,
+# escape distance, fire direction toward junctions).
+@export var debug_show_projectile_traps: bool = false
 
 var map_data: MapData
 var generator: LevelGenerator
@@ -239,6 +245,23 @@ func _on_map_draw() -> void:
 				for i in range(4):
 					map_draw.draw_line(diamond[i], diamond[(i + 1) % 4], Color(0.1, 0.5, 0.1), line_width)
 
+	# Draw projectile-trap launcher arrows (debug only) on top of any
+	# floor / object markers in the same cell, but BENEATH the player
+	# arrow. The launcher's host cell is the floor cell adjacent to
+	# the wall the launcher is mounted on; the arrow points in the
+	# projectile's fire direction.
+	if debug_show_projectile_traps:
+		for ptrap in generator.projectile_traps:
+			if ptrap == null or ptrap.data == null:
+				continue
+			if not map_data.is_explored(ptrap.cell):
+				continue
+			var pcell: GridCell = generator.get_cell(ptrap.cell.x, ptrap.cell.y)
+			if pcell == null:
+				continue
+			var prect_pos: Vector2 = offset + Vector2(ptrap.cell.x * cell_size, ptrap.cell.y * cell_size)
+			_draw_projectile_trap_marker(prect_pos, cell_size, ptrap)
+
 	# Draw doors as thin slabs on cell boundaries. Filled when the
 	# door currently blocks; outline-only when it's open. Only drawn
 	# if BOTH endpoint cells have been explored, so the slab doesn't
@@ -351,6 +374,30 @@ func _draw_trap_marker(rect_pos: Vector2, rect_size: Vector2, cell_size: float, 
 	var lw: float = max(cell_size * 0.06, 1.0)
 	for i in range(3):
 		map_draw.draw_line(triangle[i], triangle[(i + 1) % 3], border, lw)
+
+func _draw_projectile_trap_marker(rect_pos: Vector2, cell_size: float, ptrap: ProjectileTrapInstance) -> void:
+	# Small arrow inside the host cell pointing in the projectile's
+	# fire direction (= -wall_dir). Tip touches the cell edge on the
+	# wall-opposite side, base sits at the wall side. Cyan-ish so it's
+	# distinct from spike-trap triangles (red/orange) and the player
+	# arrow (red).
+	var fire: Vector2i = ptrap.fire_direction()
+	var center: Vector2 = rect_pos + Vector2(cell_size * 0.5, cell_size * 0.5)
+	var dir := Vector2(float(fire.x), float(fire.y))
+	if dir.length_squared() < 0.0001:
+		return
+	dir = dir.normalized()
+	var perp := Vector2(-dir.y, dir.x)
+	var tip: Vector2 = center + dir * cell_size * 0.40
+	var base_l: Vector2 = center - dir * cell_size * 0.20 + perp * cell_size * 0.18
+	var base_r: Vector2 = center - dir * cell_size * 0.20 - perp * cell_size * 0.18
+	var color := Color(0.20, 0.65, 0.85)  # launcher cyan — distinct from spike red/orange
+	var poly := PackedVector2Array([tip, base_l, base_r])
+	map_draw.draw_colored_polygon(poly, color)
+	var border := Color(color.r * 0.5, color.g * 0.5, color.b * 0.5)
+	var lw: float = max(cell_size * 0.06, 1.0)
+	for i in range(3):
+		map_draw.draw_line(poly[i], poly[(i + 1) % 3], border, lw)
 
 func _draw_door_slab(door: DoorInstance, offset: Vector2, cell_size: float, line_width: float) -> void:
 	# A door sits on the boundary between cell_a and cell_b. The slab

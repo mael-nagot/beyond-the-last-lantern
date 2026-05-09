@@ -21,6 +21,7 @@ var objects_pool: Array[ObjectSpawn] = []
 var linked_objects_pool: Array[LinkedObjectSpawn] = []
 var key_door_spawns_pool: Array[KeyDoorSpawn] = []
 var trap_spawns_pool: Array[TrapSpawn] = []
+var projectile_trap_spawns_pool: Array[ProjectileTrapSpawn] = []
 var wall_decorations_pool: Array[WallDecorationSpawn] = []
 
 var grid: Array = []
@@ -54,6 +55,13 @@ var traps: Array[TrapInstance] = []
 # defeats the per-segment cluster cap.
 var _cluster_cells: Dictionary = {}
 
+# Wall-mounted projectile launchers (Phase 8 Task 3 — Subtask C).
+# Live on wall FACES (cell + wall_dir) like wall decorations and share
+# the same `_wall_faces_used` registry so a face never holds both a
+# decoration and a launcher. Authoritative list — DungeonView iterates
+# this for rendering and Game ticks each entry's firing logic (C2).
+var projectile_traps: Array[ProjectileTrapInstance] = []
+
 func configure(biome: BiomeData) -> void:
 	if biome == null:
 		push_error("LevelGenerator: biome is null, using defaults")
@@ -78,6 +86,7 @@ func configure(biome: BiomeData) -> void:
 	linked_objects_pool = biome.linked_objects
 	key_door_spawns_pool = biome.key_door_spawns
 	trap_spawns_pool = biome.trap_spawns
+	projectile_trap_spawns_pool = biome.projectile_trap_spawns
 	wall_decorations_pool = biome.wall_decorations
 
 func generate() -> void:
@@ -88,6 +97,7 @@ func generate() -> void:
 	_wall_faces_used.clear()
 	traps.clear()
 	_cluster_cells.clear()
+	projectile_traps.clear()
 	if room_count > 0:
 		_place_rooms()
 	_grow_maze()
@@ -106,6 +116,7 @@ func generate() -> void:
 	_validate_timed_trap_safe_distance()
 	_place_items()
 	_validate_step_trap_reachability()
+	_place_projectile_traps()
 	_place_wall_decorations()
 
 # -------------------------------------------------------
@@ -2085,6 +2096,171 @@ func _place_items() -> void:
 # -------------------------------------------------------
 # Wall decorations (paintings, torches, lanterns)
 # -------------------------------------------------------
+# -------------------------------------------------------
+# Projectile traps (Phase 8 Task 3 — Subtask C)
+# -------------------------------------------------------
+
+func _place_projectile_traps() -> void:
+	# Subtask C1: corridor placement only. Room placement (C5) and
+	# pressure plates (C4) layer in later. We deliberately don't claim
+	# wall-face exclusivity for the spike trap pass — spike traps live
+	# on cells, not faces, so there's no conflict.
+	if projectile_trap_spawns_pool.is_empty():
+		return
+	var segments: Array = _detect_corridor_segments()
+	# Junction lookup — corridor cells with 3+ corridor neighbours,
+	# excluded from segments by `_detect_corridor_segments`. The fire
+	# direction must reach a junction within `max_escape_distance`
+	# tiles, so we precompute the junction set once per generation.
+	var junctions: Dictionary = _detect_corridor_junctions()
+	for spawn in projectile_trap_spawns_pool:
+		if spawn == null or spawn.trap == null:
+			continue
+		if spawn.uses_corridor() and spawn.allows(ObjectSpawn.PLACEMENT_CORRIDOR):
+			_place_corridor_projectile_traps(spawn, segments, junctions)
+		# Room placement (C5) and dead-end placement deliberately not
+		# wired in C1.
+
+# Returns Dictionary[Vector2i -> true] of every corridor cell with 3+
+# corridor neighbours. Mirrors the junction logic in
+# `_detect_corridor_segments` but exposed as a standalone set so the
+# projectile-trap placer can ask "is this cell a junction" in O(1).
+func _detect_corridor_junctions() -> Dictionary:
+	var junctions: Dictionary = {}
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var pos := Vector2i(x, y)
+			var cell: GridCell = grid[x][y]
+			if cell.cell_type != GridCell.CellType.FLOOR:
+				continue
+			if classify_cell(pos) != ObjectSpawn.PLACEMENT_CORRIDOR:
+				continue
+			var corridor_n := 0
+			for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				var n: Vector2i = pos + d
+				if not _in_bounds(n.x, n.y):
+					continue
+				if grid[n.x][n.y].cell_type != GridCell.CellType.FLOOR:
+					continue
+				if classify_cell(n) == ObjectSpawn.PLACEMENT_CORRIDOR:
+					corridor_n += 1
+			if corridor_n >= 3:
+				junctions[pos] = true
+	return junctions
+
+func _place_corridor_projectile_traps(spawn: ProjectileTrapSpawn, segments: Array, junctions: Dictionary) -> void:
+	var max_escape: int = max(1, spawn.trap.max_escape_distance)
+	for segment in segments:
+		if randf() >= spawn.corridor_chance:
+			continue
+		# Build the candidate (cell, wall_dir) pool for this segment.
+		# A candidate is valid when:
+		#   - cell.x/y are in the segment (so the launcher's host cell
+		#     is itself a corridor cell, not a junction or room)
+		#   - cell + wall_dir is a WALL cell (where the launcher mounts)
+		#   - cell - wall_dir is a corridor floor (so the projectile has
+		#     somewhere to fly — the cell directly opposite the wall)
+		#   - tracing forward in fire_direction = -wall_dir reaches a
+		#     junction within `max_escape_distance` tiles without
+		#     hitting a wall first (the player's escape route)
+		#   - the wall face isn't already in `_wall_faces_used`
+		#     (decorations register here too — a decoration could land
+		#     here later, but at this point the registry only holds
+		#     other projectile launchers since C1 runs before
+		#     `_place_wall_decorations()`)
+		var candidates: Array = []
+		for pos in segment:
+			if pos == entrance_pos or pos == exit_pos:
+				continue
+			# Skip cells with a blocking object — a chest at the
+			# launcher's host cell would mean the player walks UP to
+			# the chest standing right where the launcher mounts. The
+			# wall face is fine geometrically but the visual gets weird.
+			var host_cell: GridCell = grid[pos.x][pos.y]
+			if host_cell.object != null:
+				continue
+			for wall_dir: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				if not _is_launchable_wall(pos, wall_dir, junctions, max_escape):
+					continue
+				candidates.append([pos, wall_dir])
+		if candidates.is_empty():
+			continue
+		var max_n: int = max(1, spawn.corridor_max_per_segment)
+		var placed_in_segment: int = 0
+		# Shuffle so repeated runs across the same segment don't always
+		# pick the same cell first.
+		candidates.shuffle()
+		for c in candidates:
+			if placed_in_segment >= max_n:
+				break
+			var pos: Vector2i = c[0]
+			var wall_dir: Vector2i = c[1]
+			# Re-check the face registry — a previous candidate in this
+			# loop may have claimed the same (cell, wall_dir).
+			var face_key: String = ProjectileTrapInstance.face_key(pos, wall_dir)
+			if _wall_faces_used.has(face_key):
+				continue
+			# Spreading rule — no graceful degrade per the spec; just
+			# skip the candidate if too close to an existing launcher.
+			if _too_close_to_existing_projectile_trap(pos, spawn.trap.min_distance_to_other_projectile_trap):
+				continue
+			var inst := ProjectileTrapInstance.create(spawn.trap, pos, wall_dir)
+			projectile_traps.append(inst)
+			_wall_faces_used[face_key] = true
+			placed_in_segment += 1
+
+# A wall face is launchable iff:
+#   - the wall_dir neighbour is a WALL (mount point)
+#   - the OPPOSITE neighbour (-wall_dir) is a corridor floor (first
+#     cell of projectile flight)
+#   - tracing forward in fire_direction = -wall_dir reaches a junction
+#     within `max_escape_distance` tiles, with every traversed cell
+#     being a corridor floor (no walls / room cells / non-corridor
+#     surprises along the way)
+#   - the face isn't already claimed
+func _is_launchable_wall(cell: Vector2i, wall_dir: Vector2i, junctions: Dictionary, max_escape: int) -> bool:
+	var wx: int = cell.x + wall_dir.x
+	var wy: int = cell.y + wall_dir.y
+	if not _in_bounds(wx, wy):
+		return false
+	if grid[wx][wy].cell_type != GridCell.CellType.WALL:
+		return false
+	var fire_dir: Vector2i = -wall_dir
+	# Walk forward until junction (success), wall (fail), out of bounds
+	# (fail), or escape budget exhausted (fail).
+	for step in range(1, max_escape + 1):
+		var nx: int = cell.x + fire_dir.x * step
+		var ny: int = cell.y + fire_dir.y * step
+		if not _in_bounds(nx, ny):
+			return false
+		var nc: GridCell = grid[nx][ny]
+		if nc.cell_type != GridCell.CellType.FLOOR:
+			return false
+		var npos := Vector2i(nx, ny)
+		if junctions.has(npos):
+			# Found the escape junction within budget.
+			# Reject if the face is already claimed (registry check
+			# late so we don't waste cycles on doomed candidates that
+			# pass the geometry check too).
+			if _wall_faces_used.has(ProjectileTrapInstance.face_key(cell, wall_dir)):
+				return false
+			return true
+		# Must be a corridor cell to keep walking — a room cell would
+		# mean the projectile fires out of the corridor into a room,
+		# which can become an unavoidable hazard since the room is
+		# typically open. Subtask C5 handles room placement separately.
+		if classify_cell(npos) != ObjectSpawn.PLACEMENT_CORRIDOR:
+			return false
+	return false
+
+func _too_close_to_existing_projectile_trap(pos: Vector2i, min_distance: int) -> bool:
+	if min_distance <= 0:
+		return false
+	for inst in projectile_traps:
+		if _manhattan(pos, inst.cell) < min_distance:
+			return true
+	return false
+
 func _place_wall_decorations() -> void:
 	if wall_decorations_pool.is_empty():
 		return

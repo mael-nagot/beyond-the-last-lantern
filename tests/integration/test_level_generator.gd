@@ -2425,3 +2425,211 @@ func test_step_traps_adjacent_to_chests_are_allowed() -> void:
 						found_step_adjacent = true
 	assert_true(found_step_adjacent,
 		"step traps adjacent to chests should be allowed (timed adjacency rule only applies to TIMED traps)")
+
+# -------------------------------------------------------
+# Projectile traps (Phase 8 Task 3 — Subtask C1)
+# -------------------------------------------------------
+
+func _make_projectile_trap_data(max_escape: int = 5, min_distance: int = 0) -> ProjectileTrapData:
+	# Defaults aimed at the small 21×21 test biome — a generous
+	# `max_escape` so most corridor segments yield candidates, and
+	# `min_distance` defaulted to 0 so spreading isn't accidentally
+	# under-tested in the count-related assertions.
+	var data := ProjectileTrapData.new()
+	data.trigger = ProjectileTrapData.Trigger.TIMED
+	data.max_escape_distance = max_escape
+	data.min_distance_to_other_projectile_trap = min_distance
+	data.name_key = "test.projectile_trap"
+	# Provide a non-null launcher_texture so DungeonView would render
+	# something — placement code itself doesn't need it, but it makes
+	# the test data realistic.
+	var img := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+	data.launcher_texture = ImageTexture.create_from_image(img)
+	return data
+
+func _make_projectile_trap_spawn(trap: ProjectileTrapData, corridor_chance: float, max_per_segment: int = 1, placement: int = ObjectSpawn.PLACEMENT_CORRIDOR) -> ProjectileTrapSpawn:
+	var spawn := ProjectileTrapSpawn.new()
+	spawn.trap = trap
+	spawn.corridor_chance = corridor_chance
+	spawn.corridor_max_per_segment = max_per_segment
+	spawn.placement = placement
+	return spawn
+
+func test_no_projectile_traps_when_pool_is_empty() -> void:
+	var gen := _make_generator(_make_biome())
+	assert_eq(gen.projectile_traps.size(), 0)
+
+func test_no_projectile_traps_when_corridor_chance_zero() -> void:
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(_make_projectile_trap_data(), 0.0)]
+	var gen := _make_generator(biome)
+	assert_eq(gen.projectile_traps.size(), 0,
+		"corridor_chance = 0 must produce no launchers")
+
+func test_projectile_traps_landed_with_chance_one() -> void:
+	# At chance = 1.0 the placer attempts a launcher in every segment.
+	# The 21×21 biome typically has multiple corridor segments, so we
+	# should see at least one placement across most seeds.
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(_make_projectile_trap_data(8), 1.0)]
+	var any_placed := false
+	for s in [12345, 99999, 55555, 42, 31337]:
+		var gen := _make_generator(biome, s)
+		if gen.projectile_traps.size() > 0:
+			any_placed = true
+			break
+	assert_true(any_placed, "chance=1.0 should produce at least one launcher across 5 seeds")
+
+func test_projectile_launcher_mounts_on_actual_wall() -> void:
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(_make_projectile_trap_data(8), 1.0)]
+	var gen := _make_generator(biome, 12345)
+	for inst in gen.projectile_traps:
+		var nx: int = inst.cell.x + inst.wall_dir.x
+		var ny: int = inst.cell.y + inst.wall_dir.y
+		assert_true(nx >= 0 and nx < gen.grid_width and ny >= 0 and ny < gen.grid_height,
+			"launcher at %s wall_dir %s points out of bounds" % [inst.cell, inst.wall_dir])
+		assert_eq(gen.grid[nx][ny].cell_type, GridCell.CellType.WALL,
+			"launcher at %s wall_dir %s points to a non-wall cell" % [inst.cell, inst.wall_dir])
+
+func test_projectile_launcher_host_cell_is_floor() -> void:
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(_make_projectile_trap_data(8), 1.0)]
+	var gen := _make_generator(biome, 12345)
+	for inst in gen.projectile_traps:
+		var cell: GridCell = gen.grid[inst.cell.x][inst.cell.y]
+		assert_ne(cell.cell_type, GridCell.CellType.WALL,
+			"launcher host cell %s is a wall — should be floor" % inst.cell)
+
+func test_projectile_launcher_never_on_entrance_or_exit() -> void:
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(_make_projectile_trap_data(8), 1.0)]
+	for s in [12345, 99999, 55555]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			assert_ne(inst.cell, gen.entrance_pos,
+				"launcher must not host on entrance (seed %d)" % s)
+			assert_ne(inst.cell, gen.exit_pos,
+				"launcher must not host on exit (seed %d)" % s)
+
+func test_projectile_fire_direction_reaches_a_junction_within_escape() -> void:
+	# Walk from the launcher cell in fire direction up to
+	# max_escape_distance steps; we MUST hit a corridor cell with 3+
+	# corridor neighbours (a junction). Anything else is a placement
+	# bug — the spec's escape rule would be violated.
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(_make_projectile_trap_data(6), 1.0)]
+	for s in [12345, 99999, 55555]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			var fire := inst.fire_direction()
+			var max_escape: int = inst.data.max_escape_distance
+			var reached_junction := false
+			for step in range(1, max_escape + 1):
+				var p: Vector2i = inst.cell + fire * step
+				if p.x < 0 or p.x >= gen.grid_width or p.y < 0 or p.y >= gen.grid_height:
+					break
+				var c: GridCell = gen.grid[p.x][p.y]
+				if c.cell_type != GridCell.CellType.FLOOR:
+					break
+				# Junction = corridor cell with 3+ corridor neighbours.
+				var corridor_n := 0
+				for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+					var nn: Vector2i = p + d
+					if nn.x < 0 or nn.x >= gen.grid_width or nn.y < 0 or nn.y >= gen.grid_height:
+						continue
+					if gen.grid[nn.x][nn.y].cell_type != GridCell.CellType.FLOOR:
+						continue
+					if gen.classify_cell(nn) == ObjectSpawn.PLACEMENT_CORRIDOR:
+						corridor_n += 1
+				if corridor_n >= 3:
+					reached_junction = true
+					break
+			assert_true(reached_junction,
+				"launcher at %s firing %s did not reach a junction within %d tiles (seed %d)"
+				% [inst.cell, fire, max_escape, s])
+
+func test_projectile_face_uniqueness() -> void:
+	# Two launchers must never share a wall face.
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(_make_projectile_trap_data(8, 0), 1.0, 3)]
+	var gen := _make_generator(biome, 12345)
+	var seen: Dictionary = {}
+	for inst in gen.projectile_traps:
+		var key: String = inst.get_face_key()
+		assert_false(seen.has(key), "duplicate wall face %s" % key)
+		seen[key] = true
+
+func test_projectile_does_not_share_face_with_decoration() -> void:
+	# Wall decorations and projectile launchers share `_wall_faces_used`.
+	# Projectile traps run BEFORE decorations, so a launcher claims
+	# its face first; the decoration pass should skip claimed faces.
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(_make_projectile_trap_data(8, 0), 1.0, 5)]
+	biome.wall_decorations = [_make_wall_deco_spawn(_make_wall_deco_data(), 8, 8)]
+	var gen := _make_generator(biome, 12345)
+	var deco_faces: Dictionary = {}
+	for d in gen.wall_decorations:
+		deco_faces[d.get_face_key()] = true
+	for inst in gen.projectile_traps:
+		assert_false(deco_faces.has(inst.get_face_key()),
+			"launcher and decoration share wall face %s" % inst.get_face_key())
+
+func test_projectile_min_distance_keeps_launchers_apart() -> void:
+	# No graceful degrade — if the rule can't be met, the launcher is
+	# simply skipped. So we just assert the placed ones respect it.
+	var biome := _make_biome()
+	var trap_data := _make_projectile_trap_data(8, 5)
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(trap_data, 1.0, 5)]
+	var gen := _make_generator(biome, 12345)
+	for i in range(gen.projectile_traps.size()):
+		for j in range(i + 1, gen.projectile_traps.size()):
+			var a: Vector2i = gen.projectile_traps[i].cell
+			var b: Vector2i = gen.projectile_traps[j].cell
+			var dist: int = abs(a.x - b.x) + abs(a.y - b.y)
+			assert_gte(dist, 5,
+				"launchers at %s and %s are %d apart (need >= 5)" % [a, b, dist])
+
+func test_projectile_max_per_segment_cap_holds() -> void:
+	# Group placed launchers by their corridor segment; no segment
+	# should contain more than `corridor_max_per_segment` launchers.
+	var biome := _make_biome()
+	var trap_data := _make_projectile_trap_data(8, 0)
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(trap_data, 1.0, 1)]
+	var gen := _make_generator(biome, 12345)
+	var segments: Array = gen._detect_corridor_segments()
+	var cell_to_seg: Dictionary = {}
+	for i in range(segments.size()):
+		for pos in segments[i]:
+			cell_to_seg[pos] = i
+	var per_segment: Dictionary = {}
+	for inst in gen.projectile_traps:
+		if not cell_to_seg.has(inst.cell):
+			continue
+		var seg: int = cell_to_seg[inst.cell]
+		per_segment[seg] = per_segment.get(seg, 0) + 1
+	for k in per_segment.keys():
+		assert_lte(per_segment[k], 1, "segment %d holds %d launchers (cap = 1)" % [k, per_segment[k]])
+
+func test_projectile_corridor_only_placement() -> void:
+	# Subtask C1 wires corridor placement only; even with PLACEMENT_ANY,
+	# the host cell must be a corridor (room placement lands in C5).
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(_make_projectile_trap_data(8), 1.0, 2, ObjectSpawn.PLACEMENT_ANY)]
+	var gen := _make_generator(biome, 12345)
+	for inst in gen.projectile_traps:
+		var classification: int = gen.classify_cell(inst.cell)
+		# Junctions classify as corridor; dead-ends are also valid as
+		# segment endpoints. Either way, NOT room.
+		assert_ne(classification & ObjectSpawn.PLACEMENT_ROOM, ObjectSpawn.PLACEMENT_ROOM,
+			"launcher at %s is in a room — C1 should be corridor-only" % inst.cell)
+
+func test_projectile_fire_direction_is_opposite_wall_dir() -> void:
+	# Sanity: the placement record's fire_direction() must be -wall_dir.
+	# Tested separately in unit tests but verified here against a real
+	# placed instance in case the placer ever sets them inconsistently.
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(_make_projectile_trap_data(8), 1.0, 3)]
+	var gen := _make_generator(biome, 12345)
+	for inst in gen.projectile_traps:
+		assert_eq(inst.fire_direction(), -inst.wall_dir)
