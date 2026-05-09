@@ -52,10 +52,13 @@ extends Resource
 @export_range(0.0, 1.0) var corridor_segment_chance: float = 0.0
 # When a segment is chosen, the placer rolls a target N in
 # [corridor_traps_per_run_min, corridor_traps_per_run_max] and lays N
-# contiguous trap cells inside that segment. The target is clamped to
-# the segment's eligible-cell count; if the segment's eligible-cell
-# count is below `corridor_traps_per_run_min`, the segment is skipped
-# (silent under-delivery is worse than placing fewer traps elsewhere).
+# contiguous trap cells inside that segment. Both bounds are SOFT —
+# when the segment has fewer eligible cells than `corridor_traps_per_run_min`,
+# the placer just lays as many as fit (rather than skipping the
+# segment entirely). The original "skip if too short" rule left
+# short corridors leading to dead-ends bare, which read as "the
+# placer forgot this corridor". `corridor_traps_per_run_max` is also
+# clamped to the segment's eligible-cell count.
 @export var corridor_traps_per_run_min: int = 1
 @export var corridor_traps_per_run_max: int = 3
 

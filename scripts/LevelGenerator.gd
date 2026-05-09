@@ -1531,15 +1531,19 @@ func _place_corridor_traps(spawn: TrapSpawn, segments: Array, cells_by_type: Dic
 		# with an object, and cells already holding a trap (defensive —
 		# segment-has-traps above should have caught these).
 		var eligible: Array = _eligible_segment_cells(segment)
-		var min_n: int = max(1, spawn.corridor_traps_per_run_min)
-		if eligible.size() < min_n:
-			# Segment too short — open-question 1 settled (skip rather
-			# than under-deliver).
+		if eligible.is_empty():
 			continue
+		# `corridor_traps_per_run_min` is a SOFT target — when the
+		# segment is too short to satisfy it, place as many cells as
+		# fit instead of skipping. Skipping leaves short corridors
+		# (e.g. 1-3 cells leading to a dead-end) entirely bare which
+		# reads as "the placer forgot this corridor". Better to
+		# under-deliver visibly than to leave gaps.
+		var min_n: int = max(1, spawn.corridor_traps_per_run_min)
 		var max_n: int = max(min_n, spawn.corridor_traps_per_run_max)
-		# Clamp the target to what the segment can actually hold.
 		max_n = min(max_n, eligible.size())
-		var target_n: int = randi_range(min_n, max_n)
+		var clamped_min: int = min(min_n, max_n)
+		var target_n: int = randi_range(clamped_min, max_n)
 		var run: Array = _gather_run_in_segment(eligible, target_n)
 		for pos in run:
 			var inst := TrapInstance.create(spawn.trap, pos)

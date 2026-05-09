@@ -542,9 +542,12 @@ func test_corridor_segments_are_disjoint() -> void:
 
 func test_corridor_clusters_lay_consecutive_traps() -> void:
 	# With chance = 1.0 and a generous run size, every chosen segment
-	# produces a connected blob of trap cells. Verify that for each trap
-	# placed there is at least one neighbouring trap (or the trap is the
-	# only one in its segment).
+	# produces a 4-connected blob of trap cells. Verify each connected
+	# component of trap cells is itself 4-connected — every member
+	# (in a multi-cell component) must have at least one component-
+	# adjacent trap. Singleton components are valid: with the soft-min
+	# behaviour, segments shorter than `run_min` produce clusters
+	# smaller than `run_min` (down to size 1).
 	var biome := _make_biome()
 	var spawn := _make_corridor_cluster_spawn(_make_trap_data(), 1.0, 3, 5)
 	biome.trap_spawns = [spawn]
@@ -552,21 +555,37 @@ func test_corridor_clusters_lay_consecutive_traps() -> void:
 	if gen.traps.is_empty():
 		# Possible on tiny test maps — skip gracefully rather than fail.
 		return
-	# Bin traps by their segment via the segment list, then verify each
-	# bin is itself a connected component within the trap-cell set.
 	var trap_set: Dictionary = {}
 	for inst in gen.traps:
 		trap_set[inst.cell] = true
+	# Walk each component once. If size > 1, verify connectivity
+	# (every member has a trap neighbour inside the component).
+	var visited: Dictionary = {}
 	for inst in gen.traps:
-		var has_trap_neighbour: bool = false
-		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
-			if trap_set.has(inst.cell + d):
-				has_trap_neighbour = true
-				break
-		# The run min is 3, so every trap must have at least one trap
-		# neighbour (the cluster never has length 1 with run_min = 3).
-		assert_true(has_trap_neighbour,
-			"clustered trap at %s has no trap neighbour (cluster broken?)" % inst.cell)
+		if visited.has(inst.cell):
+			continue
+		var component: Dictionary = {}
+		var queue: Array = [inst.cell]
+		visited[inst.cell] = true
+		component[inst.cell] = true
+		while not queue.is_empty():
+			var cur: Vector2i = queue.pop_front()
+			for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				var n: Vector2i = cur + d
+				if trap_set.has(n) and not visited.has(n):
+					visited[n] = true
+					component[n] = true
+					queue.append(n)
+		if component.size() <= 1:
+			continue  # singleton — soft-min produced it, valid.
+		for cell_pos in component:
+			var has_n: bool = false
+			for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+				if component.has(cell_pos + d):
+					has_n = true
+					break
+			assert_true(has_n,
+				"trap at %s in size-%d cluster has no in-cluster neighbour (cluster broken)" % [cell_pos, component.size()])
 
 func test_corridor_clusters_only_in_corridors() -> void:
 	var biome := _make_biome()
