@@ -59,7 +59,7 @@ func test_cells_entered_empty_when_no_transition() -> void:
 
 func test_cells_entered_one_cell_on_normal_transition() -> void:
 	var proj := Projectile.create(Vector2(3.0, 5.0), Vector2i(1, 0), 5.0)
-	proj.tick(0.3)  # moves 1.5 cells → enters cell (4, 5)
+	proj.tick(0.25)  # moves 1.25 cells → position (4.25, 5) → enters cell (4, 5)
 	var cells := proj.cells_entered_this_tick()
 	assert_eq(cells.size(), 1)
 	assert_eq(cells[0], Vector2i(4, 5))
