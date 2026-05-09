@@ -106,12 +106,12 @@ static func _weighted_pick(entries: Array, cell_pos: Vector2i) -> BiomeTextureEn
 	var total: int = 0
 	for entry in entries:
 		total += max(0, entry.weight)
-	var hash: int = ((cell_pos.x * 7919) ^ (cell_pos.y * 6271)) & 0x7FFFFFFF
+	var pos_hash: int = ((cell_pos.x * 7919) ^ (cell_pos.y * 6271)) & 0x7FFFFFFF
 	# Degenerate: every entry has weight 0. Fall back to uniform pick
 	# so the quad still gets a texture instead of crashing.
 	if total <= 0:
-		return entries[hash % entries.size()]
-	var roll: int = hash % total
+		return entries[pos_hash % entries.size()]
+	var roll: int = pos_hash % total
 	var cumulative: int = 0
 	for entry in entries:
 		cumulative += max(0, entry.weight)
