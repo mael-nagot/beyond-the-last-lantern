@@ -52,9 +52,9 @@ enum StatusEffect {
 
 @export_group("Projectile")
 @export var projectile_sprite: Texture2D
-# Shown when the camera views the projectile from the side (perpendicular
-# to its travel axis). Falls back to projectile_sprite when null.
-@export var projectile_side_sprite: Texture2D
+@export var projectile_back_sprite: Texture2D
+@export var projectile_left_sprite: Texture2D
+@export var projectile_right_sprite: Texture2D
 # Travel speed in cells per second. At 60 fps and 5 cells/sec the
 # projectile moves ~0.08 cells per frame — no risk of skipping a cell.
 # Values above ~20 at 30 fps would need the frame-skip tracking in
@@ -124,6 +124,14 @@ func is_pressure_plate() -> bool:
 	return trigger == Trigger.PRESSURE_PLATE
 
 func get_projectile_sprite_for_view(fire_direction: Vector2i, camera_forward: Vector2i) -> Texture2D:
-	if projectile_side_sprite and fire_direction.x * camera_forward.x + fire_direction.y * camera_forward.y == 0:
-		return projectile_side_sprite
+	var dot := fire_direction.x * camera_forward.x + fire_direction.y * camera_forward.y
+	if dot > 0:
+		if projectile_back_sprite:
+			return projectile_back_sprite
+	elif dot == 0:
+		var cross := fire_direction.x * camera_forward.y - fire_direction.y * camera_forward.x
+		if cross > 0 and projectile_left_sprite:
+			return projectile_left_sprite
+		elif cross < 0 and projectile_right_sprite:
+			return projectile_right_sprite
 	return projectile_sprite
