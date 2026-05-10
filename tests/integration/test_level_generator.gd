@@ -2987,3 +2987,234 @@ func test_projectile_at_most_one_launcher_per_segment_cross_spawn() -> void:
 			assert_lte(per_segment[k], 1,
 				"segment %d holds %d launchers across 2 spawns (cross-spawn cap = 1, seed %d)"
 				% [k, per_segment[k], s])
+
+# -------------------------------------------------------
+# Projectile traps — room placement (Phase 8 Task 3 — Subtask C5)
+# -------------------------------------------------------
+
+# Builds a ProjectileTrapSpawn that ONLY runs the room pass — corridor
+# chance pinned to 0 and `placement` restricted to PLACEMENT_ROOM so the
+# corridor pass would be skipped even if `room_chance` somehow leaked
+# into the corridor side.
+func _make_projectile_room_spawn(trap: ProjectileTrapData, room_chance: float, max_per_room: int = 1) -> ProjectileTrapSpawn:
+	var spawn := ProjectileTrapSpawn.new()
+	spawn.trap = trap
+	spawn.corridor_chance = 0.0
+	spawn.room_chance = room_chance
+	spawn.room_max_per_room = max_per_room
+	spawn.placement = ObjectSpawn.PLACEMENT_ROOM
+	return spawn
+
+# Returns the room rect containing `pos`, or Rect2i() with size = 0 if
+# `pos` is not in any room. Mirrors LevelGenerator._is_in_room but
+# returns the actual rect for follow-up checks.
+func _room_containing(gen: LevelGenerator, pos: Vector2i) -> Rect2i:
+	for room_obj in gen._room_rects:
+		var room: Rect2i = room_obj as Rect2i
+		if room.has_point(pos):
+			return room
+	return Rect2i()
+
+func test_projectile_no_room_traps_when_room_chance_zero() -> void:
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [_make_projectile_room_spawn(_make_projectile_trap_data(8), 0.0)]
+	var gen := _make_generator(biome)
+	assert_eq(gen.projectile_traps.size(), 0,
+		"room_chance = 0 must produce no launchers")
+
+func test_projectile_room_traps_landed_with_chance_one() -> void:
+	# At room_chance = 1.0 the placer attempts a launcher in every room.
+	# The 21x21 biome has 3 small rooms so we should see at least one
+	# placement across most seeds (some rooms may have all four walls
+	# opened by doorways or all-coplanar paths leaving the room rect).
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [_make_projectile_room_spawn(_make_projectile_trap_data(8), 1.0)]
+	var any_placed := false
+	for s in [12345, 99999, 55555, 42, 31337]:
+		var gen := _make_generator(biome, s)
+		if gen.projectile_traps.size() > 0:
+			any_placed = true
+			break
+	assert_true(any_placed, "room_chance=1.0 should produce at least one launcher across 5 seeds")
+
+func test_projectile_room_launcher_host_is_in_a_room() -> void:
+	# When PLACEMENT_ROOM is the only flag, every placed launcher's host
+	# cell must be inside one of the `_room_rects`.
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [_make_projectile_room_spawn(_make_projectile_trap_data(8), 1.0, 2)]
+	var any_launcher_seen: bool = false
+	for s in [12345, 99999, 55555, 42, 31337]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			any_launcher_seen = true
+			var room: Rect2i = _room_containing(gen, inst.cell)
+			assert_gt(room.size.x, 0,
+				"launcher host %s is not in any room rect (seed %d)" % [inst.cell, s])
+	assert_true(any_launcher_seen,
+		"no room-only launchers placed across 5 seeds — test scenario broken")
+
+func test_projectile_room_path_stays_inside_host_room() -> void:
+	# Spec rule: a room-placed launcher's full projectile path must
+	# stay entirely inside the SAME room rect — escaping through a
+	# doorway into a corridor (or an adjacent room) makes the projectile
+	# unavoidable outside the controlled space.
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [_make_projectile_room_spawn(_make_projectile_trap_data(8), 1.0, 2)]
+	var any_launcher_seen: bool = false
+	for s in [12345, 99999, 55555, 42, 31337]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			any_launcher_seen = true
+			var room: Rect2i = _room_containing(gen, inst.cell)
+			assert_gt(room.size.x, 0,
+				"launcher host %s is not in any room rect (seed %d)" % [inst.cell, s])
+			for p in _projectile_path_until_wall(gen, inst):
+				assert_true(room.has_point(p),
+					"projectile path cell %s outside host room %s (launcher %s, seed %d)"
+					% [p, room, inst.cell, s])
+	assert_true(any_launcher_seen,
+		"no room-only launchers placed across 5 seeds — test scenario broken")
+
+func test_projectile_room_max_per_room_cap_holds() -> void:
+	# Cap = 1. Even when many candidates exist, no room contains more
+	# than one launcher from a single spawn.
+	var biome := _make_biome()
+	# Larger rooms so a single room has multiple wall faces that could
+	# host launchers — otherwise the test scenario can't exercise the cap.
+	biome.room_count = 4
+	biome.room_min_size = 4
+	biome.room_max_size = 5
+	# `min_distance_to_other_projectile_trap = 0` so the spreading rule
+	# doesn't accidentally hide the per-room cap rule under test.
+	var trap_data := _make_projectile_trap_data(8, 0)
+	biome.projectile_trap_spawns = [_make_projectile_room_spawn(trap_data, 1.0, 1)]
+	for s in [12345, 99999, 55555, 42]:
+		var gen := _make_generator(biome, s)
+		var per_room: Dictionary = {}
+		for inst in gen.projectile_traps:
+			for i in range(gen._room_rects.size()):
+				var room: Rect2i = gen._room_rects[i] as Rect2i
+				if room.has_point(inst.cell):
+					per_room[i] = per_room.get(i, 0) + 1
+					break
+		for k in per_room.keys():
+			assert_lte(per_room[k], 1,
+				"room %d holds %d launchers (cap = 1, seed %d)" % [k, per_room[k], s])
+
+func test_projectile_room_traps_mount_on_actual_wall() -> void:
+	# Same sanity check as corridor placement: wall_dir must point to a
+	# WALL cell (the room boundary, usually).
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [_make_projectile_room_spawn(_make_projectile_trap_data(8), 1.0, 2)]
+	var gen := _make_generator(biome, 12345)
+	for inst in gen.projectile_traps:
+		var nx: int = inst.cell.x + inst.wall_dir.x
+		var ny: int = inst.cell.y + inst.wall_dir.y
+		assert_true(nx >= 0 and nx < gen.grid_width and ny >= 0 and ny < gen.grid_height,
+			"launcher at %s wall_dir %s points out of bounds" % [inst.cell, inst.wall_dir])
+		assert_eq(gen.grid[nx][ny].cell_type, GridCell.CellType.WALL,
+			"launcher at %s wall_dir %s points to a non-wall cell" % [inst.cell, inst.wall_dir])
+
+func test_projectile_room_paths_never_overlap_with_corridor_paths() -> void:
+	# When the same spawn runs both passes (corridor + room), no two
+	# placed launchers' full flight paths share any cell — the shared
+	# `_projectile_path_cells` registry covers both passes.
+	var biome := _make_biome()
+	var spawn := ProjectileTrapSpawn.new()
+	spawn.trap = _make_projectile_trap_data(8, 0)
+	spawn.corridor_chance = 1.0
+	spawn.corridor_max_per_segment = 2
+	spawn.room_chance = 1.0
+	spawn.room_max_per_room = 2
+	spawn.placement = ObjectSpawn.PLACEMENT_CORRIDOR | ObjectSpawn.PLACEMENT_ROOM
+	biome.projectile_trap_spawns = [spawn]
+	var any_pair_seen: bool = false
+	for s in [12345, 99999, 55555, 42, 31337]:
+		var gen := _make_generator(biome, s)
+		if gen.projectile_traps.size() < 2:
+			continue
+		any_pair_seen = true
+		var paths: Array = []
+		for inst in gen.projectile_traps:
+			paths.append(_projectile_path_until_wall(gen, inst))
+		for i in range(paths.size()):
+			var path_i_set: Dictionary = {}
+			for p in paths[i]:
+				path_i_set[p] = true
+			for j in range(i + 1, paths.size()):
+				for q in paths[j]:
+					assert_false(path_i_set.has(q),
+						"launcher paths %d and %d overlap at %s (seed %d)" % [i, j, q, s])
+	assert_true(any_pair_seen,
+		"no seed produced 2+ launchers (corridor + room combined) — path-overlap test scenario broken")
+
+func test_projectile_room_face_uniqueness_vs_decorations() -> void:
+	# Wall decorations and projectile launchers share `_wall_faces_used`.
+	# Projectile traps run BEFORE decorations, so a launcher claims the
+	# face and the decoration pass must skip it. We assert no overlap.
+	var biome := _make_biome()
+	biome.projectile_trap_spawns = [_make_projectile_room_spawn(_make_projectile_trap_data(8, 0), 1.0, 3)]
+	biome.wall_decorations = [_make_wall_deco_spawn(_make_wall_deco_data(), 30, 30, ObjectSpawn.PLACEMENT_ANY)]
+	var gen := _make_generator(biome, 12345)
+	var faces: Dictionary = {}
+	for inst in gen.projectile_traps:
+		faces[inst.get_face_key()] = "launcher"
+	for deco in gen.wall_decorations:
+		var k: String = deco.get_face_key()
+		assert_false(faces.has(k),
+			"decoration at %s+%s shares face with a launcher" % [deco.cell, deco.wall_dir])
+
+func test_projectile_room_pressure_plate_drops_junction_constraint() -> void:
+	# C5 relaxes the plate placement: rooms have no junctions, so the
+	# room plate picker only enforces "on path" + "≥ min distance to
+	# launcher", NOT the max-distance-to-junction rule used in corridors.
+	# We pump room PRESSURE_PLATE launchers with a very small
+	# `max_plate_to_junction_distance` — if the corridor rule were
+	# accidentally applied to rooms, no plate would satisfy it and no
+	# PRESSURE_PLATE room launcher would land.
+	var biome := _make_biome()
+	biome.room_count = 3
+	biome.room_min_size = 3
+	biome.room_max_size = 4
+	var trap_data := _make_projectile_trap_data(8, 0)
+	trap_data.trigger = ProjectileTrapData.Trigger.PRESSURE_PLATE
+	trap_data.min_plate_to_launcher_distance = 1
+	# Pin the junction max to 1 — would block almost every corridor
+	# candidate; rooms should still place because the rule is dropped.
+	trap_data.max_plate_to_junction_distance = 1
+	biome.projectile_trap_spawns = [_make_projectile_room_spawn(trap_data, 1.0, 2)]
+	var any_room_plate_seen: bool = false
+	for s in [12345, 99999, 55555, 42, 31337]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			if not inst.data.is_pressure_plate() or not inst.has_plate():
+				continue
+			any_room_plate_seen = true
+			# Plate must be on the path.
+			var path: Array = _projectile_path_until_wall(gen, inst)
+			assert_true(path.has(inst.plate_cell),
+				"plate %s not on launcher path (seed %d)" % [inst.plate_cell, s])
+			# Plate must satisfy the min-distance-to-launcher rule.
+			var d: int = abs(inst.plate_cell.x - inst.cell.x) + abs(inst.plate_cell.y - inst.cell.y)
+			assert_gte(d, 1,
+				"plate %s only %d from launcher %s (seed %d)" % [inst.plate_cell, d, inst.cell, s])
+	assert_true(any_room_plate_seen,
+		"no PRESSURE_PLATE room launchers placed across 5 seeds — junction rule may have leaked into the room pass")
+
+func test_projectile_room_min_distance_keeps_launchers_apart() -> void:
+	# Spreading rule still applies in the room pass. Two launchers placed
+	# in the same room (or across rooms) must respect Manhattan spacing.
+	var biome := _make_biome()
+	biome.room_count = 4
+	biome.room_min_size = 4
+	biome.room_max_size = 5
+	var trap_data := _make_projectile_trap_data(8, 5)
+	biome.projectile_trap_spawns = [_make_projectile_room_spawn(trap_data, 1.0, 3)]
+	var gen := _make_generator(biome, 12345)
+	for i in range(gen.projectile_traps.size()):
+		for j in range(i + 1, gen.projectile_traps.size()):
+			var a: Vector2i = gen.projectile_traps[i].cell
+			var b: Vector2i = gen.projectile_traps[j].cell
+			var dist: int = abs(a.x - b.x) + abs(a.y - b.y)
+			assert_gte(dist, 5,
+				"launchers at %s and %s are %d apart (need >= 5)" % [a, b, dist])

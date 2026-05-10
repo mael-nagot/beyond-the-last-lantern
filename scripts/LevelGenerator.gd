@@ -2118,10 +2118,10 @@ func _place_items() -> void:
 # -------------------------------------------------------
 
 func _place_projectile_traps() -> void:
-	# Subtask C1: corridor placement only. Room placement (C5) and
-	# pressure plates (C4) layer in later. We deliberately don't claim
-	# wall-face exclusivity for the spike trap pass — spike traps live
-	# on cells, not faces, so there's no conflict.
+	# Subtask C1: corridor placement; Subtask C5: room placement. Both
+	# passes are additive — a spawn can opt into either or both. We
+	# deliberately don't claim wall-face exclusivity for the spike trap
+	# pass — spike traps live on cells, not faces, so there's no conflict.
 	if projectile_trap_spawns_pool.is_empty():
 		return
 	var segments: Array = _detect_corridor_segments()
@@ -2129,14 +2129,15 @@ func _place_projectile_traps() -> void:
 	# excluded from segments by `_detect_corridor_segments`. The fire
 	# direction must reach a junction within `max_escape_distance`
 	# tiles, so we precompute the junction set once per generation.
+	# Used by the corridor pass only — rooms have no junction concept.
 	var junctions: Dictionary = _detect_corridor_junctions()
 	for spawn in projectile_trap_spawns_pool:
 		if spawn == null or spawn.trap == null:
 			continue
 		if spawn.uses_corridor() and spawn.allows(ObjectSpawn.PLACEMENT_CORRIDOR):
 			_place_corridor_projectile_traps(spawn, segments, junctions)
-		# Room placement (C5) and dead-end placement deliberately not
-		# wired in C1.
+		if spawn.uses_room() and spawn.allows(ObjectSpawn.PLACEMENT_ROOM):
+			_place_room_projectile_traps(spawn)
 
 # Returns Dictionary[Vector2i -> true] of every corridor cell with 3+
 # corridor neighbours. Mirrors the junction logic in
@@ -2260,6 +2261,181 @@ func _place_corridor_projectile_traps(spawn: ProjectileTrapSpawn, segments: Arra
 			for p in path:
 				_projectile_path_cells[p] = true
 			placed_in_segment += 1
+
+# Room placement (Subtask C5). Mirrors the corridor pass with three
+# differences: (1) the candidate validator
+# (`_projectile_launch_path_in_room`) requires the FULL projectile
+# path to stay inside the room rect — escaping through a doorway into
+# a corridor makes the projectile unavoidable outside the controlled
+# space; (2) there's no junction-reachability rule (rooms have no
+# junctions in the corridor sense; the player can sidestep inside the
+# room or step out through any doorway to escape the firing line); (3)
+# the PRESSURE_PLATE plate picker (`_pick_plate_cell_for_room`) drops
+# the junction-distance bound and keeps only the min-distance-to-
+# launcher bound.
+func _place_room_projectile_traps(spawn: ProjectileTrapSpawn) -> void:
+	for room_obj in _room_rects:
+		var room: Rect2i = room_obj as Rect2i
+		if randf() >= spawn.room_chance:
+			continue
+		# Build the candidate (cell, wall_dir, path) pool for this room.
+		# Same shape as the corridor pass — `_projectile_launch_path_in_room`
+		# returns the full path on success and an empty array on rejection.
+		var candidates: Array = []
+		for x in range(room.position.x, room.position.x + room.size.x):
+			for y in range(room.position.y, room.position.y + room.size.y):
+				if not _in_bounds(x, y):
+					continue
+				var pos := Vector2i(x, y)
+				if pos == entrance_pos or pos == exit_pos:
+					continue
+				var host_cell: GridCell = grid[pos.x][pos.y]
+				if host_cell.cell_type != GridCell.CellType.FLOOR:
+					continue
+				# Same host-cell exclusions as corridor placement — a
+				# blocking object or a spike trap on the launcher's host
+				# cell reads as layered hazard/decor and looks weird.
+				if host_cell.object != null:
+					continue
+				if host_cell.trap != null:
+					continue
+				for wall_dir: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+					var path: Array = _projectile_launch_path_in_room(pos, wall_dir, room)
+					if path.is_empty():
+						continue
+					candidates.append([pos, wall_dir, path])
+		if candidates.is_empty():
+			continue
+		var max_n: int = max(1, spawn.room_max_per_room)
+		var placed_in_room: int = 0
+		candidates.shuffle()
+		for c in candidates:
+			if placed_in_room >= max_n:
+				break
+			var pos: Vector2i = c[0]
+			var wall_dir: Vector2i = c[1]
+			var path: Array = c[2]
+			# Revalidate against state that may have changed since the
+			# candidate list was built (an earlier winner in this loop,
+			# or the corridor pass running before us, may have claimed
+			# the face or laid down an overlapping path).
+			var face_key: String = ProjectileTrapInstance.face_key(pos, wall_dir)
+			if _wall_faces_used.has(face_key):
+				continue
+			if _path_overlaps_existing(path):
+				continue
+			# Spreading rule applies globally — no graceful degrade,
+			# matching the corridor pass.
+			if _too_close_to_existing_projectile_trap(pos, spawn.trap.min_distance_to_other_projectile_trap):
+				continue
+			var plate_cell: Vector2i = ProjectileTrapInstance.NO_PLATE
+			if spawn.trap.is_pressure_plate():
+				plate_cell = _pick_plate_cell_for_room(path, pos, spawn.trap)
+				if plate_cell == ProjectileTrapInstance.NO_PLATE:
+					continue
+			var inst := ProjectileTrapInstance.create(spawn.trap, pos, wall_dir)
+			if spawn.trap.is_timed():
+				var period: float = max(0.001, spawn.trap.timed_period)
+				inst.timed_offset = fposmod(spawn.trap.timed_initial_offset + randf() * period, period)
+				inst.timer = inst.timed_offset
+			inst.plate_cell = plate_cell
+			projectile_traps.append(inst)
+			_wall_faces_used[face_key] = true
+			for p in path:
+				_projectile_path_cells[p] = true
+			placed_in_room += 1
+
+# Returns the projectile's full flight path as Array[Vector2i] when
+# the (cell, wall_dir) candidate is launchable INSIDE THE ROOM; empty
+# array otherwise. Used in Subtask C5.
+#
+# A wall face is launchable in a room iff:
+#   - the wall_dir neighbour is a WALL (mount point — typically the
+#     room's outer boundary wall)
+#   - tracing forward in fire_direction = -wall_dir, every cell on the
+#     full path until the projectile hits a wall is a FLOOR cell INSIDE
+#     the same room rect. Escaping through a doorway into a corridor
+#     or an adjacent room would make the projectile unavoidable outside
+#     the controlled space.
+#   - no cell on the path holds a CHEST or LEVER (same fairness rule
+#     as the corridor pass — projectiles crossing reward / interactive
+#     points feel unfair)
+#   - no cell on the path is the EXIT (rare in rooms but possible if
+#     the level designer dropped an exit in one)
+#   - no cell on the path is on another launcher's path
+#   - the face isn't already claimed
+#
+# No junction requirement (rooms have no junctions in the corridor
+# sense — the player escapes by sidestepping inside the room or
+# stepping out through a doorway).
+func _projectile_launch_path_in_room(cell: Vector2i, wall_dir: Vector2i, room: Rect2i) -> Array:
+	var empty: Array = []
+	if not room.has_point(cell):
+		return empty
+	var wx: int = cell.x + wall_dir.x
+	var wy: int = cell.y + wall_dir.y
+	if not _in_bounds(wx, wy):
+		return empty
+	if grid[wx][wy].cell_type != GridCell.CellType.WALL:
+		return empty
+	if _wall_faces_used.has(ProjectileTrapInstance.face_key(cell, wall_dir)):
+		return empty
+	var fire_dir: Vector2i = -wall_dir
+	var path: Array = []
+	var step_limit: int = grid_width + grid_height + 2
+	var step: int = 1
+	while step <= step_limit:
+		var nx: int = cell.x + fire_dir.x * step
+		var ny: int = cell.y + fire_dir.y * step
+		if not _in_bounds(nx, ny):
+			return empty
+		var nc: GridCell = grid[nx][ny]
+		if nc.cell_type == GridCell.CellType.WALL:
+			break
+		if nc.cell_type == GridCell.CellType.EXIT:
+			return empty
+		if nc.cell_type != GridCell.CellType.FLOOR:
+			return empty
+		var npos := Vector2i(nx, ny)
+		# Path must stay inside the SAME room. A projectile leaking out
+		# through a doorway into a corridor (or an adjacent room) becomes
+		# unavoidable outside the controlled space.
+		if not room.has_point(npos):
+			return empty
+		if nc.object != null and nc.object.data != null:
+			var cat: int = nc.object.data.category
+			if cat == ObjectData.Category.CHEST or cat == ObjectData.Category.LEVER:
+				return empty
+		if _projectile_path_cells.has(npos):
+			return empty
+		path.append(npos)
+		step += 1
+	return path
+
+# Pick a plate cell for a PRESSURE_PLATE room launcher, or return
+# `ProjectileTrapInstance.NO_PLATE` if no valid candidate exists.
+# Relaxed version of `_pick_plate_cell_for_corridor`: the plate must
+# be on the projectile path AND ≥ `min_plate_to_launcher_distance`
+# from the launcher; the junction-distance constraint is dropped
+# because rooms have no junctions and the player's escape is
+# sidestepping inside the room or stepping out through a doorway.
+func _pick_plate_cell_for_room(path: Array, launcher_cell: Vector2i, data: ProjectileTrapData) -> Vector2i:
+	if path.is_empty():
+		return ProjectileTrapInstance.NO_PLATE
+	var min_to_launcher: int = max(1, data.min_plate_to_launcher_distance)
+	var candidates: Array = []
+	for plate_pos in path:
+		# Same spike-trap exclusion as the corridor variant — stepping
+		# on the plate must not trigger a co-located spike at the same
+		# time, and the decals must not z-fight.
+		if grid[plate_pos.x][plate_pos.y].trap != null:
+			continue
+		if _manhattan(plate_pos, launcher_cell) < min_to_launcher:
+			continue
+		candidates.append(plate_pos)
+	if candidates.is_empty():
+		return ProjectileTrapInstance.NO_PLATE
+	return candidates[randi() % candidates.size()]
 
 # Pick a plate cell for a PRESSURE_PLATE corridor launcher, or return
 # `ProjectileTrapInstance.NO_PLATE` if no valid candidate exists. The
