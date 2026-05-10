@@ -2988,6 +2988,43 @@ func test_projectile_at_most_one_launcher_per_segment_cross_spawn() -> void:
 				"segment %d holds %d launchers across 2 spawns (cross-spawn cap = 1, seed %d)"
 				% [k, per_segment[k], s])
 
+func test_projectile_pressure_plate_corridor_path_has_middle_junction() -> void:
+	# PRESSURE_PLATE-only fairness rule: every PRESSURE_PLATE corridor
+	# launcher's projectile path must contain a junction at a
+	# non-endpoint position (i.e., index in [1, N-2]). Without this,
+	# the developer-reported case "junction is the path's terminal
+	# cell, plate lands adjacent to it, player can't fairly traverse
+	# past it" can occur. TIMED launchers don't enforce this rule
+	# (covered separately by the C1 escape-distance test).
+	var biome := _make_biome()
+	var trap_data := _make_projectile_trap_data(8, 0)
+	trap_data.trigger = ProjectileTrapData.Trigger.PRESSURE_PLATE
+	trap_data.min_plate_to_launcher_distance = 1
+	trap_data.max_plate_to_junction_distance = 8
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(trap_data, 1.0, 2)]
+	var any_seen: bool = false
+	for s in [12345, 99999, 55555, 42, 31337]:
+		var gen := _make_generator(biome, s)
+		var junctions: Dictionary = gen._detect_corridor_junctions()
+		for inst in gen.projectile_traps:
+			if not inst.data.is_pressure_plate():
+				continue
+			any_seen = true
+			var path: Array = _projectile_path_until_wall(gen, inst)
+			assert_gte(path.size(), 3,
+				"PRESSURE_PLATE launcher at %s has path length %d — middle-junction rule requires >= 3 (seed %d)"
+				% [inst.cell, path.size(), s])
+			var has_middle := false
+			for i in range(1, path.size() - 1):
+				if junctions.has(path[i]):
+					has_middle = true
+					break
+			assert_true(has_middle,
+				"PRESSURE_PLATE launcher at %s has no junction at non-endpoint position (path=%s, seed %d)"
+				% [inst.cell, path, s])
+	assert_true(any_seen,
+		"no PRESSURE_PLATE launchers placed across 5 seeds — test scenario broken")
+
 # -------------------------------------------------------
 # Projectile traps — room placement (Phase 8 Task 3 — Subtask C5)
 # -------------------------------------------------------
