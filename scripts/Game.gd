@@ -219,6 +219,7 @@ func _open_chest(instance: ObjectInstance) -> void:
 	if not instance.data.interactable:
 		_play_locked_feedback(instance.data)
 		return
+	var was_opened: bool = instance.opened
 	if not instance.opened:
 		_roll_chest_loot(instance)
 		instance.opened = true
@@ -228,6 +229,14 @@ func _open_chest(instance: ObjectInstance) -> void:
 	if instance.has_remaining_loot():
 		if _hud != null and _hud.loot_popup != null:
 			_hud.loot_popup.open(instance)
+	else:
+		# Empty chest: show a toast so the click isn't silent. On a
+		# re-click the negative sound carries the audible feedback;
+		# on the first open the chest's own interact_sound already did.
+		if _hud != null:
+			_hud.show_toast("ui.feedback.empty_chest")
+		if was_opened:
+			SoundManager.play_negative()
 
 func _roll_chest_loot(instance: ObjectInstance) -> void:
 	var table: LootTable = instance.loot_table

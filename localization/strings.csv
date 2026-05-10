@@ -4,6 +4,7 @@ item.health_potion.description,Restores 30 HP.
 ui.pickup.prompt,Pick up
 ui.pickup.bar_full,Bag full
 ui.feedback.no_effect,No effect
+ui.feedback.empty_chest,It's empty.
 character.placeholder.warrior,Warrior
 character.placeholder.wizard,Wizard
 character.placeholder.rogue,Rogue
