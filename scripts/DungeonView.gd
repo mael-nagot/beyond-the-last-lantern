@@ -970,10 +970,10 @@ func _build_projectile_traps() -> void:
 		# idle texture. Lives under the same root as the launcher so a
 		# level rebuild frees both together.
 		if inst.has_plate() and inst.data.plate_texture_idle != null:
-			var plate_node := _make_plate_decal_node(inst)
-			if plate_node != null:
-				_projectile_traps_root.add_child(plate_node)
-				_plate_visuals[inst] = plate_node
+			var plate_entry := _make_plate_decal_node(inst)
+			if not plate_entry.is_empty():
+				_projectile_traps_root.add_child(plate_entry["root"])
+				_plate_visuals[inst] = plate_entry
 				_plate_triggered_state[inst] = false
 	# Initial trigger states reflect the camera's current grid pos
 	# (the player may already be on a plate when the level builds).
@@ -1034,31 +1034,55 @@ func _projectile_launcher_position(inst: ProjectileTrapInstance) -> Vector3:
 # texture in `_trap_floor_material_cache` (cache is shared because the
 # material setup is identical — if a designer reuses the same texture
 # for both, they reuse the same cached material).
-func _make_plate_decal_node(inst: ProjectileTrapInstance) -> MeshInstance3D:
+# Plate decal returns a {root, mi} dict so the caller can both track
+# the parent Node3D (for tweenable Y rotation that follows the camera
+# — see `_refresh_plate_y_rotation`) AND the inner MeshInstance3D
+# (for swapping the idle / triggered material). Wrapping the mesh in
+# a Node3D lets us tween `rotation_degrees:y` directly without
+# fighting the -90° X tilt that lays the quad flat on the floor.
+func _make_plate_decal_node(inst: ProjectileTrapInstance) -> Dictionary:
 	var data: ProjectileTrapData = inst.data
 	if data.plate_texture_idle == null:
-		return null
+		return {}
 	if inst.plate_cell == ProjectileTrapInstance.NO_PLATE:
-		return null
+		return {}
 	var size_factor: float = max(0.01, data.plate_world_size)
 	var quad := QuadMesh.new()
 	quad.size = Vector2(CELL_SIZE * size_factor, CELL_SIZE * size_factor)
-	var mi := MeshInstance3D.new()
-	mi.mesh = quad
-	# Start in the IDLE state. `_update_plate_visual_states` swaps the
-	# material when the player enters / leaves the plate cell.
-	mi.material_override = _build_trap_floor_material(data.plate_texture_idle)
-	# Position: cell centre, very slightly above the floor mesh.
-	# Rotate -90° around X so the quad (authored on the XY plane)
-	# lies flat on the XZ floor — same convention as spike-trap
-	# decals.
+	# Outer Node3D: anchors the plate at its cell centre and owns the
+	# Y rotation that tracks the camera. Tweenable as a single
+	# `rotation_degrees:y` property so we can ride the same 0.12s
+	# rotation tween the camera uses, keeping the plate texture
+	# locked in screen-space throughout the rotate.
+	var root := Node3D.new()
 	var cx: float = inst.plate_cell.x * CELL_SIZE + CELL_SIZE * 0.5
 	var cz: float = inst.plate_cell.y * CELL_SIZE + CELL_SIZE * 0.5
+	root.position = Vector3(cx, 0.01, cz)
+	root.rotation_degrees = Vector3(0.0, _current_angle, 0.0)
+	# Inner MeshInstance3D: laid flat by a -90° X rotation, no
+	# translation (the parent positions it). The X rotation is
+	# constant — only the parent's Y rotation changes over time.
+	var mi := MeshInstance3D.new()
+	mi.mesh = quad
+	mi.material_override = _build_trap_floor_material(data.plate_texture_idle)
 	mi.transform = Transform3D(
 		Basis(Vector3(1.0, 0.0, 0.0), -PI * 0.5),
-		Vector3(cx, 0.01, cz)
+		Vector3.ZERO
 	)
-	return mi
+	root.add_child(mi)
+	return {"root": root, "mi": mi}
+
+# Update one plate's Y rotation immediately (no tween) — used during
+# `_build_projectile_traps` so plates render correctly from the very
+# first frame. Per-plate tweening alongside camera rotation lives in
+# `rotate_camera_to`.
+func _refresh_plate_y_rotation(entry: Dictionary) -> void:
+	if entry.is_empty():
+		return
+	var root: Node3D = entry.get("root", null)
+	if root == null or not is_instance_valid(root):
+		return
+	root.rotation_degrees = Vector3(0.0, _current_angle, 0.0)
 
 # Phase 8 Task 3 — Subtask C4. Walks every tracked plate visual and
 # swaps its material to the triggered or idle texture based on whether
@@ -1080,8 +1104,9 @@ func _update_plate_visual_states() -> void:
 		var current: bool = _plate_triggered_state.get(inst, false)
 		if should_trigger == current:
 			continue
-		var mi: MeshInstance3D = _plate_visuals[inst]
-		if not is_instance_valid(mi):
+		var entry: Dictionary = _plate_visuals[inst]
+		var mi: MeshInstance3D = entry.get("mi", null)
+		if mi == null or not is_instance_valid(mi):
 			# Decal was freed (level rebuild mid-frame, etc.) — drop
 			# the stale entry so we don't keep checking it.
 			_plate_visuals.erase(inst)
@@ -1312,6 +1337,11 @@ func set_initial_facing(facing: Vector2i) -> void:
 	camera.position           = _grid_to_world(_current_grid_pos.x, _current_grid_pos.y)
 	_refresh_object_positions()
 	_refresh_trap_spike_positions()
+	# Snap every plate's Y rotation to the new camera angle so they
+	# render correctly from the very first frame after a level setup
+	# (no tween — this runs before the player has moved at all).
+	for inst in _plate_visuals.keys():
+		_refresh_plate_y_rotation(_plate_visuals[inst])
 
 func move_camera_to(grid_pos: Vector2i, facing: Vector2i) -> void:
 	_current_grid_pos = grid_pos
@@ -1337,8 +1367,19 @@ func rotate_camera_to(turn_right: bool, facing: Vector2i = Vector2i.ZERO) -> voi
 	_current_angle += -90.0 if turn_right else 90.0
 	if facing != Vector2i.ZERO:
 		_current_facing = facing
-	var tween = create_tween()
+	var tween = create_tween().set_parallel(true)
 	tween.tween_property(camera, "rotation_degrees:y", _current_angle, 0.12)
+	# Phase 8 Task 3 — Subtask C4: rotate every plate decal alongside
+	# the camera so the texture stays locked in screen space (the
+	# player always sees the plate from the same perspective). This is
+	# the trick that lets designers bake shadows / fake depth into the
+	# plate art — without it, the texture's "front" would be visually
+	# correct from only one of the four cardinal angles.
+	for inst in _plate_visuals.keys():
+		var entry: Dictionary = _plate_visuals[inst]
+		var root: Node3D = entry.get("root", null)
+		if root != null and is_instance_valid(root):
+			tween.tween_property(root, "rotation_degrees:y", _current_angle, 0.12)
 	_refresh_object_positions()
 	_refresh_trap_spike_positions()
 

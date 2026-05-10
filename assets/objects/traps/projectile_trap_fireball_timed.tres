@@ -5,11 +5,15 @@
 [ext_resource type="Texture2D" uid="uid://dnb4874j2x0lw" path="res://assets/textures/objects/traps/fireball_launcher.png" id="1_umsce"]
 [ext_resource type="AudioStream" uid="uid://cjv2mdr047dog" path="res://assets/sounds/objects/traps/fireball_launch.ogg" id="2_atjfu"]
 [ext_resource type="Texture2D" uid="uid://bq7k4ih27to0u" path="res://assets/textures/objects/traps/fireball.png" id="2_v3y1k"]
+[ext_resource type="AudioStream" uid="uid://c6t18mwgkjmw5" path="res://assets/sounds/objects/traps/pressure_plate_activate.ogg" id="4_24thh"]
+[ext_resource type="Texture2D" uid="uid://beivnqvyi4bqa" path="res://assets/textures/objects/traps/pressure_plate_idle.png" id="5_e7bul"]
+[ext_resource type="Texture2D" uid="uid://6dec3jnbcp7s" path="res://assets/textures/objects/traps/pressure_plate_triggered.png" id="6_0jjrj"]
 
 [resource]
 script = ExtResource("1_jmvhx")
 name_key = "projectile_trap.fireball_timed.name"
 description_key = "projectile_trap.fireball_timed.description"
+trigger = 1
 speed_cells_per_second = 4.0
 max_escape_distance = 3
 launcher_texture = ExtResource("1_umsce")
@@ -18,6 +22,9 @@ launcher_y_offset = -0.6
 projectile_sprite_front = ExtResource("2_v3y1k")
 projectile_world_height = 2.0
 projectile_y_offset = -1.0
+plate_texture_idle = ExtResource("5_e7bul")
+plate_texture_triggered = ExtResource("6_0jjrj")
 launch_sound = ExtResource("2_atjfu")
 impact_sound = ExtResource("1_580ee")
+plate_sound = ExtResource("4_24thh")
 metadata/_custom_type_script = "uid://cam2dc4t0qvmv"
