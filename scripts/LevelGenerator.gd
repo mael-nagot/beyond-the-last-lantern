@@ -2193,6 +2193,14 @@ func _place_corridor_projectile_traps(spawn: ProjectileTrapSpawn, segments: Arra
 			var host_cell: GridCell = grid[pos.x][pos.y]
 			if host_cell.object != null:
 				continue
+			# Same idea for spike traps — spike-hole decals directly
+			# under a launcher read as layered hazards and visually
+			# compete. The plate-cell check (in
+			# `_pick_plate_cell_for_corridor`) excludes spike-trap
+			# cells too, so PRESSURE_PLATE traps don't end up with
+			# their plate sharing a tile with a spike trap.
+			if host_cell.trap != null:
+				continue
 			for wall_dir: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
 				var path: Array = _projectile_launch_path(pos, wall_dir, junctions, max_escape)
 				if path.is_empty():
@@ -2283,6 +2291,15 @@ func _pick_plate_cell_for_corridor(path: Array, launcher_cell: Vector2i, junctio
 	var max_to_junction: int = max(1, data.max_plate_to_junction_distance)
 	var candidates: Array = []
 	for plate_pos in path:
+		# A plate must never share its cell with a spike trap. Without
+		# this check, stepping onto the plate would trigger BOTH
+		# hazards on the same frame (spike damage + fireball spawn),
+		# and the plate / spike-hole decals would z-fight visually.
+		# Spike traps are placed before projectile traps in `generate()`,
+		# so the check is simply "is `cell.trap` non-null at this
+		# moment".
+		if grid[plate_pos.x][plate_pos.y].trap != null:
+			continue
 		# Step distance from launcher along the fire direction equals
 		# Manhattan distance for cardinal flight.
 		if _manhattan(plate_pos, launcher_cell) < min_to_launcher:
