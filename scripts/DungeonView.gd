@@ -932,9 +932,9 @@ func _wall_decoration_y_rotation_deg(inst: WallDecorationInstance) -> float:
 
 # Phase 8 Task 3 — Subtask C1: static launcher rendering. Each launcher
 # is a single Sprite3D anchored at the wall-face midpoint, Y-rotated to
-# face into the corridor. Subtask C2 will add per-launcher projectile
-# spawning and an in-flight projectile subtree under this same root;
-# Subtask C4 will add the pressure-plate floor decal.
+# face into the corridor. Subtask C4 adds a floor-decal MeshInstance3D
+# at the linked plate cell (only PRESSURE_PLATE traps get one — TIMED
+# traps have no plate, `plate_cell == NO_PLATE`).
 func _build_projectile_traps() -> void:
 	for child in _projectile_traps_root.get_children():
 		child.queue_free()
@@ -946,6 +946,13 @@ func _build_projectile_traps() -> void:
 		var node := _make_projectile_trap_node(inst)
 		if node != null:
 			_projectile_traps_root.add_child(node)
+		# Plate decal (Subtask C4) — only for PRESSURE_PLATE traps that
+		# the placer assigned a valid plate cell. Lives under the same
+		# root as the launcher so a level rebuild frees both together.
+		if inst.has_plate() and inst.data.plate_texture != null:
+			var plate_node := _make_plate_decal_node(inst)
+			if plate_node != null:
+				_projectile_traps_root.add_child(plate_node)
 
 func _make_projectile_trap_node(inst: ProjectileTrapInstance) -> Node3D:
 	var data: ProjectileTrapData = inst.data
@@ -993,6 +1000,38 @@ func _projectile_launcher_position(inst: ProjectileTrapInstance) -> Vector3:
 	var shifted_z: float = pulled_z + tan_z * data.launcher_horizontal_offset
 	var y_centre: float = wall_height * 0.5 + data.launcher_y_offset
 	return Vector3(shifted_x, y_centre, shifted_z)
+
+# Plate floor decal (Phase 8 Task 3 — Subtask C4). One MeshInstance3D
+# per PRESSURE_PLATE launcher, lying flat at Y = 0.01 above the floor
+# to avoid Z-fighting with the floor mesh below. Sized via
+# `plate_world_size` (1.0 = fills the cell). Same alpha-scissor +
+# NEAREST-filter material the spike-trap holes use, cached on the
+# texture in `_trap_floor_material_cache` (cache is shared because the
+# material setup is identical — if a designer reuses the same texture
+# for both, they reuse the same cached material).
+func _make_plate_decal_node(inst: ProjectileTrapInstance) -> MeshInstance3D:
+	var data: ProjectileTrapData = inst.data
+	if data.plate_texture == null:
+		return null
+	if inst.plate_cell == ProjectileTrapInstance.NO_PLATE:
+		return null
+	var size_factor: float = max(0.01, data.plate_world_size)
+	var quad := QuadMesh.new()
+	quad.size = Vector2(CELL_SIZE * size_factor, CELL_SIZE * size_factor)
+	var mi := MeshInstance3D.new()
+	mi.mesh = quad
+	mi.material_override = _build_trap_floor_material(data.plate_texture)
+	# Position: cell centre, very slightly above the floor mesh.
+	# Rotate -90° around X so the quad (authored on the XY plane)
+	# lies flat on the XZ floor — same convention as spike-trap
+	# decals.
+	var cx: float = inst.plate_cell.x * CELL_SIZE + CELL_SIZE * 0.5
+	var cz: float = inst.plate_cell.y * CELL_SIZE + CELL_SIZE * 0.5
+	mi.transform = Transform3D(
+		Basis(Vector3(1.0, 0.0, 0.0), -PI * 0.5),
+		Vector3(cx, 0.01, cz)
+	)
+	return mi
 
 func _projectile_launcher_y_rotation_deg(inst: ProjectileTrapInstance) -> float:
 	# Same wall-face → Y-rotation mapping wall decorations use, so the

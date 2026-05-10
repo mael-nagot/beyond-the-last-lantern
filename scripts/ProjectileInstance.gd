@@ -48,10 +48,19 @@ var cell_pos: Vector2 = Vector2.ZERO
 # Cardinal flight direction. One of (1,0) / (-1,0) / (0,1) / (0,-1).
 var direction: Vector2i = Vector2i.ZERO
 # Latched true the first frame the projectile crosses the player's
-# cell so it can't damage twice on the same flight (defined now,
-# wired in Subtask C3 — Game.gd reads + sets this when applying
-# damage).
+# cell so it can't damage twice on the same flight. Wrapper
+# `consume_damage_for_player` is the canonical setter.
 var damage_latch: bool = false
+# Back-reference to the launcher that fired this projectile. Set by
+# `ProjectileTrapInstance.spawn_projectile`. Phase 8 Task 3 — Subtask
+# C4 reads this on IMPACT to clear the launcher's `in_flight` lock so
+# a PRESSURE_PLATE trap can fire again after its projectile dies.
+# TIMED traps don't set / read in_flight but we set the back-ref
+# anyway so the same Game.gd impact-handling code path covers both.
+# Strong ref is safe — projectiles are released via
+# `LevelGenerator.projectiles.clear()` in `generate()` BEFORE
+# launchers are released via `projectile_traps.clear()`, so no cycle.
+var launcher: ProjectileTrapInstance = null
 
 static func create(p_data: ProjectileTrapData, p_cell_pos: Vector2, p_direction: Vector2i) -> ProjectileInstance:
 	var inst := ProjectileInstance.new()

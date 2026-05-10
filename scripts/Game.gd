@@ -510,9 +510,12 @@ func _on_player_entered_cell() -> void:
 	if _generator == null:
 		return
 	var cell := _current_cell()
-	if cell == null or cell.trap == null:
-		return
-	var trap: TrapInstance = cell.trap
+	# Snapshot the spike trap on the cell — projectile-trap plates
+	# (Subtask C4) trigger from a separate registry so we still want
+	# to run that branch on cells WITHOUT a spike trap.
+	var spike_trap: TrapInstance = null
+	if cell != null:
+		spike_trap = cell.trap
 	# Defer trap activation/feedback until the move tween has visibly
 	# completed. Without this delay the spike-pop / shake / flash /
 	# damage all fire on the same frame the player presses W, making
@@ -521,37 +524,80 @@ func _on_player_entered_cell() -> void:
 	# is paused during the wait (modal popup), the timer pauses too —
 	# trap effects resume when the modal closes.
 	await get_tree().create_timer(_TRAP_ACTIVATION_DELAY).timeout
-	# Re-check the trap is still here. The cell-bound trap can't be
-	# removed at runtime today, but defending against future systems
-	# (disarm, level transitions) is cheap.
+	# Re-check we're still alive after the await.
 	if not is_instance_valid(self) or _generator == null:
 		return
-	if cell.trap != trap:
+	# Spike trap branch (Subtask A) — guarded by null + still-on-cell
+	# check so a future runtime trap removal (disarm, transition)
+	# doesn't fire on a stale ref.
+	if spike_trap != null:
+		var post_cell := _current_cell()
+		if post_cell != null and post_cell.trap == spike_trap:
+			if spike_trap.data.is_timed():
+				# TIMED trap: walking ONTO a cell with spikes already
+				# extended should damage the player once. The latch
+				# (damage_applied_this_extension) prevents a double-charge
+				# if the player walks off and back on within the same up
+				# phase, or stood there when ACTIVATED already triggered
+				# damage. The state machine resets the latch on every
+				# RETRACTED→EXTENDED transition so each extension can
+				# damage once.
+				if spike_trap.is_extended() and not spike_trap.damage_applied_this_extension and spike_trap.data.damage > 0:
+					spike_trap.damage_applied_this_extension = true
+					_apply_party_damage(spike_trap.data.damage)
+			elif spike_trap.data.is_step():
+				var should_damage: bool = spike_trap.on_player_step()
+				if _dungeon_view != null:
+					_dungeon_view.update_trap_visual(spike_trap)
+				# Activate sound — STEP traps fire at the player's feet,
+				# so route through SoundManager (non-spatial) for
+				# consistent loudness even if the spatial player would
+				# attenuate.
+				if spike_trap.data.activate_sound != null:
+					SoundManager.play(spike_trap.data.activate_sound)
+				if should_damage:
+					_apply_party_damage(spike_trap.data.damage)
+	# Pressure-plate branch (Subtask C4). Player cell is re-read here
+	# so a plate fires only if the player is STILL on it after the
+	# await — same conservative behaviour as the spike-trap branch.
+	if _player_controller != null:
+		_check_pressure_plate_trigger(_player_controller.grid_pos)
+
+# Phase 8 Task 3 — Subtask C4. Scans every PRESSURE_PLATE launcher;
+# if its plate cell matches the player's current cell AND the launcher
+# isn't already mid-flight, spawns a projectile and plays the plate +
+# launch sounds (always at full volume — the player is right at the
+# plate, no hearing-distance gate).
+#
+# Multiple plates on the same cell are not blocked here — if two
+# launchers somehow share a plate cell (placement should prevent it
+# but this stays safe), each fires independently. `spawn_projectile`
+# returns null if `in_flight` is set, so a re-entry while the
+# projectile is still flying is a no-op.
+func _check_pressure_plate_trigger(player_cell: Vector2i) -> void:
+	if _generator == null:
 		return
-	if trap.data.is_timed():
-		# TIMED trap: walking ONTO a cell with spikes already extended
-		# should damage the player once. The latch
-		# (damage_applied_this_extension) prevents a double-charge if
-		# the player walks off and back on within the same up phase,
-		# or stood there when ACTIVATED already triggered damage. The
-		# state machine resets the latch on every RETRACTED→EXTENDED
-		# transition so each extension can damage once.
-		if trap.is_extended() and not trap.damage_applied_this_extension and trap.data.damage > 0:
-			trap.damage_applied_this_extension = true
-			_apply_party_damage(trap.data.damage)
-		return
-	if not trap.data.is_step():
-		return
-	var should_damage: bool = trap.on_player_step()
-	if _dungeon_view != null:
-		_dungeon_view.update_trap_visual(trap)
-	# Activate sound — STEP traps fire at the player's feet, so
-	# route through SoundManager (non-spatial) for consistent
-	# loudness even if the spatial player would attenuate.
-	if trap.data.activate_sound != null:
-		SoundManager.play(trap.data.activate_sound)
-	if should_damage:
-		_apply_party_damage(trap.data.damage)
+	for ptrap in _generator.projectile_traps:
+		if ptrap == null or ptrap.data == null:
+			continue
+		if not ptrap.data.is_pressure_plate():
+			continue
+		if not ptrap.has_plate():
+			continue
+		if ptrap.plate_cell != player_cell:
+			continue
+		var spawned: ProjectileInstance = ptrap.spawn_projectile()
+		if spawned == null:
+			# in_flight already true — projectile from this plate is
+			# still in the air, so the plate doesn't re-trigger.
+			continue
+		_generator.projectiles.append(spawned)
+		if _dungeon_view != null:
+			_dungeon_view.spawn_projectile_visual(spawned)
+		if ptrap.data.plate_sound != null:
+			SoundManager.play(ptrap.data.plate_sound)
+		if ptrap.data.launch_sound != null:
+			SoundManager.play(ptrap.data.launch_sound)
 
 # Per-frame tick. Advances every trap's state machine and reacts to
 # observed transitions:
@@ -637,6 +683,13 @@ func _tick_projectiles(delta: float) -> void:
 		if proj.consume_damage_for_player(player_cell):
 			_apply_party_damage(proj.data.damage)
 		if event == ProjectileInstance.Event.IMPACT:
+			# Clear the launcher's PRESSURE_PLATE in-flight lock so
+			# the plate can re-fire on the next player step. TIMED
+			# launchers don't read in_flight, but clearing it anyway
+			# keeps state tidy and lets future systems treat all
+			# projectile-trap launchers uniformly.
+			if proj.launcher != null:
+				proj.launcher.in_flight = false
 			if _player_within_projectile_hearing(proj):
 				if proj.data.impact_sound != null:
 					SoundManager.play(proj.data.impact_sound)

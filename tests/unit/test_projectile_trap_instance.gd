@@ -172,3 +172,58 @@ func test_spawned_projectile_direction_matches_fire_direction() -> void:
 		var spawned: ProjectileInstance = inst.tick(0.1)
 		assert_not_null(spawned)
 		assert_eq(spawned.direction, expected_dir, "wall=%s" % wall)
+
+# --- Subtask C4: PRESSURE_PLATE in-flight lock + spawn_projectile ---
+
+func _make_plate_data() -> ProjectileTrapData:
+	var data := ProjectileTrapData.new()
+	data.trigger = ProjectileTrapData.Trigger.PRESSURE_PLATE
+	data.speed_cells_per_second = 8.0
+	return data
+
+func test_spawn_projectile_sets_launcher_back_ref() -> void:
+	# Game.gd reads `proj.launcher` on IMPACT to clear the launcher's
+	# in_flight flag. Without the back-ref a PRESSURE_PLATE trap
+	# would lock forever after its first shot.
+	var data := _make_timed_data(1.0)
+	var inst := ProjectileTrapInstance.create(data, Vector2i(3, 4), ProjectileTrapInstance.DIR_NORTH)
+	var spawned := inst.spawn_projectile()
+	assert_not_null(spawned)
+	assert_eq(spawned.launcher, inst, "back-ref must point to the firing launcher")
+
+func test_spawn_projectile_sets_in_flight_for_pressure_plate() -> void:
+	# A successful spawn_projectile on a PRESSURE_PLATE launcher must
+	# flip in_flight true so the plate can't re-trigger before IMPACT.
+	var inst := ProjectileTrapInstance.create(_make_plate_data(), Vector2i(3, 4), ProjectileTrapInstance.DIR_NORTH)
+	assert_false(inst.in_flight, "fresh launcher starts with no projectile in flight")
+	var spawned := inst.spawn_projectile()
+	assert_not_null(spawned)
+	assert_true(inst.in_flight, "in_flight must be set after a successful spawn")
+
+func test_spawn_projectile_does_not_set_in_flight_for_timed() -> void:
+	# TIMED traps don't gate by in_flight — their period drives
+	# everything. Setting in_flight on TIMED would do no harm but the
+	# code intentionally leaves it false so the field cleanly
+	# reflects "PRESSURE_PLATE has a live projectile".
+	var inst := ProjectileTrapInstance.create(_make_timed_data(1.0), Vector2i(3, 4), ProjectileTrapInstance.DIR_NORTH)
+	var spawned := inst.spawn_projectile()
+	assert_not_null(spawned)
+	assert_false(inst.in_flight, "TIMED traps must not flip in_flight on spawn")
+
+func test_spawn_projectile_blocks_when_pressure_plate_in_flight() -> void:
+	# The whole point of the lock — once a projectile is in flight
+	# from a PRESSURE_PLATE launcher, the plate can't re-trigger.
+	var inst := ProjectileTrapInstance.create(_make_plate_data(), Vector2i(3, 4), ProjectileTrapInstance.DIR_NORTH)
+	var first := inst.spawn_projectile()
+	assert_not_null(first)
+	var second := inst.spawn_projectile()
+	assert_null(second, "second spawn while in_flight must return null")
+
+func test_spawn_projectile_succeeds_again_after_in_flight_cleared() -> void:
+	# Game.gd clears in_flight on IMPACT; once cleared the plate
+	# fires again on the next step.
+	var inst := ProjectileTrapInstance.create(_make_plate_data(), Vector2i(3, 4), ProjectileTrapInstance.DIR_NORTH)
+	assert_not_null(inst.spawn_projectile())
+	# Simulate IMPACT clearing the lock.
+	inst.in_flight = false
+	assert_not_null(inst.spawn_projectile(), "next spawn must succeed once lock clears")

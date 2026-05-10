@@ -88,13 +88,25 @@ func tick(delta: float) -> ProjectileInstance:
 	# Rollover. `fposmod` keeps the remainder in `[0, period)` even
 	# when delta is huge (e.g. after a long pause).
 	timer = fposmod(timer, period)
-	return _spawn_projectile()
+	return spawn_projectile()
 
 # Spawn one projectile from this launcher's mouth in fire_direction.
 # Public so PRESSURE_PLATE traps (C4) can call it directly when the
 # player steps on the plate, bypassing the TIMED clock.
-func _spawn_projectile() -> ProjectileInstance:
+#
+# **PRESSURE_PLATE in-flight lock** — when the launcher's previous
+# projectile is still alive, returns null so the plate can't re-trigger.
+# `in_flight` is set true here on success and cleared by Game.gd in
+# the projectile's IMPACT handler (via the `launcher` back-reference
+# on the spawned `ProjectileInstance`). TIMED traps don't gate on
+# in_flight — their period is meant to be longer than the flight, and
+# overlapping projectiles from a single TIMED trap is acceptable
+# (`timed_period` < flight time would just produce a chain of
+# projectiles, which is a tunable consequence of designer choice).
+func spawn_projectile() -> ProjectileInstance:
 	if data == null:
+		return null
+	if data.is_pressure_plate() and in_flight:
 		return null
 	var fire_dir: Vector2i = fire_direction()
 	# Start position: the wall face on the inside of the host cell.
@@ -103,7 +115,11 @@ func _spawn_projectile() -> ProjectileInstance:
 	# fire_dir into the corridor.
 	var start_pos := Vector2(float(cell.x) + 0.5, float(cell.y) + 0.5) \
 		+ Vector2(float(wall_dir.x), float(wall_dir.y)) * 0.5
-	return ProjectileInstance.create(data, start_pos, fire_dir)
+	var inst := ProjectileInstance.create(data, start_pos, fire_dir)
+	inst.launcher = self
+	if data.is_pressure_plate():
+		in_flight = true
+	return inst
 
 # Cardinal direction the projectile flies. Always opposite the wall
 # the launcher is mounted on (i.e., away from the wall, into the
