@@ -154,9 +154,19 @@ enum Trigger {
 @export var projectile_y_offset: float = 0.0
 
 @export_group("Art — Pressure Plate (PRESSURE_PLATE only)")
-# Floor decal. Flat MeshInstance3D quad on the floor, same technique
-# as spike trap holes. Used in Subtask C4.
-@export var plate_texture: Texture2D
+# Floor decal — IDLE state (the "raised" / un-pressed look). Flat
+# MeshInstance3D quad on the floor, same technique as spike trap
+# holes. Used in Subtask C4.
+@export var plate_texture_idle: Texture2D
+# Floor decal — TRIGGERED state (the "depressed" / pressed look),
+# rendered while ANY entity is currently standing on the plate cell.
+# Today that's just the player; Phase 10 will extend this to non-
+# flying enemies so the player gets visual feedback that an enemy is
+# about to trigger a fireball / unlock a gate / etc. Optional — when
+# null, the decal stays at `plate_texture_idle` regardless of who's
+# on the plate (acceptable for designs where pressed/un-pressed
+# differentiation isn't important; or temporarily during asset work).
+@export var plate_texture_triggered: Texture2D
 # Cell-relative size of the plate quad (world units). 1.0 = fills the
 # cell. Default 0.7 leaves a bit of floor visible around the plate.
 @export var plate_world_size: float = 0.7

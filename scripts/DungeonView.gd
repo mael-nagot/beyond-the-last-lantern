@@ -53,6 +53,19 @@ var _projectiles_root: Node3D
 # frees it in `despawn_projectile_visual` on impact. The dictionary
 # keeps the lookup O(1) without scanning the scene tree.
 var _projectile_visuals: Dictionary = {}
+# ProjectileTrapInstance → MeshInstance3D for the plate floor decal
+# (Subtask C4). Only PRESSURE_PLATE traps that the placer assigned a
+# valid plate cell appear here. The decal's material is swapped
+# between idle and triggered textures via `_update_plate_visual_states`
+# whenever the player enters / leaves a plate cell, so the player
+# (and future enemies — Phase 10) get visual feedback that something
+# is on the plate.
+var _plate_visuals: Dictionary = {}
+# ProjectileTrapInstance → bool. Tracks whether each plate is currently
+# rendering its triggered material so we only swap on state CHANGES,
+# not every camera move. Without this we'd issue a `material_override`
+# write for every plate every step, even when the state didn't change.
+var _plate_triggered_state: Dictionary = {}
 # TrapInstance → Dictionary { "root": Node3D, "spikes_root": Node3D }
 # Lookup so update_trap_visual / _refresh_trap_spike_positions can
 # touch the spike subtree without walking the scene tree. The floor
@@ -938,6 +951,12 @@ func _wall_decoration_y_rotation_deg(inst: WallDecorationInstance) -> float:
 func _build_projectile_traps() -> void:
 	for child in _projectile_traps_root.get_children():
 		child.queue_free()
+	# Plate visuals are children of `_projectile_traps_root`, so the
+	# `queue_free` loop above already detached them — but the
+	# dictionaries hold stale RefCounted keys → freed-Node values.
+	# Reset both here so the next iteration starts clean.
+	_plate_visuals.clear()
+	_plate_triggered_state.clear()
 	if generator == null:
 		return
 	for inst in generator.projectile_traps:
@@ -947,12 +966,18 @@ func _build_projectile_traps() -> void:
 		if node != null:
 			_projectile_traps_root.add_child(node)
 		# Plate decal (Subtask C4) — only for PRESSURE_PLATE traps that
-		# the placer assigned a valid plate cell. Lives under the same
-		# root as the launcher so a level rebuild frees both together.
-		if inst.has_plate() and inst.data.plate_texture != null:
+		# the placer assigned a valid plate cell AND have at least an
+		# idle texture. Lives under the same root as the launcher so a
+		# level rebuild frees both together.
+		if inst.has_plate() and inst.data.plate_texture_idle != null:
 			var plate_node := _make_plate_decal_node(inst)
 			if plate_node != null:
 				_projectile_traps_root.add_child(plate_node)
+				_plate_visuals[inst] = plate_node
+				_plate_triggered_state[inst] = false
+	# Initial trigger states reflect the camera's current grid pos
+	# (the player may already be on a plate when the level builds).
+	_update_plate_visual_states()
 
 func _make_projectile_trap_node(inst: ProjectileTrapInstance) -> Node3D:
 	var data: ProjectileTrapData = inst.data
@@ -1011,7 +1036,7 @@ func _projectile_launcher_position(inst: ProjectileTrapInstance) -> Vector3:
 # for both, they reuse the same cached material).
 func _make_plate_decal_node(inst: ProjectileTrapInstance) -> MeshInstance3D:
 	var data: ProjectileTrapData = inst.data
-	if data.plate_texture == null:
+	if data.plate_texture_idle == null:
 		return null
 	if inst.plate_cell == ProjectileTrapInstance.NO_PLATE:
 		return null
@@ -1020,7 +1045,9 @@ func _make_plate_decal_node(inst: ProjectileTrapInstance) -> MeshInstance3D:
 	quad.size = Vector2(CELL_SIZE * size_factor, CELL_SIZE * size_factor)
 	var mi := MeshInstance3D.new()
 	mi.mesh = quad
-	mi.material_override = _build_trap_floor_material(data.plate_texture)
+	# Start in the IDLE state. `_update_plate_visual_states` swaps the
+	# material when the player enters / leaves the plate cell.
+	mi.material_override = _build_trap_floor_material(data.plate_texture_idle)
 	# Position: cell centre, very slightly above the floor mesh.
 	# Rotate -90° around X so the quad (authored on the XY plane)
 	# lies flat on the XZ floor — same convention as spike-trap
@@ -1032,6 +1059,52 @@ func _make_plate_decal_node(inst: ProjectileTrapInstance) -> MeshInstance3D:
 		Vector3(cx, 0.01, cz)
 	)
 	return mi
+
+# Phase 8 Task 3 — Subtask C4. Walks every tracked plate visual and
+# swaps its material to the triggered or idle texture based on whether
+# the player is currently on the plate cell. Called from
+# `_build_projectile_traps` (initial state on level build) and from
+# `move_camera_to` (every player step). Diffs against
+# `_plate_triggered_state` so we only issue a `material_override`
+# write on actual state CHANGES, not every step.
+#
+# Future Phase 10 enemies that walk over plates will hook into the
+# same path — the `_plate_should_be_triggered` predicate is the only
+# thing that needs to extend (also check enemy positions). The
+# diff-and-swap mechanic stays the same.
+func _update_plate_visual_states() -> void:
+	if _plate_visuals.is_empty():
+		return
+	for inst in _plate_visuals.keys():
+		var should_trigger: bool = _plate_should_be_triggered(inst)
+		var current: bool = _plate_triggered_state.get(inst, false)
+		if should_trigger == current:
+			continue
+		var mi: MeshInstance3D = _plate_visuals[inst]
+		if not is_instance_valid(mi):
+			# Decal was freed (level rebuild mid-frame, etc.) — drop
+			# the stale entry so we don't keep checking it.
+			_plate_visuals.erase(inst)
+			_plate_triggered_state.erase(inst)
+			continue
+		var data: ProjectileTrapData = inst.data
+		# Resolve the texture for the new state. Triggered falls back
+		# to idle when the variant didn't supply a triggered texture
+		# (Phase 10 enemies will still affect the bool state, but the
+		# visual stays the same — acceptable and simple).
+		var tex: Texture2D
+		if should_trigger and data.plate_texture_triggered != null:
+			tex = data.plate_texture_triggered
+		else:
+			tex = data.plate_texture_idle
+		mi.material_override = _build_trap_floor_material(tex)
+		_plate_triggered_state[inst] = should_trigger
+
+func _plate_should_be_triggered(inst: ProjectileTrapInstance) -> bool:
+	# Today: triggered iff the player stands on the plate cell. Phase
+	# 10 enemies that walk over plates will also count; keep this
+	# predicate centralised so the extension is one place.
+	return inst.plate_cell == _current_grid_pos
 
 func _projectile_launcher_y_rotation_deg(inst: ProjectileTrapInstance) -> float:
 	# Same wall-face → Y-rotation mapping wall decorations use, so the
@@ -1256,6 +1329,9 @@ func move_camera_to(grid_pos: Vector2i, facing: Vector2i) -> void:
 	# Object positions are intentionally NOT refreshed here — the lean
 	# axis is tied to facing, so the chest only re-leans when the player
 	# turns. Refreshing on move would visibly snap the chest mid-step.
+	# Pressure-plate visual state (Subtask C4) — diff against the
+	# previous-frame state and only swap material on actual change.
+	_update_plate_visual_states()
 
 func rotate_camera_to(turn_right: bool, facing: Vector2i = Vector2i.ZERO) -> void:
 	_current_angle += -90.0 if turn_right else 90.0
