@@ -20,7 +20,7 @@
 [ext_resource type="Resource" uid="uid://mtigjawa2y3e" path="res://assets/loot_tables/forest_chest_1.tres" id="11_bq1p8"]
 [ext_resource type="Resource" uid="uid://b0furuompokno" path="res://assets/objects/door/door_forest.tres" id="13_bq1p8"]
 [ext_resource type="Script" uid="uid://bqw57pqm6wjbx" path="res://scripts/ProjectileTrapSpawn.gd" id="19_1qwx2"]
-[ext_resource type="Resource" uid="uid://cxpqvvvbx6foo" path="res://assets/objects/traps/projectile_trap_fireball_timed.tres" id="20_28y6b"]
+[ext_resource type="Resource" uid="uid://dp5j6ni6glw81" path="res://assets/objects/traps/projectile_trap_fireball_timed.tres" id="20_28y6b"]
 [ext_resource type="Script" uid="uid://bpkkmcjv0jnht" path="res://scripts/TrapSpawn.gd" id="20_obsjo"]
 [ext_resource type="Resource" uid="uid://df3vqllijxj7l" path="res://assets/objects/traps/trap_spike_timed.tres" id="21_3vyya"]
 [ext_resource type="Script" uid="uid://c4fbuyttq7iik" path="res://scripts/WallDecorationSpawn.gd" id="21_evnw4"]
@@ -98,7 +98,7 @@ metadata/_custom_type_script = "uid://q2yc7peloed8"
 script = ExtResource("19_1qwx2")
 trap = ExtResource("20_28y6b")
 placement = 3
-corridor_chance = 0.322
+corridor_chance = 0.34
 room_chance = 0.379
 room_max_per_room = 2
 metadata/_custom_type_script = "uid://bqw57pqm6wjbx"

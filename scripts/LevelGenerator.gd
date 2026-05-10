@@ -2265,8 +2265,8 @@ func _place_corridor_projectile_traps(spawn: ProjectileTrapSpawn, segments: Arra
 			# deterministic — only the placer, which already runs under
 			# a seeded RNG, picks a random phase.
 			if spawn.trap.is_timed():
-				var period: float = max(0.001, spawn.trap.timed_period)
-				inst.timed_offset = fposmod(spawn.trap.timed_initial_offset + randf() * period, period)
+				var break_duration: float = max(0.001, spawn.trap.timed_break_duration)
+				inst.timed_offset = fposmod(spawn.trap.timed_initial_offset + randf() * break_duration, break_duration)
 				inst.timer = inst.timed_offset
 			inst.plate_cell = plate_cell
 			projectile_traps.append(inst)
@@ -2348,8 +2348,8 @@ func _place_room_projectile_traps(spawn: ProjectileTrapSpawn) -> void:
 					continue
 			var inst := ProjectileTrapInstance.create(spawn.trap, pos, wall_dir)
 			if spawn.trap.is_timed():
-				var period: float = max(0.001, spawn.trap.timed_period)
-				inst.timed_offset = fposmod(spawn.trap.timed_initial_offset + randf() * period, period)
+				var break_duration: float = max(0.001, spawn.trap.timed_break_duration)
+				inst.timed_offset = fposmod(spawn.trap.timed_initial_offset + randf() * break_duration, break_duration)
 				inst.timer = inst.timed_offset
 			inst.plate_cell = plate_cell
 			projectile_traps.append(inst)

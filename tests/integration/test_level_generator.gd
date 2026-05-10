@@ -2774,10 +2774,10 @@ func test_projectile_placer_randomises_timed_phase_per_instance() -> void:
 	# base offset; this test asserts the resulting `timed_offset`
 	# values are not all equal.
 	var biome := _make_biome()
-	# Configure the data with a non-trivial period so randomisation has
-	# meaningful range.
+	# Configure the data with a non-trivial break duration so randomisation
+	# has meaningful range.
 	var trap_data := _make_projectile_trap_data(8, 0)
-	trap_data.timed_period = 4.0
+	trap_data.timed_break_duration = 4.0
 	# Bias the placer to produce many launchers so the chance of all
 	# instances rolling the same phase by accident is negligible.
 	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(trap_data, 1.0, 5)]

@@ -9,7 +9,7 @@ func test_default_field_values() -> void:
 	assert_eq(data.trigger, ProjectileTrapData.Trigger.TIMED)
 	assert_eq(data.damage, 8)
 	assert_eq(data.speed_cells_per_second, 8.0)
-	assert_eq(data.timed_period, 2.5)
+	assert_eq(data.timed_break_duration, 2.5)
 	assert_eq(data.timed_initial_offset, 0.0)
 	assert_eq(data.max_escape_distance, 5)
 	assert_eq(data.min_distance_to_other_projectile_trap, 6)
