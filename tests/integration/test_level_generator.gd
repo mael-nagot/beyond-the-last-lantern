@@ -2894,6 +2894,53 @@ func test_projectile_plate_respects_max_distance_to_nearest_junction() -> void:
 			assert_lte(nearest, 3,
 				"plate at %s is %d from nearest path junction (need <= 3, seed %d)" % [inst.plate_cell, nearest, s])
 
+func test_projectile_plate_never_shares_cell_with_spike_trap() -> void:
+	# A plate must never coexist with a spike trap on the same cell.
+	# Stepping on the plate would trigger BOTH hazards at once
+	# (fireball + spike damage), and the decals would z-fight. We
+	# pump the level full of spike traps + PRESSURE_PLATE launchers
+	# and assert no plate cell ever holds a spike trap.
+	var biome := _make_biome()
+	# Dense spike-trap pass first — these run BEFORE projectile
+	# traps in `generate()`, so they prime the conflict.
+	biome.trap_spawns = [_make_trap_spawn(_make_trap_data(TrapData.Trigger.STEP), 30, 30, ObjectSpawn.PLACEMENT_ANY)]
+	var trap_data := _make_projectile_trap_data(8, 0)
+	trap_data.trigger = ProjectileTrapData.Trigger.PRESSURE_PLATE
+	trap_data.min_plate_to_launcher_distance = 1
+	trap_data.max_plate_to_junction_distance = 6
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(trap_data, 1.0, 2)]
+	var any_plate_seen: bool = false
+	for s in [12345, 99999, 55555, 42, 31337]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			if not inst.has_plate():
+				continue
+			any_plate_seen = true
+			var cell: GridCell = gen.grid[inst.plate_cell.x][inst.plate_cell.y]
+			assert_null(cell.trap,
+				"plate at %s shares its cell with spike trap (seed %d)" % [inst.plate_cell, s])
+	assert_true(any_plate_seen, "no PRESSURE_PLATE plates placed across 5 seeds — test scenario broken")
+
+func test_projectile_launcher_host_cell_is_free_of_spike_trap() -> void:
+	# Same conflict story for the launcher's host cell: spike-hole
+	# decals directly under a launcher read as layered hazards and
+	# visually compete. The placer excludes host cells with spike
+	# traps so a corridor segment crowded with spikes simply yields
+	# fewer launcher candidates rather than overlapping art.
+	var biome := _make_biome()
+	biome.trap_spawns = [_make_trap_spawn(_make_trap_data(TrapData.Trigger.STEP), 30, 30, ObjectSpawn.PLACEMENT_ANY)]
+	var trap_data := _make_projectile_trap_data(8, 0)
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(trap_data, 1.0, 2)]
+	var any_launcher_seen: bool = false
+	for s in [12345, 99999, 55555, 42, 31337]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			any_launcher_seen = true
+			var cell: GridCell = gen.grid[inst.cell.x][inst.cell.y]
+			assert_null(cell.trap,
+				"launcher host at %s shares its cell with spike trap (seed %d)" % [inst.cell, s])
+	assert_true(any_launcher_seen, "no projectile launchers placed across 5 seeds — test scenario broken")
+
 func test_projectile_timed_traps_have_no_plate_cell() -> void:
 	# TIMED traps don't use plates — `plate_cell` must stay at the
 	# NO_PLATE sentinel so Game.gd's plate scan ignores them.
