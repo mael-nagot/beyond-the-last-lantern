@@ -2225,6 +2225,16 @@ func _place_corridor_projectile_traps(spawn: ProjectileTrapSpawn, segments: Arra
 			# skip the candidate if too close to an existing launcher.
 			if _too_close_to_existing_projectile_trap(pos, spawn.trap.min_distance_to_other_projectile_trap):
 				continue
+			# PRESSURE_PLATE traps need a plate cell that satisfies the
+			# distance bounds; reject the launcher if no plate fits
+			# (otherwise the trap would be a dead inert wall mount).
+			# TIMED traps don't need a plate — `plate_cell` stays at
+			# the NO_PLATE sentinel for them.
+			var plate_cell: Vector2i = ProjectileTrapInstance.NO_PLATE
+			if spawn.trap.is_pressure_plate():
+				plate_cell = _pick_plate_cell_for_corridor(path, pos, junctions, spawn.trap)
+				if plate_cell == ProjectileTrapInstance.NO_PLATE:
+					continue
 			var inst := ProjectileTrapInstance.create(spawn.trap, pos, wall_dir)
 			# Per-instance phase shift on top of the data's base offset
 			# so multiple TIMED launchers placed in the same area don't
@@ -2236,11 +2246,58 @@ func _place_corridor_projectile_traps(spawn: ProjectileTrapSpawn, segments: Arra
 				var period: float = max(0.001, spawn.trap.timed_period)
 				inst.timed_offset = fposmod(spawn.trap.timed_initial_offset + randf() * period, period)
 				inst.timer = inst.timed_offset
+			inst.plate_cell = plate_cell
 			projectile_traps.append(inst)
 			_wall_faces_used[face_key] = true
 			for p in path:
 				_projectile_path_cells[p] = true
 			placed_in_segment += 1
+
+# Pick a plate cell for a PRESSURE_PLATE corridor launcher, or return
+# `ProjectileTrapInstance.NO_PLATE` if no valid candidate exists. The
+# plate must be:
+#   - on the projectile path (so a player triggering it is already
+#     in the firing line — they have to dodge AFTER stepping on it)
+#   - ≥ `min_plate_to_launcher_distance` cells from the launcher
+#     (Manhattan; on a straight corridor segment this is the step
+#     count along fire direction). Without this minimum the
+#     projectile would hit the player instantly with no time to
+#     react.
+#   - ≤ `max_plate_to_junction_distance` Manhattan cells from the
+#     nearest path junction (the player's escape route after
+#     triggering). Without this maximum the player would have no
+#     reachable escape after the projectile fires.
+# Picks uniformly at random among valid candidates. Empty path and
+# no-junction-on-path are both treated as "no plate" — the path
+# validator already guarantees a junction exists, but defensive.
+func _pick_plate_cell_for_corridor(path: Array, launcher_cell: Vector2i, junctions: Dictionary, data: ProjectileTrapData) -> Vector2i:
+	if path.is_empty():
+		return ProjectileTrapInstance.NO_PLATE
+	var path_junctions: Array = []
+	for p in path:
+		if junctions.has(p):
+			path_junctions.append(p)
+	if path_junctions.is_empty():
+		return ProjectileTrapInstance.NO_PLATE
+	var min_to_launcher: int = max(1, data.min_plate_to_launcher_distance)
+	var max_to_junction: int = max(1, data.max_plate_to_junction_distance)
+	var candidates: Array = []
+	for plate_pos in path:
+		# Step distance from launcher along the fire direction equals
+		# Manhattan distance for cardinal flight.
+		if _manhattan(plate_pos, launcher_cell) < min_to_launcher:
+			continue
+		var nearest_junction_dist: int = -1
+		for j in path_junctions:
+			var d: int = _manhattan(plate_pos, j)
+			if nearest_junction_dist == -1 or d < nearest_junction_dist:
+				nearest_junction_dist = d
+		if nearest_junction_dist == -1 or nearest_junction_dist > max_to_junction:
+			continue
+		candidates.append(plate_pos)
+	if candidates.is_empty():
+		return ProjectileTrapInstance.NO_PLATE
+	return candidates[randi() % candidates.size()]
 
 func _path_overlaps_existing(path: Array) -> bool:
 	for p in path:

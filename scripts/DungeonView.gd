@@ -53,6 +53,19 @@ var _projectiles_root: Node3D
 # frees it in `despawn_projectile_visual` on impact. The dictionary
 # keeps the lookup O(1) without scanning the scene tree.
 var _projectile_visuals: Dictionary = {}
+# ProjectileTrapInstance → MeshInstance3D for the plate floor decal
+# (Subtask C4). Only PRESSURE_PLATE traps that the placer assigned a
+# valid plate cell appear here. The decal's material is swapped
+# between idle and triggered textures via `_update_plate_visual_states`
+# whenever the player enters / leaves a plate cell, so the player
+# (and future enemies — Phase 10) get visual feedback that something
+# is on the plate.
+var _plate_visuals: Dictionary = {}
+# ProjectileTrapInstance → bool. Tracks whether each plate is currently
+# rendering its triggered material so we only swap on state CHANGES,
+# not every camera move. Without this we'd issue a `material_override`
+# write for every plate every step, even when the state didn't change.
+var _plate_triggered_state: Dictionary = {}
 # TrapInstance → Dictionary { "root": Node3D, "spikes_root": Node3D }
 # Lookup so update_trap_visual / _refresh_trap_spike_positions can
 # touch the spike subtree without walking the scene tree. The floor
@@ -932,12 +945,18 @@ func _wall_decoration_y_rotation_deg(inst: WallDecorationInstance) -> float:
 
 # Phase 8 Task 3 — Subtask C1: static launcher rendering. Each launcher
 # is a single Sprite3D anchored at the wall-face midpoint, Y-rotated to
-# face into the corridor. Subtask C2 will add per-launcher projectile
-# spawning and an in-flight projectile subtree under this same root;
-# Subtask C4 will add the pressure-plate floor decal.
+# face into the corridor. Subtask C4 adds a floor-decal MeshInstance3D
+# at the linked plate cell (only PRESSURE_PLATE traps get one — TIMED
+# traps have no plate, `plate_cell == NO_PLATE`).
 func _build_projectile_traps() -> void:
 	for child in _projectile_traps_root.get_children():
 		child.queue_free()
+	# Plate visuals are children of `_projectile_traps_root`, so the
+	# `queue_free` loop above already detached them — but the
+	# dictionaries hold stale RefCounted keys → freed-Node values.
+	# Reset both here so the next iteration starts clean.
+	_plate_visuals.clear()
+	_plate_triggered_state.clear()
 	if generator == null:
 		return
 	for inst in generator.projectile_traps:
@@ -946,6 +965,19 @@ func _build_projectile_traps() -> void:
 		var node := _make_projectile_trap_node(inst)
 		if node != null:
 			_projectile_traps_root.add_child(node)
+		# Plate decal (Subtask C4) — only for PRESSURE_PLATE traps that
+		# the placer assigned a valid plate cell AND have at least an
+		# idle texture. Lives under the same root as the launcher so a
+		# level rebuild frees both together.
+		if inst.has_plate() and inst.data.plate_texture_idle != null:
+			var plate_entry := _make_plate_decal_node(inst)
+			if not plate_entry.is_empty():
+				_projectile_traps_root.add_child(plate_entry["root"])
+				_plate_visuals[inst] = plate_entry
+				_plate_triggered_state[inst] = false
+	# Initial trigger states reflect the camera's current grid pos
+	# (the player may already be on a plate when the level builds).
+	_update_plate_visual_states()
 
 func _make_projectile_trap_node(inst: ProjectileTrapInstance) -> Node3D:
 	var data: ProjectileTrapData = inst.data
@@ -993,6 +1025,111 @@ func _projectile_launcher_position(inst: ProjectileTrapInstance) -> Vector3:
 	var shifted_z: float = pulled_z + tan_z * data.launcher_horizontal_offset
 	var y_centre: float = wall_height * 0.5 + data.launcher_y_offset
 	return Vector3(shifted_x, y_centre, shifted_z)
+
+# Plate floor decal (Phase 8 Task 3 — Subtask C4). One MeshInstance3D
+# per PRESSURE_PLATE launcher, lying flat at Y = 0.01 above the floor
+# to avoid Z-fighting with the floor mesh below. Sized via
+# `plate_world_size` (1.0 = fills the cell). Same alpha-scissor +
+# NEAREST-filter material the spike-trap holes use, cached on the
+# texture in `_trap_floor_material_cache` (cache is shared because the
+# material setup is identical — if a designer reuses the same texture
+# for both, they reuse the same cached material).
+# Plate decal returns a {root, mi} dict so the caller can both track
+# the parent Node3D (for tweenable Y rotation that follows the camera
+# — see `_refresh_plate_y_rotation`) AND the inner MeshInstance3D
+# (for swapping the idle / triggered material). Wrapping the mesh in
+# a Node3D lets us tween `rotation_degrees:y` directly without
+# fighting the -90° X tilt that lays the quad flat on the floor.
+func _make_plate_decal_node(inst: ProjectileTrapInstance) -> Dictionary:
+	var data: ProjectileTrapData = inst.data
+	if data.plate_texture_idle == null:
+		return {}
+	if inst.plate_cell == ProjectileTrapInstance.NO_PLATE:
+		return {}
+	var size_factor: float = max(0.01, data.plate_world_size)
+	var quad := QuadMesh.new()
+	quad.size = Vector2(CELL_SIZE * size_factor, CELL_SIZE * size_factor)
+	# Outer Node3D: anchors the plate at its cell centre and owns the
+	# Y rotation that tracks the camera. Tweenable as a single
+	# `rotation_degrees:y` property so we can ride the same 0.12s
+	# rotation tween the camera uses, keeping the plate texture
+	# locked in screen-space throughout the rotate.
+	var root := Node3D.new()
+	var cx: float = inst.plate_cell.x * CELL_SIZE + CELL_SIZE * 0.5
+	var cz: float = inst.plate_cell.y * CELL_SIZE + CELL_SIZE * 0.5
+	root.position = Vector3(cx, 0.01, cz)
+	root.rotation_degrees = Vector3(0.0, _current_angle, 0.0)
+	# Inner MeshInstance3D: laid flat by a -90° X rotation, no
+	# translation (the parent positions it). The X rotation is
+	# constant — only the parent's Y rotation changes over time.
+	var mi := MeshInstance3D.new()
+	mi.mesh = quad
+	mi.material_override = _build_trap_floor_material(data.plate_texture_idle)
+	mi.transform = Transform3D(
+		Basis(Vector3(1.0, 0.0, 0.0), -PI * 0.5),
+		Vector3.ZERO
+	)
+	root.add_child(mi)
+	return {"root": root, "mi": mi}
+
+# Update one plate's Y rotation immediately (no tween) — used during
+# `_build_projectile_traps` so plates render correctly from the very
+# first frame. Per-plate tweening alongside camera rotation lives in
+# `rotate_camera_to`.
+func _refresh_plate_y_rotation(entry: Dictionary) -> void:
+	if entry.is_empty():
+		return
+	var root: Node3D = entry.get("root", null)
+	if root == null or not is_instance_valid(root):
+		return
+	root.rotation_degrees = Vector3(0.0, _current_angle, 0.0)
+
+# Phase 8 Task 3 — Subtask C4. Walks every tracked plate visual and
+# swaps its material to the triggered or idle texture based on whether
+# the player is currently on the plate cell. Called from
+# `_build_projectile_traps` (initial state on level build) and from
+# `move_camera_to` (every player step). Diffs against
+# `_plate_triggered_state` so we only issue a `material_override`
+# write on actual state CHANGES, not every step.
+#
+# Future Phase 10 enemies that walk over plates will hook into the
+# same path — the `_plate_should_be_triggered` predicate is the only
+# thing that needs to extend (also check enemy positions). The
+# diff-and-swap mechanic stays the same.
+func _update_plate_visual_states() -> void:
+	if _plate_visuals.is_empty():
+		return
+	for inst in _plate_visuals.keys():
+		var should_trigger: bool = _plate_should_be_triggered(inst)
+		var current: bool = _plate_triggered_state.get(inst, false)
+		if should_trigger == current:
+			continue
+		var entry: Dictionary = _plate_visuals[inst]
+		var mi: MeshInstance3D = entry.get("mi", null)
+		if mi == null or not is_instance_valid(mi):
+			# Decal was freed (level rebuild mid-frame, etc.) — drop
+			# the stale entry so we don't keep checking it.
+			_plate_visuals.erase(inst)
+			_plate_triggered_state.erase(inst)
+			continue
+		var data: ProjectileTrapData = inst.data
+		# Resolve the texture for the new state. Triggered falls back
+		# to idle when the variant didn't supply a triggered texture
+		# (Phase 10 enemies will still affect the bool state, but the
+		# visual stays the same — acceptable and simple).
+		var tex: Texture2D
+		if should_trigger and data.plate_texture_triggered != null:
+			tex = data.plate_texture_triggered
+		else:
+			tex = data.plate_texture_idle
+		mi.material_override = _build_trap_floor_material(tex)
+		_plate_triggered_state[inst] = should_trigger
+
+func _plate_should_be_triggered(inst: ProjectileTrapInstance) -> bool:
+	# Today: triggered iff the player stands on the plate cell. Phase
+	# 10 enemies that walk over plates will also count; keep this
+	# predicate centralised so the extension is one place.
+	return inst.plate_cell == _current_grid_pos
 
 func _projectile_launcher_y_rotation_deg(inst: ProjectileTrapInstance) -> float:
 	# Same wall-face → Y-rotation mapping wall decorations use, so the
@@ -1200,6 +1337,11 @@ func set_initial_facing(facing: Vector2i) -> void:
 	camera.position           = _grid_to_world(_current_grid_pos.x, _current_grid_pos.y)
 	_refresh_object_positions()
 	_refresh_trap_spike_positions()
+	# Snap every plate's Y rotation to the new camera angle so they
+	# render correctly from the very first frame after a level setup
+	# (no tween — this runs before the player has moved at all).
+	for inst in _plate_visuals.keys():
+		_refresh_plate_y_rotation(_plate_visuals[inst])
 
 func move_camera_to(grid_pos: Vector2i, facing: Vector2i) -> void:
 	_current_grid_pos = grid_pos
@@ -1217,13 +1359,27 @@ func move_camera_to(grid_pos: Vector2i, facing: Vector2i) -> void:
 	# Object positions are intentionally NOT refreshed here — the lean
 	# axis is tied to facing, so the chest only re-leans when the player
 	# turns. Refreshing on move would visibly snap the chest mid-step.
+	# Pressure-plate visual state (Subtask C4) — diff against the
+	# previous-frame state and only swap material on actual change.
+	_update_plate_visual_states()
 
 func rotate_camera_to(turn_right: bool, facing: Vector2i = Vector2i.ZERO) -> void:
 	_current_angle += -90.0 if turn_right else 90.0
 	if facing != Vector2i.ZERO:
 		_current_facing = facing
-	var tween = create_tween()
+	var tween = create_tween().set_parallel(true)
 	tween.tween_property(camera, "rotation_degrees:y", _current_angle, 0.12)
+	# Phase 8 Task 3 — Subtask C4: rotate every plate decal alongside
+	# the camera so the texture stays locked in screen space (the
+	# player always sees the plate from the same perspective). This is
+	# the trick that lets designers bake shadows / fake depth into the
+	# plate art — without it, the texture's "front" would be visually
+	# correct from only one of the four cardinal angles.
+	for inst in _plate_visuals.keys():
+		var entry: Dictionary = _plate_visuals[inst]
+		var root: Node3D = entry.get("root", null)
+		if root != null and is_instance_valid(root):
+			tween.tween_property(root, "rotation_degrees:y", _current_angle, 0.12)
 	_refresh_object_positions()
 	_refresh_trap_spike_positions()
 

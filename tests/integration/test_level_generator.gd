@@ -2804,6 +2804,109 @@ func test_projectile_placer_randomises_timed_phase_per_instance() -> void:
 	assert_gte(unique_values.size(), 2,
 		"all %d launchers share the same timed_offset (%s) — placer's per-instance phase shift not applied" % [offsets.size(), offsets])
 
+func test_projectile_pressure_plate_assigns_plate_cell() -> void:
+	# Phase 8 Task 3 — Subtask C4. PRESSURE_PLATE traps must have a
+	# valid plate cell — without one they'd be inert (the plate is
+	# the only way they fire). The placer rejects launchers that
+	# can't satisfy the plate distance bounds, so every PRESSURE_PLATE
+	# launcher that lands has has_plate() == true.
+	var biome := _make_biome()
+	var trap_data := _make_projectile_trap_data(8, 0)
+	trap_data.trigger = ProjectileTrapData.Trigger.PRESSURE_PLATE
+	trap_data.min_plate_to_launcher_distance = 2
+	trap_data.max_plate_to_junction_distance = 4
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(trap_data, 1.0, 1)]
+	var any_seen: bool = false
+	for s in [12345, 99999, 55555, 42, 31337]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			if inst.data.is_pressure_plate():
+				any_seen = true
+				assert_true(inst.has_plate(),
+					"PRESSURE_PLATE launcher at %s placed with NO_PLATE — placer should have rejected it (seed %d)" % [inst.cell, s])
+	assert_true(any_seen, "no PRESSURE_PLATE launchers placed across 5 seeds — test scenario broken")
+
+func test_projectile_plate_lies_on_projectile_path() -> void:
+	# The plate must sit on the projectile's flight path so a player
+	# stepping on the plate is also in the firing line. Verified by
+	# walking the path until the wall and checking plate_cell appears
+	# somewhere in it.
+	var biome := _make_biome()
+	var trap_data := _make_projectile_trap_data(8, 0)
+	trap_data.trigger = ProjectileTrapData.Trigger.PRESSURE_PLATE
+	trap_data.min_plate_to_launcher_distance = 1
+	trap_data.max_plate_to_junction_distance = 8
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(trap_data, 1.0, 1)]
+	for s in [12345, 99999, 55555]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			if not inst.data.is_pressure_plate() or not inst.has_plate():
+				continue
+			var path: Array = _projectile_path_until_wall(gen, inst)
+			assert_true(path.has(inst.plate_cell),
+				"plate at %s not on launcher path (seed %d, path=%s)" % [inst.plate_cell, s, path])
+
+func test_projectile_plate_respects_min_distance_to_launcher() -> void:
+	# Plate must be at least `min_plate_to_launcher_distance` Manhattan
+	# tiles from the launcher, so the projectile has visible travel
+	# time after the plate fires.
+	var biome := _make_biome()
+	var trap_data := _make_projectile_trap_data(10, 0)
+	trap_data.trigger = ProjectileTrapData.Trigger.PRESSURE_PLATE
+	trap_data.min_plate_to_launcher_distance = 3
+	trap_data.max_plate_to_junction_distance = 8
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(trap_data, 1.0, 1)]
+	for s in [12345, 99999, 55555, 42]:
+		var gen := _make_generator(biome, s)
+		for inst in gen.projectile_traps:
+			if not inst.data.is_pressure_plate() or not inst.has_plate():
+				continue
+			var dx: int = abs(inst.plate_cell.x - inst.cell.x)
+			var dy: int = abs(inst.plate_cell.y - inst.cell.y)
+			assert_gte(dx + dy, 3,
+				"plate at %s is %d tiles from launcher %s (need >= 3, seed %d)" % [inst.plate_cell, dx + dy, inst.cell, s])
+
+func test_projectile_plate_respects_max_distance_to_nearest_junction() -> void:
+	# Plate must be within `max_plate_to_junction_distance` of the
+	# nearest path junction so the player has a reachable escape.
+	var biome := _make_biome()
+	var trap_data := _make_projectile_trap_data(10, 0)
+	trap_data.trigger = ProjectileTrapData.Trigger.PRESSURE_PLATE
+	trap_data.min_plate_to_launcher_distance = 1
+	trap_data.max_plate_to_junction_distance = 3
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(trap_data, 1.0, 1)]
+	for s in [12345, 99999, 55555, 42]:
+		var gen := _make_generator(biome, s)
+		var junctions: Dictionary = gen._detect_corridor_junctions()
+		for inst in gen.projectile_traps:
+			if not inst.data.is_pressure_plate() or not inst.has_plate():
+				continue
+			# Nearest junction on the same projectile path. Mirrors the
+			# placer's "junctions on path" lookup.
+			var path: Array = _projectile_path_until_wall(gen, inst)
+			var nearest: int = -1
+			for p in path:
+				if junctions.has(p):
+					var d: int = abs(p.x - inst.plate_cell.x) + abs(p.y - inst.plate_cell.y)
+					if nearest == -1 or d < nearest:
+						nearest = d
+			assert_ne(nearest, -1, "plate %s has no junction on path (seed %d)" % [inst.plate_cell, s])
+			assert_lte(nearest, 3,
+				"plate at %s is %d from nearest path junction (need <= 3, seed %d)" % [inst.plate_cell, nearest, s])
+
+func test_projectile_timed_traps_have_no_plate_cell() -> void:
+	# TIMED traps don't use plates — `plate_cell` must stay at the
+	# NO_PLATE sentinel so Game.gd's plate scan ignores them.
+	var biome := _make_biome()
+	var trap_data := _make_projectile_trap_data(8, 0)
+	# Default trigger from _make_projectile_trap_data is TIMED.
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(trap_data, 1.0, 1)]
+	var gen := _make_generator(biome, 12345)
+	for inst in gen.projectile_traps:
+		assert_eq(inst.plate_cell, ProjectileTrapInstance.NO_PLATE,
+			"TIMED launcher at %s has plate_cell %s — should be NO_PLATE" % [inst.cell, inst.plate_cell])
+		assert_false(inst.has_plate())
+
 func test_projectile_at_most_one_launcher_per_segment_cross_spawn() -> void:
 	# Rule: even when multiple `ProjectileTrapSpawn` entries are
 	# configured, every corridor segment holds AT MOST ONE launcher

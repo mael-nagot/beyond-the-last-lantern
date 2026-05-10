@@ -249,7 +249,10 @@ func _on_map_draw() -> void:
 	# floor / object markers in the same cell, but BENEATH the player
 	# arrow. The launcher's host cell is the floor cell adjacent to
 	# the wall the launcher is mounted on; the arrow points in the
-	# projectile's fire direction.
+	# projectile's fire direction. PRESSURE_PLATE traps additionally
+	# get a small square marker on their plate cell (Subtask C4) so
+	# the developer can verify the plate sits on the projectile path
+	# at the right distance from launcher + junction.
 	if debug_show_projectile_traps:
 		for ptrap in generator.projectile_traps:
 			if ptrap == null or ptrap.data == null:
@@ -261,6 +264,9 @@ func _on_map_draw() -> void:
 				continue
 			var prect_pos: Vector2 = offset + Vector2(ptrap.cell.x * cell_size, ptrap.cell.y * cell_size)
 			_draw_projectile_trap_marker(prect_pos, cell_size, ptrap)
+			if ptrap.has_plate() and map_data.is_explored(ptrap.plate_cell):
+				var plate_rect_pos: Vector2 = offset + Vector2(ptrap.plate_cell.x * cell_size, ptrap.plate_cell.y * cell_size)
+				_draw_projectile_plate_marker(plate_rect_pos, cell_size)
 
 	# Draw doors as thin slabs on cell boundaries. Filled when the
 	# door currently blocks; outline-only when it's open. Only drawn
@@ -408,6 +414,19 @@ func _draw_projectile_trap_marker(rect_pos: Vector2, cell_size: float, ptrap: Pr
 	var lw: float = max(cell_size * 0.06, 1.0)
 	for i in range(3):
 		map_draw.draw_line(poly[i], poly[(i + 1) % 3], border, lw)
+
+func _draw_projectile_plate_marker(rect_pos: Vector2, cell_size: float) -> void:
+	# Phase 8 Task 3 — Subtask C4. Small filled square in the plate
+	# cell, same launcher-cyan tint as the launcher arrow so the
+	# developer reads them as a pair. Centred and sized to ~40% of the
+	# cell so it doesn't overpower other markers (chests, levers).
+	var size: float = cell_size * 0.4
+	var center: Vector2 = rect_pos + Vector2(cell_size * 0.5, cell_size * 0.5)
+	var marker_rect := Rect2(center - Vector2(size, size) * 0.5, Vector2(size, size))
+	var color := Color(0.20, 0.65, 0.85)  # same launcher cyan
+	map_draw.draw_rect(marker_rect, color)
+	var border := Color(color.r * 0.5, color.g * 0.5, color.b * 0.5)
+	map_draw.draw_rect(marker_rect, border, false, max(cell_size * 0.06, 1.0))
 
 func _draw_door_slab(door: DoorInstance, offset: Vector2, cell_size: float, line_width: float) -> void:
 	# A door sits on the boundary between cell_a and cell_b. The slab
