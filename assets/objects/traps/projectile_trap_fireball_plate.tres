@@ -8,8 +8,8 @@
 
 [resource]
 script = ExtResource("5_p1b0b")
-name_key = "projectile_trap.fireball_timed.name"
-description_key = "projectile_trap.fireball_timed.description"
+name_key = "projectile_trap.fireball_plate.name"
+description_key = "projectile_trap.fireball_plate.description"
 speed_cells_per_second = 4.0
 max_escape_distance = 3
 launcher_texture = ExtResource("3_pw4wb")

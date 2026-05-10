@@ -2206,6 +2206,19 @@ func _place_corridor_projectile_traps(spawn: ProjectileTrapSpawn, segments: Arra
 				var path: Array = _projectile_launch_path(pos, wall_dir, junctions, max_escape)
 				if path.is_empty():
 					continue
+				# PRESSURE_PLATE-only fairness rule: the projectile path
+				# must contain a junction at a NON-ENDPOINT position
+				# (i.e., with at least one path cell before AND after
+				# the junction). Without this, geometries like a 2-cell
+				# path where the only junction is the terminal cell put
+				# the plate immediately adjacent to the junction with
+				# no buffer cell — the player stepping onto the plate
+				# is in the firing line and has no fair way to traverse
+				# past it (e.g., to reach a side branch off the host
+				# cell). TIMED traps don't have this issue because the
+				# player can time their entry through the cooldown.
+				if spawn.trap.is_pressure_plate() and not _path_has_middle_junction(path, junctions):
+					continue
 				candidates.append([pos, wall_dir, path])
 		if candidates.is_empty():
 			continue
@@ -2495,6 +2508,23 @@ func _pick_plate_cell_for_corridor(path: Array, launcher_cell: Vector2i, junctio
 func _path_overlaps_existing(path: Array) -> bool:
 	for p in path:
 		if _projectile_path_cells.has(p):
+			return true
+	return false
+
+# True iff at least one path cell at a non-endpoint position
+# (`index in [1, path.size() - 2]`) is a junction. "Non-endpoint"
+# means the junction has at least one path cell before it AND at
+# least one path cell after it — a "middle" junction. Used by the
+# corridor placer to gate PRESSURE_PLATE launchers: without a
+# middle junction the plate ends up adjacent to a terminal-cell
+# junction with no buffer for fair traversal past the plate.
+# TIMED launchers don't call into this — their fairness comes
+# from the player timing their entry through the cooldown.
+func _path_has_middle_junction(path: Array, junctions: Dictionary) -> bool:
+	if path.size() < 3:
+		return false
+	for i in range(1, path.size() - 1):
+		if junctions.has(path[i]):
 			return true
 	return false
 
