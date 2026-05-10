@@ -22,4 +22,5 @@ For each frame, in the Godot Import tab:
 - `Compress > Mode`: VRAM Compressed (or Lossless if pixel-art crispness suffers)
 - `Process > sRGB`: on
 - `Mipmaps > Generate`: on
-- `Filter`: **Nearest** (Linear blurs pixel art) — set under `Compress > Mode` if available, or via the Sprite3D's `texture_filter` (already set by the renderer)
+
+Note: Godot 4 has no per-texture `Filter` import setting — nearest-neighbour filtering is enforced project-wide by `rendering/textures/canvas_textures/default_texture_filter=0` in `project.godot` (covers 2D), and per-`Sprite3D` via `TEXTURE_FILTER_NEAREST` set in the dungeon renderer (`DungeonView.gd`).
