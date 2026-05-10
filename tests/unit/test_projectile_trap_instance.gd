@@ -67,10 +67,10 @@ func test_direction_constants() -> void:
 
 # --- TIMED firing (Subtask C2) ---
 
-func _make_timed_data(period: float = 2.0, initial_offset: float = 0.0) -> ProjectileTrapData:
+func _make_timed_data(break_duration: float = 2.0, initial_offset: float = 0.0) -> ProjectileTrapData:
 	var data := ProjectileTrapData.new()
 	data.trigger = ProjectileTrapData.Trigger.TIMED
-	data.timed_period = period
+	data.timed_break_duration = break_duration
 	data.timed_initial_offset = initial_offset
 	data.speed_cells_per_second = 8.0
 	return data
@@ -91,20 +91,20 @@ func test_create_leaves_timer_zero_for_pressure_plate() -> void:
 	assert_eq(inst.timer, 0.0)
 	assert_eq(inst.timed_offset, 0.0)
 
-func test_tick_returns_null_until_period_elapsed() -> void:
+func test_tick_returns_null_until_break_elapsed() -> void:
 	var data := _make_timed_data(2.0)
 	var inst := ProjectileTrapInstance.create(data, Vector2i(3, 4), ProjectileTrapInstance.DIR_NORTH)
-	# Advance 1.5s — still under the 2.0s period, so no spawn.
+	# Advance 1.5s — still under the 2.0s break, so no spawn.
 	assert_null(inst.tick(0.5))
 	assert_null(inst.tick(1.0))
 	assert_almost_eq(inst.timer, 1.5, 0.0001)
 
-func test_tick_spawns_projectile_on_period_rollover() -> void:
+func test_tick_spawns_projectile_on_break_rollover() -> void:
 	var data := _make_timed_data(1.0)
 	var inst := ProjectileTrapInstance.create(data, Vector2i(3, 4), ProjectileTrapInstance.DIR_NORTH)
 	# 1.0s exactly — fires.
 	var spawned: ProjectileInstance = inst.tick(1.0)
-	assert_not_null(spawned, "should spawn at exactly the period boundary")
+	assert_not_null(spawned, "should spawn at exactly the break boundary")
 	assert_eq(spawned.data, data)
 	assert_eq(spawned.direction, Vector2i(0, 1), "north wall fires south")
 
@@ -113,21 +113,46 @@ func test_tick_resets_timer_after_rollover() -> void:
 	var inst := ProjectileTrapInstance.create(data, Vector2i(0, 0), ProjectileTrapInstance.DIR_NORTH)
 	inst.tick(1.0)
 	# After rollover the timer holds the leftover time (here exactly 0)
-	# so the next cycle starts cleanly. fposmod handles delta > period
-	# too — see the next test.
+	# so the next cycle starts cleanly. fposmod handles delta >
+	# break_duration too — see the next test.
 	assert_almost_eq(inst.timer, 0.0, 0.0001)
 
 func test_tick_handles_long_delta_via_fposmod() -> void:
-	# Single tick of 3.5s with a 1.0s period — should still spawn one
-	# projectile and leave timer at fposmod(3.5, 1.0) = 0.5. We don't
-	# spawn three projectiles in one tick (would feel like a burst);
-	# the placer's TIMED contract is "one shot per period rollover the
-	# tick observes", which is good enough at 60fps.
+	# Single tick of 3.5s with a 1.0s break_duration — should still
+	# spawn one projectile and leave timer at fposmod(3.5, 1.0) = 0.5.
+	# We don't spawn three projectiles in one tick (would feel like a
+	# burst); the contract is "one shot per rollover the tick observes",
+	# which is good enough at 60fps.
 	var data := _make_timed_data(1.0)
 	var inst := ProjectileTrapInstance.create(data, Vector2i(0, 0), ProjectileTrapInstance.DIR_NORTH)
 	var spawned: ProjectileInstance = inst.tick(3.5)
 	assert_not_null(spawned)
 	assert_almost_eq(inst.timer, 0.5, 0.0001)
+
+func test_tick_pauses_timer_while_in_flight_for_timed() -> void:
+	# Break-duration semantics: the timer ONLY advances when there's
+	# no projectile in flight. Without this, the launch interval
+	# would silently include the flight time, breaking the
+	# "designer sets the visible empty-corridor break" contract.
+	var data := _make_timed_data(1.0)
+	var inst := ProjectileTrapInstance.create(data, Vector2i(0, 0), ProjectileTrapInstance.DIR_NORTH)
+	# First fire — sets in_flight = true.
+	var first := inst.tick(1.0)
+	assert_not_null(first)
+	assert_true(inst.in_flight, "spawning a TIMED projectile must engage the in_flight lock")
+	# Try advancing while a projectile is alive — timer must not move,
+	# and no second projectile must spawn (the break clock is paused).
+	assert_null(inst.tick(5.0), "tick while in_flight must not spawn")
+	assert_null(inst.tick(5.0))
+	assert_almost_eq(inst.timer, 0.0, 0.0001,
+		"timer must not advance while in_flight")
+	# Simulate IMPACT clearing the lock; the break clock resumes.
+	inst.in_flight = false
+	assert_null(inst.tick(0.5), "0.5s of break < 1.0s — no spawn yet")
+	assert_almost_eq(inst.timer, 0.5, 0.0001,
+		"timer advances once in_flight clears")
+	var second := inst.tick(0.5)
+	assert_not_null(second, "completing the break duration must spawn the next projectile")
 
 func test_tick_returns_null_for_pressure_plate_data() -> void:
 	# Subtask C2 only wires TIMED firing. PRESSURE_PLATE traps never
@@ -200,15 +225,17 @@ func test_spawn_projectile_sets_in_flight_for_pressure_plate() -> void:
 	assert_not_null(spawned)
 	assert_true(inst.in_flight, "in_flight must be set after a successful spawn")
 
-func test_spawn_projectile_does_not_set_in_flight_for_timed() -> void:
-	# TIMED traps don't gate by in_flight — their period drives
-	# everything. Setting in_flight on TIMED would do no harm but the
-	# code intentionally leaves it false so the field cleanly
-	# reflects "PRESSURE_PLATE has a live projectile".
+func test_spawn_projectile_sets_in_flight_for_timed_too() -> void:
+	# Break-duration semantics: TIMED traps now also engage in_flight
+	# on spawn so the break clock pauses while the projectile flies.
+	# This decouples `timed_break_duration` from speed / path length —
+	# the designer's "4s of empty corridor" tuning means exactly that,
+	# not "4s minus flight time."
 	var inst := ProjectileTrapInstance.create(_make_timed_data(1.0), Vector2i(3, 4), ProjectileTrapInstance.DIR_NORTH)
+	assert_false(inst.in_flight, "fresh TIMED launcher starts with no projectile in flight")
 	var spawned := inst.spawn_projectile()
 	assert_not_null(spawned)
-	assert_false(inst.in_flight, "TIMED traps must not flip in_flight on spawn")
+	assert_true(inst.in_flight, "TIMED spawn must engage in_flight so the break clock pauses")
 
 func test_spawn_projectile_blocks_when_pressure_plate_in_flight() -> void:
 	# The whole point of the lock — once a projectile is in flight
@@ -218,6 +245,16 @@ func test_spawn_projectile_blocks_when_pressure_plate_in_flight() -> void:
 	assert_not_null(first)
 	var second := inst.spawn_projectile()
 	assert_null(second, "second spawn while in_flight must return null")
+
+func test_spawn_projectile_blocks_when_timed_in_flight() -> void:
+	# Same lock applies to TIMED — defensive guard against external
+	# callers (Game.gd's TIMED tick path already gates on in_flight,
+	# so the guard here is belt-and-braces).
+	var inst := ProjectileTrapInstance.create(_make_timed_data(1.0), Vector2i(3, 4), ProjectileTrapInstance.DIR_NORTH)
+	var first := inst.spawn_projectile()
+	assert_not_null(first)
+	var second := inst.spawn_projectile()
+	assert_null(second, "second spawn on a TIMED launcher while in_flight must return null")
 
 func test_spawn_projectile_succeeds_again_after_in_flight_cleared() -> void:
 	# Game.gd clears in_flight on IMPACT; once cleared the plate

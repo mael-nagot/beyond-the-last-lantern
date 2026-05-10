@@ -32,8 +32,8 @@ var cell: Vector2i
 var wall_dir: Vector2i
 # PRESSURE_PLATE only. NO_PLATE for TIMED traps. Wired in Subtask C4.
 var plate_cell: Vector2i = NO_PLATE
-# TIMED only — phase-shift offset (0..timed_period). Two values feed
-# into this:
+# TIMED only — phase-shift offset (0..timed_break_duration). Two
+# values feed into this:
 #   - `data.timed_initial_offset` — designer-chosen base shift,
 #     same for every instance of this variant
 #   - the placer's per-instance random component, applied AFTER
@@ -43,14 +43,22 @@ var plate_cell: Vector2i = NO_PLATE
 # random desync is added by `LevelGenerator` so test code building
 # instances directly stays deterministic.
 var timed_offset: float = 0.0
-# Time accumulated within the current TIMED cycle. Initialised to
+# Time accumulated within the current TIMED break. The timer is
+# paused while `in_flight` is true (a projectile is still alive),
+# so this only counts the empty-corridor break. Initialised to
 # `timed_offset` at create() so the first launch fires at
-# `timed_period - timed_offset` seconds. Reset modulo period on each
-# rollover.
+# `timed_break_duration - timed_offset` seconds after spawn. Reset
+# modulo break duration on each rollover.
 var timer: float = 0.0
-# PRESSURE_PLATE only. Set true when a projectile is in flight from
-# this launcher; cleared on its IMPACT. Used in C4 to block
-# re-triggering while the plate's projectile is still flying.
+# Set true when a projectile is in flight from this launcher;
+# cleared on its IMPACT by Game.gd via the projectile's `launcher`
+# back-reference. Used by:
+#   - PRESSURE_PLATE: gates re-triggering while the plate's
+#     projectile is still flying (one projectile per plate at a time).
+#   - TIMED: pauses `tick()` so `timed_break_duration` counts only
+#     empty-corridor time, not flight time. Without this, the launch
+#     period would silently include the flight (a 4s period with a
+#     1.25s flight would feel like 2.75s of empty corridor).
 var in_flight: bool = false
 
 static func create(p_data: ProjectileTrapData, p_cell: Vector2i, p_wall_dir: Vector2i) -> ProjectileTrapInstance:
@@ -69,9 +77,16 @@ static func create(p_data: ProjectileTrapData, p_cell: Vector2i, p_wall_dir: Vec
 # Advance the launcher's internal clock by `delta` seconds and return
 # a new `ProjectileInstance` if it should fire this tick, else null.
 #
-# Phase 8 Task 3 — Subtask C2 wires TIMED firing only. PRESSURE_PLATE
-# (Subtask C4) will spawn projectiles via `_on_player_entered_cell()`
-# instead of `tick()` (the player's step is the trigger event).
+# TIMED traps pause the timer while a projectile is in flight (the
+# `in_flight` flag is cleared by Game.gd in the projectile's IMPACT
+# handler). Effect: `timed_break_duration` measures only the empty-
+# corridor break between impact and next launch, not launch-to-launch
+# period. This decouples the designer's "break feel" tuning from the
+# variant's speed and the corridor's path length.
+#
+# PRESSURE_PLATE traps spawn projectiles via
+# `_check_pressure_plate_trigger` in Game.gd instead — the player's
+# step is the trigger, not the timer.
 #
 # Pure state machine — no node access, no audio. Game.gd wires audio
 # (launch_sound) and visual (DungeonView.spawn_projectile_visual)
@@ -81,32 +96,39 @@ func tick(delta: float) -> ProjectileInstance:
 		return null
 	if not data.is_timed():
 		return null
-	timer += delta
-	var period: float = max(0.001, data.timed_period)
-	if timer < period:
+	# Pause the timer while the previous projectile is still alive —
+	# `timed_break_duration` counts only the empty-corridor break, not
+	# the flight time.
+	if in_flight:
 		return null
-	# Rollover. `fposmod` keeps the remainder in `[0, period)` even
-	# when delta is huge (e.g. after a long pause).
-	timer = fposmod(timer, period)
+	timer += delta
+	var break_duration: float = max(0.001, data.timed_break_duration)
+	if timer < break_duration:
+		return null
+	# Rollover. `fposmod` keeps the remainder in `[0, break_duration)`
+	# even when delta is huge (e.g. after a long pause).
+	timer = fposmod(timer, break_duration)
 	return spawn_projectile()
 
 # Spawn one projectile from this launcher's mouth in fire_direction.
 # Public so PRESSURE_PLATE traps (C4) can call it directly when the
 # player steps on the plate, bypassing the TIMED clock.
 #
-# **PRESSURE_PLATE in-flight lock** — when the launcher's previous
-# projectile is still alive, returns null so the plate can't re-trigger.
-# `in_flight` is set true here on success and cleared by Game.gd in
-# the projectile's IMPACT handler (via the `launcher` back-reference
-# on the spawned `ProjectileInstance`). TIMED traps don't gate on
-# in_flight — their period is meant to be longer than the flight, and
-# overlapping projectiles from a single TIMED trap is acceptable
-# (`timed_period` < flight time would just produce a chain of
-# projectiles, which is a tunable consequence of designer choice).
+# **In-flight lock** — both TIMED and PRESSURE_PLATE traps set
+# `in_flight = true` here on success. Game.gd clears it in the
+# projectile's IMPACT handler (via the `launcher` back-reference on
+# the spawned `ProjectileInstance`). The lock means:
+#   - PRESSURE_PLATE: the plate can't re-trigger while the previous
+#     projectile is still alive (one projectile per plate at a time).
+#   - TIMED: `tick()` pauses while the lock is held, so the break
+#     duration counts only empty-corridor time, not flight time.
+# Callers (the TIMED `tick()` path; Game.gd for PRESSURE_PLATE)
+# already guard against re-spawning while in_flight, so this method
+# never spawns a second projectile from a launcher with one alive.
 func spawn_projectile() -> ProjectileInstance:
 	if data == null:
 		return null
-	if data.is_pressure_plate() and in_flight:
+	if in_flight:
 		return null
 	var fire_dir: Vector2i = fire_direction()
 	# Start position: the wall face on the inside of the host cell.
@@ -117,8 +139,7 @@ func spawn_projectile() -> ProjectileInstance:
 		+ Vector2(float(wall_dir.x), float(wall_dir.y)) * 0.5
 	var inst := ProjectileInstance.create(data, start_pos, fire_dir)
 	inst.launcher = self
-	if data.is_pressure_plate():
-		in_flight = true
+	in_flight = true
 	return inst
 
 # Cardinal direction the projectile flies. Always opposite the wall

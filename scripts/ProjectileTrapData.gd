@@ -26,10 +26,15 @@ extends Resource
 # gameplay (deferred to a later phase) all reuse this resource as-is.
 
 enum Trigger {
-	# Fires at fixed intervals. `timed_initial_offset` phase-shifts each
-	# placed trap so multiple TIMED launchers in the same area don't
-	# fire in sync. (The placer applies a per-trap pseudo-random offset
-	# on top of this base value at spawn time.)
+	# Fires after `timed_break_duration` seconds of EMPTY CORRIDOR.
+	# The launcher's timer is paused while a projectile is in flight
+	# and only counts the break between an impact and the next launch
+	# — so the player gets exactly `timed_break_duration` seconds of
+	# safe corridor between projectiles, independent of speed or path
+	# length. `timed_initial_offset` phase-shifts each placed trap so
+	# multiple TIMED launchers in the same area don't fire in sync.
+	# (The placer applies a per-trap pseudo-random offset on top of
+	# this base value at spawn time.)
 	TIMED,
 	# Fires when the player steps on a linked floor plate. The plate
 	# cell is chosen by the placer to satisfy `min_plate_to_launcher_distance`
@@ -63,13 +68,18 @@ enum Trigger {
 @export var speed_cells_per_second: float = 8.0
 
 @export_group("Timing — TIMED")
-# Period in seconds between launches. Half a second feels frantic,
-# 3+ seconds feels lurking. Independent of the player's actions.
-@export var timed_period: float = 2.5
+# Break duration in seconds — the time of EMPTY CORRIDOR between an
+# impact and the next launch. The launcher's timer is paused while a
+# projectile is in flight, so this field is fully decoupled from
+# `speed_cells_per_second` and the path length: setting `4.0` always
+# means "4 seconds of safe corridor between fireballs", regardless of
+# how long the projectile takes to fly. Half a second feels frantic,
+# 3+ seconds feels lurking.
+@export var timed_break_duration: float = 2.5
 # Per-instance phase shift (seconds added to the timer at spawn) so
 # multiple TIMED traps don't fire in lockstep. The placer applies a
-# pseudo-random offset within [0, timed_period) on top of this base
-# value, so the developer can leave this at 0 in most variants.
+# pseudo-random offset within [0, timed_break_duration) on top of this
+# base value, so the developer can leave this at 0 in most variants.
 @export var timed_initial_offset: float = 0.0
 
 @export_group("Placement — Corridor")
