@@ -3703,3 +3703,44 @@ func test_gate_mode_none_skips_gating_check() -> void:
 	var gen := _make_generator(biome)
 	assert_true(gen.secret_walls.size() > 0,
 		"NONE-mode secret wall placement should commit even when nothing is gated")
+
+func test_loot_only_secret_walls_never_gate_the_exit() -> void:
+	# LOOT_ONLY must reject edges where sealing the wall would make
+	# the exit unreachable from the entrance. The player must always
+	# have a non-secret path to the exit.
+	var biome := _make_biome([_make_loot_entry(_make_item(), 1)], 4, 6)
+	biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
+	biome.secret_wall_spawns = [_make_secret_wall_spawn(4, 4, SecretWallSpawn.GateMode.LOOT_ONLY)]
+	# Sweep several seeds so we don't depend on the default rolling
+	# the exact edge configuration we want to stress-test.
+	for s in [12345, 1, 2, 7, 11, 31]:
+		var gen := _make_generator(biome, s)
+		for sw in gen.secret_walls:
+			var extra_closed: Dictionary = {SecretWallInstance.edge_key(sw.cell_a, sw.cell_b): true}
+			var restricted: Dictionary = gen._chain_reachable_from_entrance({}, extra_closed)
+			assert_true(restricted.has(gen.exit_pos),
+				"seed %d: LOOT_ONLY secret wall at %s/%s gates the exit" % [s, sw.cell_a, sw.cell_b])
+
+func test_loot_only_secret_walls_gate_at_least_one_loot_cell() -> void:
+	# The other half of the LOOT_ONLY contract: every placed wall
+	# must actually hide a chest OR a non-key floor item.
+	var biome := _make_biome([_make_loot_entry(_make_item(), 1)], 4, 6)
+	biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
+	biome.secret_wall_spawns = [_make_secret_wall_spawn(3, 3, SecretWallSpawn.GateMode.LOOT_ONLY)]
+	var gen := _make_generator(biome)
+	for sw in gen.secret_walls:
+		var extra_closed: Dictionary = {SecretWallInstance.edge_key(sw.cell_a, sw.cell_b): true}
+		var restricted: Dictionary = gen._chain_reachable_from_entrance({}, extra_closed)
+		var hides_loot: bool = false
+		for x in range(gen.grid_width):
+			for y in range(gen.grid_height):
+				var cell: GridCell = gen.grid[x][y]
+				var pos := Vector2i(x, y)
+				if cell.object != null and cell.object.is_chest() and not gen._has_reachable_neighbour(pos, restricted):
+					hides_loot = true
+				if not cell.items.is_empty() and not restricted.has(pos):
+					for it in cell.items:
+						if it != null and it.get_key_id() == "":
+							hides_loot = true
+		assert_true(hides_loot,
+			"LOOT_ONLY secret wall at %s/%s hides no chest / floor item" % [sw.cell_a, sw.cell_b])

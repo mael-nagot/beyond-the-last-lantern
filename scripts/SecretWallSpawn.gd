@@ -19,7 +19,12 @@ extends Resource
 enum GateMode {
 	NONE,          # No content-gating requirement. Designer's risk.
 	ANY_CONTENT,   # Mirrors door must_gate_content: chest / lever / key / exit.
-	LOOT_ONLY,     # Stricter: the gated content must be a chest or a floor item.
+	LOOT_ONLY,     # Stricter: the gated cells must be a chest OR a non-key
+	               # floor item AND the wall MUST NOT also gate the exit,
+	               # a lever, or any key. A secret wall behind the main
+	               # path forces the player to find the secret to progress;
+	               # LOOT_ONLY explicitly rejects that, leaving secret walls
+	               # as optional side-paths to bonus loot.
 }
 
 @export var count_min: int = 1

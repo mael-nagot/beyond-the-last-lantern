@@ -2946,50 +2946,70 @@ func _secret_wall_too_close_to_object(edge: Array, min_distance: int) -> bool:
 	return false
 
 func _secret_wall_gates_content(a: Vector2i, b: Vector2i, gate_mode: int) -> bool:
-	# Simulate "this edge is a real, permanent wall" and check whether
-	# any content of the configured kind becomes unreachable from the
-	# entrance. Uses the same chain-reachability machinery doors use,
-	# with the secret-wall edge added to the excluded set so the BFS
-	# treats it as closed.
+	# Decides whether a secret wall on edge (a, b) is allowed under
+	# `gate_mode`. Simulates "this edge is a real, permanent wall" and
+	# walks the world from the entrance under chain reachability with
+	# the secret-wall edge sealed. The secret-wall edge isn't a door,
+	# so we feed it through the extra_closed_edges parameter rather
+	# than `excluded_door_keys` (which only suppresses doors that DO
+	# exist on that edge).
 	#
-	# ANY_CONTENT mirrors `_door_gates_content` (chest / lever / key /
-	# exit). LOOT_ONLY is stricter — only chests and floor-item cells
-	# count, so the secret wall must be hiding tangible loot rather
-	# than e.g. just walling off an alternate path to the exit.
-	# The secret-wall edge isn't a door, so we feed it through the
-	# extra_closed_edges parameter rather than `excluded_door_keys`
-	# (which only suppresses doors that DO exist on that edge).
+	# The check is split in two:
+	#   - `gates_loot`: at least one chest cell OR floor-item cell
+	#     (non-key items only) becomes unreachable from the entrance.
+	#   - `gates_progression`: the exit, a lever, a key (floor OR
+	#     inside a chest), or a key-locked door's KEY becomes
+	#     unreachable. These are the "important" cells the player
+	#     can't be allowed to lose access to.
+	#
+	# Then per mode:
+	#   - ANY_CONTENT: pass if gates_loot OR gates_progression.
+	#     Mirrors the locked-door must_gate_content rule.
+	#   - LOOT_ONLY: pass if gates_loot AND NOT gates_progression.
+	#     The wall must hide loot AND must not block any progression
+	#     element. A wall that gates "a chest AND the exit" is
+	#     rejected here — the user explicitly doesn't want secret
+	#     walls walling off the main path.
+	#   - NONE: this function isn't called.
 	var extra_closed: Dictionary = {SecretWallInstance.edge_key(a, b): true}
 	var restricted: Dictionary = _chain_reachable_from_entrance({}, extra_closed)
+	var gates_loot: bool = false
+	var gates_progression: bool = false
 	for x in range(grid_width):
 		for y in range(grid_height):
 			var cell: GridCell = grid[x][y]
 			var pos := Vector2i(x, y)
-			# Chests count under both modes.
-			if cell.object != null and cell.object.is_chest():
-				if not _has_reachable_neighbour(pos, restricted):
-					return true
-			# Floor items count under both modes.
-			for item in cell.items:
-				if item == null:
-					continue
-				if not restricted.has(pos):
-					return true
-			if gate_mode == SecretWallSpawn.GateMode.LOOT_ONLY:
-				continue
-			# ANY_CONTENT also counts: exit, lever, and keys inside chests.
 			if cell.cell_type == GridCell.CellType.EXIT:
 				if not restricted.has(pos):
-					return true
+					gates_progression = true
 			if cell.object != null and cell.object is LeverInstance:
 				if not _has_reachable_neighbour(pos, restricted):
-					return true
+					gates_progression = true
+			# Floor items: a key item routes to progression, every
+			# other item routes to loot. Same cell can hold both —
+			# scan each item independently.
+			if not cell.items.is_empty() and not restricted.has(pos):
+				for item in cell.items:
+					if item == null:
+						continue
+					if item.get_key_id() != "":
+						gates_progression = true
+					else:
+						gates_loot = true
 			if cell.object != null and cell.object.is_chest():
-				for chest_item in cell.object.items:
-					if chest_item != null and chest_item.get_key_id() != "":
-						if not _has_reachable_neighbour(pos, restricted):
-							return true
-	return false
+				if not _has_reachable_neighbour(pos, restricted):
+					gates_loot = true
+					# Chests holding a key route to progression too.
+					for chest_item in cell.object.items:
+						if chest_item != null and chest_item.get_key_id() != "":
+							gates_progression = true
+	match gate_mode:
+		SecretWallSpawn.GateMode.ANY_CONTENT:
+			return gates_loot or gates_progression
+		SecretWallSpawn.GateMode.LOOT_ONLY:
+			return gates_loot and not gates_progression
+		_:
+			return false
 
 # Public — DungeonView and MapPopup iterate `secret_walls` directly;
 # this helper is here for symmetry with `get_door_at_edge`.
