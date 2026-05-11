@@ -2888,6 +2888,18 @@ func _try_place_secret_wall(spawn: SecretWallSpawn) -> void:
 			if spawn.gate_mode != SecretWallSpawn.GateMode.NONE \
 					and not _secret_wall_gates_content(a, b, spawn.gate_mode):
 				continue
+			# Belt-and-suspenders runtime check: any non-NONE placement
+			# must be on a bridge (sealing the edge must disconnect at
+			# least one endpoint from the entrance). The gating check
+			# above already enforces this, but a loud `push_error` here
+			# would catch any future regression in the chain-reachability
+			# helpers that lets a loop edge slip through.
+			if spawn.gate_mode != SecretWallSpawn.GateMode.NONE:
+				var verify_closed: Dictionary = {SecretWallInstance.edge_key(a, b): true}
+				var verify_reach: Dictionary = _chain_reachable_from_entrance({}, verify_closed)
+				if verify_reach.has(a) and verify_reach.has(b):
+					push_error("LevelGenerator: secret wall about to commit on a LOOP edge %s/%s — gating check is broken (gate_mode=%d)" % [a, b, spawn.gate_mode])
+					continue
 			var inst := SecretWallInstance.create(a, b)
 			secret_walls.append(inst)
 			_secret_walls_by_edge[SecretWallInstance.edge_key(a, b)] = inst
@@ -2954,13 +2966,23 @@ func _secret_wall_gates_content(a: Vector2i, b: Vector2i, gate_mode: int) -> boo
 	# than `excluded_door_keys` (which only suppresses doors that DO
 	# exist on that edge).
 	#
-	# The check is split in two:
-	#   - `gates_loot`: at least one chest cell OR floor-item cell
-	#     (non-key items only) becomes unreachable from the entrance.
-	#   - `gates_progression`: the exit, a lever, a key (floor OR
-	#     inside a chest), or a key-locked door's KEY becomes
-	#     unreachable. These are the "important" cells the player
-	#     can't be allowed to lose access to.
+	# Three rules combine:
+	#
+	# 1. BRIDGE: the wall must be on a graph bridge. Sealing the edge
+	#    must disconnect at least one of its endpoints from the
+	#    entrance. If both endpoints stay reachable, the wall sits on
+	#    a loop and walking through it reveals nothing the player
+	#    couldn't have reached otherwise — fail fast. The downstream
+	#    content checks would catch this too (a loop wall gates
+	#    nothing), but stating it explicitly here documents the
+	#    intent and serves as a safety net.
+	#
+	# 2. `gates_loot`: at least one chest cell OR non-key floor-item
+	#    cell becomes unreachable from the entrance.
+	#
+	# 3. `gates_progression`: the exit, a lever, a key (floor OR
+	#    inside a chest) becomes unreachable. These are "important"
+	#    cells the player can't be allowed to lose access to.
 	#
 	# Then per mode:
 	#   - ANY_CONTENT: pass if gates_loot OR gates_progression.
@@ -2973,6 +2995,9 @@ func _secret_wall_gates_content(a: Vector2i, b: Vector2i, gate_mode: int) -> boo
 	#   - NONE: this function isn't called.
 	var extra_closed: Dictionary = {SecretWallInstance.edge_key(a, b): true}
 	var restricted: Dictionary = _chain_reachable_from_entrance({}, extra_closed)
+	# Rule 1: bridge check.
+	if restricted.has(a) and restricted.has(b):
+		return false
 	var gates_loot: bool = false
 	var gates_progression: bool = false
 	for x in range(grid_width):

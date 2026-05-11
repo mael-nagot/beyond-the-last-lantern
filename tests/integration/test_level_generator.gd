@@ -3744,3 +3744,24 @@ func test_loot_only_secret_walls_gate_at_least_one_loot_cell() -> void:
 							hides_loot = true
 		assert_true(hides_loot,
 			"LOOT_ONLY secret wall at %s/%s hides no chest / floor item" % [sw.cell_a, sw.cell_b])
+
+func test_placed_secret_walls_are_always_on_bridges_stress() -> void:
+	# Sweep 25 seeds at the user's reported map size (21x21) with a
+	# realistic biome (chests + floor items, both LOOT_ONLY and
+	# ANY_CONTENT). Every placed wall MUST be on a bridge — sealing
+	# its edge MUST disconnect at least one of its endpoints from
+	# the entrance. If the wall is on a loop, walking through it
+	# reveals nothing new, and the placement is a bug.
+	var modes := [SecretWallSpawn.GateMode.LOOT_ONLY, SecretWallSpawn.GateMode.ANY_CONTENT]
+	for mode in modes:
+		for s in range(100, 125):
+			var biome := _make_biome([_make_loot_entry(_make_item(), 1)], 4, 6)
+			biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
+			biome.secret_wall_spawns = [_make_secret_wall_spawn(3, 3, mode)]
+			var gen := _make_generator(biome, s)
+			for sw in gen.secret_walls:
+				var extra_closed: Dictionary = {SecretWallInstance.edge_key(sw.cell_a, sw.cell_b): true}
+				var restricted: Dictionary = gen._chain_reachable_from_entrance({}, extra_closed)
+				var bridge: bool = not restricted.has(sw.cell_a) or not restricted.has(sw.cell_b)
+				assert_true(bridge,
+					"mode=%d seed=%d: wall at %s/%s is on a LOOP — both endpoints reachable when sealed (player gains nothing by walking through)" % [mode, s, sw.cell_a, sw.cell_b])
