@@ -305,6 +305,12 @@ func rebuild_items() -> void:
 	if _items_root == null:
 		return
 	_build_items()
+	# An item appearing on or leaving a plate cell flips the plate's
+	# triggered visual state (and its blocking effect on the trap —
+	# see `Game._check_pressure_plate_trigger`). The diff inside
+	# `_update_plate_visual_states` is cheap when nothing changed,
+	# so calling it unconditionally on every item change is fine.
+	_update_plate_visual_states()
 
 func rebuild_objects() -> void:
 	if _objects_root == null:
@@ -1126,10 +1132,21 @@ func _update_plate_visual_states() -> void:
 		_plate_triggered_state[inst] = should_trigger
 
 func _plate_should_be_triggered(inst: ProjectileTrapInstance) -> bool:
-	# Today: triggered iff the player stands on the plate cell. Phase
-	# 10 enemies that walk over plates will also count; keep this
-	# predicate centralised so the extension is one place.
-	return inst.plate_cell == _current_grid_pos
+	# Triggered (depressed) visual state when EITHER:
+	#   - the player stands on the plate cell (the existing rule), OR
+	#   - any item sits on the plate cell — dropping an item onto a
+	#     plate holds it down and disables the trap until pickup.
+	#     `Game._check_pressure_plate_trigger` mirrors this — the trap
+	#     does not fire while an item is on the plate.
+	# Phase 10 enemies that walk over plates will also count; keep
+	# this predicate centralised so the extension is one place.
+	if inst.plate_cell == _current_grid_pos:
+		return true
+	if generator != null:
+		var c: GridCell = generator.grid[inst.plate_cell.x][inst.plate_cell.y]
+		if c != null and not c.items.is_empty():
+			return true
+	return false
 
 func _projectile_launcher_y_rotation_deg(inst: ProjectileTrapInstance) -> float:
 	# Same wall-face → Y-rotation mapping wall decorations use, so the
