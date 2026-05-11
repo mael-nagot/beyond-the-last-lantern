@@ -301,15 +301,16 @@ func _on_map_draw() -> void:
 	# Draw secret walls as a faint wall line on the edge between the
 	# two endpoint cells — same geometry as a real wall edge but at
 	# reduced opacity so an observant player can spot the difference.
-	# Same fog-of-war rule as door slabs (both endpoints must be
-	# explored) so a secret wall behind a still-unexplored corridor
-	# stays hidden. The wall renders at full opacity in 3D regardless
-	# of map state; the map is the only place where the wall "leaks"
-	# its secret, and only to a careful eye.
+	# Rule: draw if EITHER endpoint is explored (not both, like the
+	# door slab). The whole point is that `MapData.reveal_around`
+	# refuses to reveal the cell behind the secret wall, so the
+	# "other" endpoint is hidden until the player walks through. We
+	# still want the faint line visible from the near side as soon
+	# as the player approaches — that IS the hint.
 	for sw in generator.secret_walls:
 		if sw == null:
 			continue
-		if not map_data.is_explored(sw.cell_a) or not map_data.is_explored(sw.cell_b):
+		if not map_data.is_explored(sw.cell_a) and not map_data.is_explored(sw.cell_b):
 			continue
 		_draw_secret_wall_marker(sw, offset, cell_size, wall_color, line_width)
 
