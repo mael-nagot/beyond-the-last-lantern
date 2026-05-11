@@ -3578,3 +3578,128 @@ func test_allow_mixed_room_spinners_false_blocks_second_spawn() -> void:
 				seen_ccw = true
 		assert_false(seen_cw and seen_ccw,
 			"room %s holds both CW and CCW spinners — second spawn ignored allow_mixed_room_spinners=false" % room)
+
+# -------------------------------------------------------
+# Secret walls — edge-based, purely visual deception. Movement /
+# reachability code must IGNORE them; placement still enforces
+# 1-wide corridor edges and an optional content-gating rule.
+# -------------------------------------------------------
+
+func _make_secret_wall_spawn(count_min: int, count_max: int, gate_mode: int = SecretWallSpawn.GateMode.NONE) -> SecretWallSpawn:
+	var spawn := SecretWallSpawn.new()
+	spawn.count_min = count_min
+	spawn.count_max = count_max
+	spawn.gate_mode = gate_mode
+	return spawn
+
+func test_no_secret_walls_placed_when_pool_empty() -> void:
+	var gen := _make_generator(_make_biome())
+	assert_eq(gen.secret_walls.size(), 0)
+
+func test_secret_wall_endpoints_are_one_wide_corridor_cells() -> void:
+	# Mirrors the door endpoint invariant: the visual deception only
+	# makes sense if both endpoints look like ordinary corridor cells
+	# with walls on the perpendicular sides.
+	var biome := _make_biome()
+	biome.secret_wall_spawns = [_make_secret_wall_spawn(3, 3)]
+	var gen := _make_generator(biome)
+	for sw in gen.secret_walls:
+		assert_true(_is_one_wide_corridor_cell(gen, sw.cell_a),
+			"secret wall endpoint %s is not a 1-wide-corridor cell" % sw.cell_a)
+		assert_true(_is_one_wide_corridor_cell(gen, sw.cell_b),
+			"secret wall endpoint %s is not a 1-wide-corridor cell" % sw.cell_b)
+
+func test_secret_wall_endpoints_orthogonally_adjacent() -> void:
+	var biome := _make_biome()
+	biome.secret_wall_spawns = [_make_secret_wall_spawn(3, 3)]
+	var gen := _make_generator(biome)
+	for sw in gen.secret_walls:
+		var diff: Vector2i = sw.cell_b - sw.cell_a
+		var manhattan: int = abs(diff.x) + abs(diff.y)
+		assert_eq(manhattan, 1,
+			"secret wall endpoints %s, %s are not orthogonally adjacent" % [sw.cell_a, sw.cell_b])
+
+func test_secret_walls_do_not_block_player_movement() -> void:
+	# is_edge_blocked is the canonical movement check
+	# (PlayerController._step calls it). A secret wall must NEVER
+	# register here — the whole point is the player walks through.
+	var biome := _make_biome()
+	biome.secret_wall_spawns = [_make_secret_wall_spawn(3, 3)]
+	var gen := _make_generator(biome)
+	for sw in gen.secret_walls:
+		assert_false(gen.is_edge_blocked(sw.cell_a, sw.cell_b),
+			"is_edge_blocked returned true for secret wall edge %s/%s" % [sw.cell_a, sw.cell_b])
+		assert_false(gen.is_edge_blocked(sw.cell_b, sw.cell_a),
+			"is_edge_blocked returned true for reversed secret wall edge")
+
+func test_secret_walls_do_not_share_edges_with_doors() -> void:
+	# A door + secret wall on the same edge would fight for rendering
+	# AND confuse the player about whether to click or walk through.
+	var biome := _make_biome()
+	biome.objects = [_make_door_spawn(_make_door(), 3, 3)]
+	biome.secret_wall_spawns = [_make_secret_wall_spawn(3, 3)]
+	var gen := _make_generator(biome)
+	for sw in gen.secret_walls:
+		var key: String = DoorInstance.edge_key(sw.cell_a, sw.cell_b)
+		assert_false(gen._doors_by_edge.has(key),
+			"secret wall edge %s/%s also hosts a door" % [sw.cell_a, sw.cell_b])
+
+func test_secret_walls_never_on_entrance_or_exit() -> void:
+	var biome := _make_biome()
+	biome.secret_wall_spawns = [_make_secret_wall_spawn(5, 5)]
+	var gen := _make_generator(biome)
+	for sw in gen.secret_walls:
+		assert_ne(sw.cell_a, gen.entrance_pos)
+		assert_ne(sw.cell_b, gen.entrance_pos)
+		assert_ne(sw.cell_a, gen.exit_pos)
+		assert_ne(sw.cell_b, gen.exit_pos)
+
+func test_get_secret_wall_at_edge_is_order_independent() -> void:
+	var biome := _make_biome()
+	biome.secret_wall_spawns = [_make_secret_wall_spawn(1, 1)]
+	var gen := _make_generator(biome)
+	if gen.secret_walls.is_empty():
+		return
+	var sw: SecretWallInstance = gen.secret_walls[0]
+	assert_eq(gen.get_secret_wall_at_edge(sw.cell_a, sw.cell_b), sw)
+	assert_eq(gen.get_secret_wall_at_edge(sw.cell_b, sw.cell_a), sw)
+
+func test_secret_walls_do_not_appear_on_grid_cells() -> void:
+	# Structural invariant — secret walls live on edges, never on
+	# cells. Nothing in the generator (or GridCell.object) should be
+	# a SecretWallInstance.
+	var biome := _make_biome()
+	biome.secret_wall_spawns = [_make_secret_wall_spawn(3, 3)]
+	var gen := _make_generator(biome)
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			var obj = gen.grid[x][y].object
+			assert_false(obj is SecretWallInstance,
+				"SecretWallInstance found on GridCell at (%d,%d) — secret walls must live on edges" % [x, y])
+
+func test_gate_mode_any_content_requires_gated_chest() -> void:
+	# With ANY_CONTENT, a placed secret wall must hide at least one
+	# chest / lever / key / exit cell from the entrance. The exit is
+	# guaranteed to exist; with the chest pool empty, ANY_CONTENT
+	# walls can still gate the exit by sitting between entrance and
+	# exit. Either way, _secret_wall_gates_content should hold for
+	# every placed instance.
+	var biome := _make_biome()
+	biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
+	biome.secret_wall_spawns = [_make_secret_wall_spawn(3, 3, SecretWallSpawn.GateMode.ANY_CONTENT)]
+	var gen := _make_generator(biome)
+	for sw in gen.secret_walls:
+		assert_true(gen._secret_wall_gates_content(sw.cell_a, sw.cell_b, SecretWallSpawn.GateMode.ANY_CONTENT),
+			"placed ANY_CONTENT secret wall %s/%s does not actually gate any content" % [sw.cell_a, sw.cell_b])
+
+func test_gate_mode_none_skips_gating_check() -> void:
+	# With NONE, the placement should succeed even on edges that gate
+	# nothing — so we expect at least one wall placed in a typical
+	# corridor-rich biome. (The actual non-gating cases are hard to
+	# pin without crafting a fixed grid; this test just confirms
+	# NONE-mode placement doesn't insist on gating.)
+	var biome := _make_biome()
+	biome.secret_wall_spawns = [_make_secret_wall_spawn(2, 2, SecretWallSpawn.GateMode.NONE)]
+	var gen := _make_generator(biome)
+	assert_true(gen.secret_walls.size() > 0,
+		"NONE-mode secret wall placement should commit even when nothing is gated")

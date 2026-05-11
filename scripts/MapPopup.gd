@@ -292,6 +292,19 @@ func _on_map_draw() -> void:
 			continue
 		_draw_door_slab(door, offset, cell_size, line_width)
 
+	# Draw secret walls as a small "S" centred on the edge between the
+	# two endpoint cells. Same fog-of-war rule as door slabs — both
+	# endpoint cells must be explored — so the player only sees the
+	# hint after walking close enough that the cells flank them. The
+	# wall renders as a normal-looking wall in 3D regardless of map
+	# state; this is purely a player-facing hint.
+	for sw in generator.secret_walls:
+		if sw == null:
+			continue
+		if not map_data.is_explored(sw.cell_a) or not map_data.is_explored(sw.cell_b):
+			continue
+		_draw_secret_wall_marker(sw, offset, cell_size)
+
 	# Draw player arrow (blinking, bigger)
 	if _blink_visible:
 		var player_center = offset + Vector2(
@@ -504,6 +517,40 @@ func _draw_door_slab(door: DoorInstance, offset: Vector2, cell_size: float, line
 		map_draw.draw_rect(slab, border, false, max(line_width * 0.5, 1.0))
 	else:
 		map_draw.draw_rect(slab, color, false, max(line_width * 0.7, 1.0))
+
+func _draw_secret_wall_marker(sw: SecretWallInstance, offset: Vector2, cell_size: float) -> void:
+	# Draw a small "S" centred on the boundary between cell_a and
+	# cell_b. The S sits on the edge midpoint — same anchor as the
+	# door slab but rendered as text so the player reads "secret" at a
+	# glance. Wall-brown tint so it groups visually with other
+	# wall-related markers without competing with door slabs (which
+	# are bolder).
+	var axis: Vector2i = sw.axis()
+	var edge_mid: Vector2
+	if axis == Vector2i(1, 0):
+		# E-W corridor — boundary is the vertical line at x = cell_b.x.
+		var bx: float = float(sw.cell_b.x) * cell_size + offset.x
+		var cy: float = (float(sw.cell_a.y) + 0.5) * cell_size + offset.y
+		edge_mid = Vector2(bx, cy)
+	else:
+		# N-S corridor — boundary is the horizontal line at y = cell_b.y.
+		var by: float = float(sw.cell_b.y) * cell_size + offset.y
+		var cx: float = (float(sw.cell_a.x) + 0.5) * cell_size + offset.x
+		edge_mid = Vector2(cx, by)
+	var font: Font = get_theme_default_font()
+	if font == null:
+		return
+	var font_size: int = max(int(cell_size * 0.65), 8)
+	var color := Color(0.35, 0.20, 0.08)  # deep wall-brown — sits between door brown and the parchment background
+	var text := "S"
+	var text_size: Vector2 = font.get_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1.0, font_size)
+	# Godot's draw_string anchors to the text's baseline left, so shift
+	# left by half the width and DOWN by the font ascent so the glyph
+	# centres on edge_mid.
+	var ascent: float = font.get_ascent(font_size)
+	var descent: float = font.get_descent(font_size)
+	var draw_pos := edge_mid + Vector2(-text_size.x * 0.5, (ascent - descent) * 0.5)
+	map_draw.draw_string(font, draw_pos, text, HORIZONTAL_ALIGNMENT_CENTER, -1.0, font_size, color)
 
 func redraw() -> void:
 	if map_draw != null:
