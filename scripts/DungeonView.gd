@@ -325,7 +325,16 @@ func _build_mesh() -> void:
 				var dir   = n[0] as Vector2i
 				var npos  = Vector2i(x + dir.x, y + dir.y)
 				var ncell = generator.get_cell(npos.x, npos.y)
-				if ncell and ncell.cell_type == GridCell.CellType.WALL:
+				# Either a real wall on this side OR a secret wall on the
+				# edge between this floor cell and the neighbour cell —
+				# both render the same way (a wall quad picked from the
+				# biome's wall_textures pool), so the secret wall is
+				# indistinguishable from a regular corridor wall.
+				var has_real_wall: bool = ncell != null and ncell.cell_type == GridCell.CellType.WALL
+				var has_secret_wall: bool = false
+				if not has_real_wall and ncell != null:
+					has_secret_wall = generator.get_secret_wall_at_edge(grid_pos, npos) != null
+				if has_real_wall or has_secret_wall:
 					var wall_classification: int = generator.classify_wall_face(grid_pos, dir)
 					var wall_entry: BiomeTextureEntry = BiomeTextureEntry.pick_for(
 						biome.wall_textures, wall_classification, grid_pos, wall_history)

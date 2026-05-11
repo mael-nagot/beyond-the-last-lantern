@@ -109,6 +109,15 @@ extends Resource
 # wall faces of cells matching `placement` flags.
 @export var wall_decorations: Array[WallDecorationSpawn] = []
 
+# Secret walls — edge-based "fake walls" between two 1-wide corridor
+# floor cells. The renderer draws a normal-looking wall quad on the
+# edge from both sides; the movement system never blocks the player
+# (the cells underneath stay normal floor). On the map the edge is
+# annotated with an "S" so the player gets a hint. Placed AFTER
+# items so the LOOT_ONLY gate mode can validate that the wall
+# actually hides a chest or floor item.
+@export var secret_wall_spawns: Array[SecretWallSpawn] = []
+
 @export_group("Sound")
 # One sound is picked at random per step (forward/back/strafe). Empty
 # array = silent. Per-biome so forest leaves and dungeon stone differ.

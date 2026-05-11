@@ -222,6 +222,7 @@ Objects attached to walls, rendered as sprites on the wall face.
 | Switch/Lever | Activates doors, bridges, reveals secrets |
 | Door | Blocks passage until opened (key, switch, or spell) |
 | Torch/Lantern | Light source, affects Shadow enemies |
+| Secret wall | Looks like a normal corridor wall; the player can walk through it freely. The map draws the wall line at reduced opacity — observant players notice the lighter line and try walking through. Placement requires the wall to gate content. ANY_CONTENT mode allows gating anything (chest/lever/key/exit); LOOT_ONLY mode REQUIRES the wall to gate a chest or non-key floor item AND REJECTS placements that would also gate the exit, a lever, or a key — so secret walls in that mode are always pure side-rewards. |
 
 ### Underwater / Special Biome Mechanics
 

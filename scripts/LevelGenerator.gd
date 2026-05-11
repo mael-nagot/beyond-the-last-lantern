@@ -24,6 +24,7 @@ var trap_spawns_pool: Array[TrapSpawn] = []
 var projectile_trap_spawns_pool: Array[ProjectileTrapSpawn] = []
 var spinner_spawns_pool: Array[SpinnerSpawn] = []
 var wall_decorations_pool: Array[WallDecorationSpawn] = []
+var secret_wall_spawns_pool: Array[SecretWallSpawn] = []
 
 var grid: Array = []
 var entrance_pos: Vector2i = Vector2i.ZERO
@@ -35,6 +36,16 @@ var _room_rects: Array = []
 # map iterate this); _doors_by_edge is just an O(1) lookup index.
 var doors: Array[DoorInstance] = []
 var _doors_by_edge: Dictionary = {}  # edge_key (String) -> DoorInstance
+
+# Secret walls also live on EDGES. The list + index mirror doors so
+# the renderer (DungeonView) and the map (MapPopup) can iterate them
+# the same way. Secret walls are PURELY VISUAL — they never appear in
+# the movement-blocking edge check (PlayerController + chain
+# reachability ignore them entirely). Placement still excludes edges
+# already used by doors so the two systems don't fight over the same
+# corridor edge.
+var secret_walls: Array[SecretWallInstance] = []
+var _secret_walls_by_edge: Dictionary = {}  # edge_key (String) -> SecretWallInstance
 
 # Wall-mounted decorations live on FACES (a side of a floor cell that
 # abuts a wall cell), not on cells. Authoritative list — DungeonView
@@ -116,6 +127,7 @@ func configure(biome: BiomeData) -> void:
 	projectile_trap_spawns_pool = biome.projectile_trap_spawns
 	spinner_spawns_pool = biome.spinner_spawns
 	wall_decorations_pool = biome.wall_decorations
+	secret_wall_spawns_pool = biome.secret_wall_spawns
 
 func generate() -> void:
 	_fill_with_walls()
@@ -130,6 +142,8 @@ func generate() -> void:
 	_projectile_path_cells.clear()
 	spinners.clear()
 	_spinner_cluster_cells.clear()
+	secret_walls.clear()
+	_secret_walls_by_edge.clear()
 	if room_count > 0:
 		_place_rooms()
 	_grow_maze()
@@ -150,6 +164,7 @@ func generate() -> void:
 	_validate_step_trap_reachability()
 	_place_projectile_traps()
 	_place_spinners()
+	_place_secret_walls()
 	_place_wall_decorations()
 
 # -------------------------------------------------------
@@ -1280,7 +1295,7 @@ func _item_label(data: ItemData) -> String:
 # -------------------------------------------------------
 # Chain reachability — the safety net for multi-pair lever placement
 # -------------------------------------------------------
-func _chain_reachable_from_entrance(excluded_door_keys: Dictionary = {}) -> Dictionary:
+func _chain_reachable_from_entrance(excluded_door_keys: Dictionary = {}, extra_closed_edges: Dictionary = {}) -> Dictionary:
 	# Chain reachability v2 — tracks both open doors AND collected
 	# keys. Iterative fixed-point:
 	#   1. Start with every directly-clickable door treated as open
@@ -1308,7 +1323,7 @@ func _chain_reachable_from_entrance(excluded_door_keys: Dictionary = {}) -> Dict
 			open_door_keys[k0] = true
 	var reachable: Dictionary = {}
 	while true:
-		reachable = _bfs_with_doors_state(entrance_pos, open_door_keys)
+		reachable = _bfs_with_doors_state(entrance_pos, open_door_keys, extra_closed_edges)
 		var progressed: bool = false
 		# Collect keys lying on the floor or inside reachable chests.
 		for x in range(grid_width):
@@ -1387,10 +1402,13 @@ func _chain_reachable_from_entrance(excluded_door_keys: Dictionary = {}) -> Dict
 			return reachable
 	return {}
 
-func _bfs_with_doors_state(origin: Vector2i, open_door_keys: Dictionary) -> Dictionary:
+func _bfs_with_doors_state(origin: Vector2i, open_door_keys: Dictionary, extra_closed_edges: Dictionary = {}) -> Dictionary:
 	# BFS treating each door in `doors` as closed UNLESS its edge_key
-	# is in `open_door_keys`. Powers the chain-reachability loop.
-	var closed_edges: Dictionary = {}
+	# is in `open_door_keys`. `extra_closed_edges` lets callers seal
+	# additional edges that aren't doors (used by the secret-wall
+	# gating check to simulate "what if this corridor edge were a
+	# real wall?"). Powers the chain-reachability loop.
+	var closed_edges: Dictionary = extra_closed_edges.duplicate()
 	for door in doors:
 		var key := DoorInstance.edge_key(door.cell_a, door.cell_b)
 		if not open_door_keys.has(key):
@@ -2815,6 +2833,213 @@ func _candidates_for_entry(entry: LootEntry, cells_by_type: Dictionary) -> Array
 					continue
 				result.append(pos)
 	return result
+
+# -------------------------------------------------------
+# Secret walls (edge-based, purely visual)
+#
+# A secret wall sits on the boundary between two adjacent 1-wide
+# corridor floor cells — same eligibility rules as a door. It is
+# never recorded in any movement-blocking structure: PlayerController
+# walks through the edge as if it weren't there, and chain
+# reachability ignores secret walls entirely. The DungeonView paints
+# a wall quad on the edge so the player SEES a wall; the map paints
+# an "S" so the player has a hint that the wall is special.
+#
+# Each SecretWallSpawn produces count_min..count_max instances. When
+# `gate_mode != NONE`, the placement only commits an edge if sealing
+# that edge would cut off content of the configured kind from the
+# entrance — a secret wall that hides nothing is rejected.
+# -------------------------------------------------------
+func _place_secret_walls() -> void:
+	if secret_wall_spawns_pool.is_empty():
+		return
+	for spawn in secret_wall_spawns_pool:
+		if spawn == null:
+			continue
+		var count := randi_range(max(0, spawn.count_min), max(spawn.count_min, spawn.count_max))
+		for _i in range(count):
+			_try_place_secret_wall(spawn)
+
+func _try_place_secret_wall(spawn: SecretWallSpawn) -> void:
+	# Reuse the door candidate-edge helper — eligibility (1-wide
+	# corridor, not entrance/exit, no chest etc.) is identical.
+	# `_candidate_edges_for_door_object(null, ...)` would crash on
+	# the data check, so call the underlying placement helper with
+	# no min-distance prefilter and apply distance below.
+	var candidates: Array = _candidate_edges_for_secret_wall()
+	var distance: int = max(0, spawn.min_distance_to_other_object)
+	while distance >= 0:
+		var pool: Array = candidates.duplicate()
+		if distance > 0:
+			pool = pool.filter(
+				func(edge): return not _secret_wall_too_close_to_object(edge, distance)
+			)
+		pool.shuffle()
+		for edge in pool:
+			var a: Vector2i = edge[0]
+			var b: Vector2i = edge[1]
+			# Edges already hosting a door or another secret wall are
+			# off-limits — two edge-bound elements on the same edge
+			# would fight for rendering and confuse the map.
+			if _doors_by_edge.has(DoorInstance.edge_key(a, b)):
+				continue
+			if _secret_walls_by_edge.has(SecretWallInstance.edge_key(a, b)):
+				continue
+			if spawn.gate_mode != SecretWallSpawn.GateMode.NONE \
+					and not _secret_wall_gates_content(a, b, spawn.gate_mode):
+				continue
+			# Belt-and-suspenders runtime check: any non-NONE placement
+			# must be on a bridge (sealing the edge must disconnect at
+			# least one endpoint from the entrance). The gating check
+			# above already enforces this, but a loud `push_error` here
+			# would catch any future regression in the chain-reachability
+			# helpers that lets a loop edge slip through.
+			if spawn.gate_mode != SecretWallSpawn.GateMode.NONE:
+				var verify_closed: Dictionary = {SecretWallInstance.edge_key(a, b): true}
+				var verify_reach: Dictionary = _chain_reachable_from_entrance({}, verify_closed)
+				if verify_reach.has(a) and verify_reach.has(b):
+					push_error("LevelGenerator: secret wall about to commit on a LOOP edge %s/%s — gating check is broken (gate_mode=%d)" % [a, b, spawn.gate_mode])
+					continue
+			var inst := SecretWallInstance.create(a, b)
+			secret_walls.append(inst)
+			_secret_walls_by_edge[SecretWallInstance.edge_key(a, b)] = inst
+			return
+		distance -= 1
+	push_warning("LevelGenerator: could not place secret wall — no eligible 1-wide-corridor edge satisfies gating + spacing")
+
+func _candidate_edges_for_secret_wall() -> Array:
+	# Same shape as `_candidate_edges_for_door` (1-wide corridor cells
+	# on both ends, no entrance/exit, no chest underneath) but without
+	# the ObjectSpawn placement-flag gate — secret walls only ever
+	# live on corridor edges.
+	var seen: Dictionary = {}
+	var result: Array = []
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var pos := Vector2i(x, y)
+			if not _is_door_endpoint(pos):
+				continue
+			for d: Vector2i in [Vector2i(1, 0), Vector2i(0, 1)]:
+				var npos: Vector2i = pos + d
+				if not _is_door_endpoint(npos):
+					continue
+				var pair: Array = SecretWallInstance.canonical_pair(pos, npos)
+				var key: String = "%d,%d|%d,%d" % [pair[0].x, pair[0].y, pair[1].x, pair[1].y]
+				if seen.has(key):
+					continue
+				seen[key] = true
+				result.append(pair)
+	return result
+
+func _secret_wall_too_close_to_object(edge: Array, min_distance: int) -> bool:
+	# Manhattan distance from either endpoint to any cell holding an
+	# object (chest / door / lever / trap host cell). Mirrors the
+	# `_too_close_to_existing_object` shape but works on the edge's
+	# two endpoint cells instead of a single cell.
+	if min_distance <= 0:
+		return false
+	var a: Vector2i = edge[0]
+	var b: Vector2i = edge[1]
+	for x in range(grid_width):
+		for y in range(grid_height):
+			if grid[x][y].object == null:
+				continue
+			var dist: int = min(_manhattan(a, Vector2i(x, y)), _manhattan(b, Vector2i(x, y)))
+			if dist < min_distance:
+				return true
+	# Also keep distance from doors (which are edge-bound, not cell-bound).
+	for door in doors:
+		var dist_d: int = min(
+			min(_manhattan(a, door.cell_a), _manhattan(a, door.cell_b)),
+			min(_manhattan(b, door.cell_a), _manhattan(b, door.cell_b))
+		)
+		if dist_d < min_distance:
+			return true
+	return false
+
+func _secret_wall_gates_content(a: Vector2i, b: Vector2i, gate_mode: int) -> bool:
+	# Decides whether a secret wall on edge (a, b) is allowed under
+	# `gate_mode`. Simulates "this edge is a real, permanent wall" and
+	# walks the world from the entrance under chain reachability with
+	# the secret-wall edge sealed. The secret-wall edge isn't a door,
+	# so we feed it through the extra_closed_edges parameter rather
+	# than `excluded_door_keys` (which only suppresses doors that DO
+	# exist on that edge).
+	#
+	# Three rules combine:
+	#
+	# 1. BRIDGE: the wall must be on a graph bridge. Sealing the edge
+	#    must disconnect at least one of its endpoints from the
+	#    entrance. If both endpoints stay reachable, the wall sits on
+	#    a loop and walking through it reveals nothing the player
+	#    couldn't have reached otherwise — fail fast. The downstream
+	#    content checks would catch this too (a loop wall gates
+	#    nothing), but stating it explicitly here documents the
+	#    intent and serves as a safety net.
+	#
+	# 2. `gates_loot`: at least one chest cell OR non-key floor-item
+	#    cell becomes unreachable from the entrance.
+	#
+	# 3. `gates_progression`: the exit, a lever, a key (floor OR
+	#    inside a chest) becomes unreachable. These are "important"
+	#    cells the player can't be allowed to lose access to.
+	#
+	# Then per mode:
+	#   - ANY_CONTENT: pass if gates_loot OR gates_progression.
+	#     Mirrors the locked-door must_gate_content rule.
+	#   - LOOT_ONLY: pass if gates_loot AND NOT gates_progression.
+	#     The wall must hide loot AND must not block any progression
+	#     element. A wall that gates "a chest AND the exit" is
+	#     rejected here — the user explicitly doesn't want secret
+	#     walls walling off the main path.
+	#   - NONE: this function isn't called.
+	var extra_closed: Dictionary = {SecretWallInstance.edge_key(a, b): true}
+	var restricted: Dictionary = _chain_reachable_from_entrance({}, extra_closed)
+	# Rule 1: bridge check.
+	if restricted.has(a) and restricted.has(b):
+		return false
+	var gates_loot: bool = false
+	var gates_progression: bool = false
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var cell: GridCell = grid[x][y]
+			var pos := Vector2i(x, y)
+			if cell.cell_type == GridCell.CellType.EXIT:
+				if not restricted.has(pos):
+					gates_progression = true
+			if cell.object != null and cell.object is LeverInstance:
+				if not _has_reachable_neighbour(pos, restricted):
+					gates_progression = true
+			# Floor items: a key item routes to progression, every
+			# other item routes to loot. Same cell can hold both —
+			# scan each item independently.
+			if not cell.items.is_empty() and not restricted.has(pos):
+				for item in cell.items:
+					if item == null:
+						continue
+					if item.get_key_id() != "":
+						gates_progression = true
+					else:
+						gates_loot = true
+			if cell.object != null and cell.object.is_chest():
+				if not _has_reachable_neighbour(pos, restricted):
+					gates_loot = true
+					# Chests holding a key route to progression too.
+					for chest_item in cell.object.items:
+						if chest_item != null and chest_item.get_key_id() != "":
+							gates_progression = true
+	match gate_mode:
+		SecretWallSpawn.GateMode.ANY_CONTENT:
+			return gates_loot or gates_progression
+		SecretWallSpawn.GateMode.LOOT_ONLY:
+			return gates_loot and not gates_progression
+		_:
+			return false
+
+# Public — DungeonView and MapPopup iterate `secret_walls` directly;
+# this helper is here for symmetry with `get_door_at_edge`.
+func get_secret_wall_at_edge(a: Vector2i, b: Vector2i) -> SecretWallInstance:
+	return _secret_walls_by_edge.get(SecretWallInstance.edge_key(a, b), null)
 
 # -------------------------------------------------------
 # BFS validation

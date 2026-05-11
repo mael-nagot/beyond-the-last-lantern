@@ -25,6 +25,7 @@
 [ext_resource type="Resource" uid="uid://df3vqllijxj7l" path="res://assets/objects/traps/trap_spike_timed.tres" id="21_3vyya"]
 [ext_resource type="Script" uid="uid://c4fbuyttq7iik" path="res://scripts/WallDecorationSpawn.gd" id="21_evnw4"]
 [ext_resource type="Script" uid="uid://cnxm6kno1kh3w" path="res://scripts/SpinnerSpawn.gd" id="22_28y6b"]
+[ext_resource type="Script" uid="uid://dgfmk8c0mn1uj" path="res://scripts/SecretWallSpawn.gd" id="22_ha57c"]
 [ext_resource type="Resource" uid="uid://bcwekrkc5e52" path="res://assets/decorations/torch01.tres" id="22_obsjo"]
 [ext_resource type="Resource" uid="uid://d2xgveel38bwc" path="res://assets/objects/traps/spinner.tres" id="23_213mq"]
 [ext_resource type="Texture2D" uid="uid://b0mt2xvmng0ww" path="res://assets/textures/biomes/forest/walls/forest_wall_02_big_tree.jpg" id="23_evnw4"]
@@ -105,6 +106,14 @@ room_chance = 0.379
 room_max_per_room = 2
 metadata/_custom_type_script = "uid://bqw57pqm6wjbx"
 
+[sub_resource type="Resource" id="Resource_48wqn"]
+script = ExtResource("22_ha57c")
+count_min = 2
+count_max = 2
+gate_mode = 2
+min_distance_to_other_object = 4
+metadata/_custom_type_script = "uid://dgfmk8c0mn1uj"
+
 [sub_resource type="Resource" id="Resource_ha57c"]
 script = ExtResource("22_28y6b")
 spinner = ExtResource("23_213mq")
@@ -159,6 +168,8 @@ fog_density = 0.2
 ambient_color = Color(0.85430586, 0.82665706, 0.76737565, 1)
 ambient_energy = 1.8
 triplanar_sharpness = 0.2
+grid_width = 21
+grid_height = 21
 floor_loot = Array[ExtResource("4_458bs")]([SubResource("Resource_ve4a7")])
 floor_items_min = 8
 floor_items_max = 12
@@ -169,4 +180,5 @@ trap_spawns = Array[ExtResource("20_obsjo")]([SubResource("Resource_1qwx2")])
 projectile_trap_spawns = Array[ExtResource("19_1qwx2")]([SubResource("Resource_213mq")])
 spinner_spawns = Array[ExtResource("22_28y6b")]([SubResource("Resource_ha57c")])
 wall_decorations = Array[ExtResource("21_evnw4")]([SubResource("Resource_3vyya")])
+secret_wall_spawns = Array[ExtResource("22_ha57c")]([SubResource("Resource_48wqn")])
 move_sounds = Array[AudioStream]([ExtResource("7_sstbg"), ExtResource("8_0wobd"), ExtResource("9_nhtug")])
