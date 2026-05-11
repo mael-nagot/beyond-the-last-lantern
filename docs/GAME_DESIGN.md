@@ -222,7 +222,7 @@ Objects attached to walls, rendered as sprites on the wall face.
 | Switch/Lever | Activates doors, bridges, reveals secrets |
 | Door | Blocks passage until opened (key, switch, or spell) |
 | Torch/Lantern | Light source, affects Shadow enemies |
-| Secret wall | Looks like a normal corridor wall; the player can walk through it freely. The map hints "S" between the two cells. Placement requires the wall to gate content (chest/lever/key/exit, or — in LOOT_ONLY mode — chest or floor item only). |
+| Secret wall | Looks like a normal corridor wall; the player can walk through it freely. The map draws the wall line at reduced opacity — observant players notice the lighter line and try walking through. Placement requires the wall to gate content (chest/lever/key/exit, or — in LOOT_ONLY mode — chest or floor item only). |
 
 ### Underwater / Special Biome Mechanics
 
