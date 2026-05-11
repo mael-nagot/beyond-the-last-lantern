@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="SpinnerData" format=3 uid="uid://d2xgveel38bwc"]
+
+[ext_resource type="Texture2D" uid="uid://w86h2t6ep6wa" path="res://assets/textures/objects/traps/spinner.png" id="1_cobqh"]
+[ext_resource type="Script" uid="uid://ceunvfqs3y5as" path="res://scripts/SpinnerData.gd" id="1_gdr2x"]
+[ext_resource type="AudioStream" uid="uid://bdt0c568hejta" path="res://assets/sounds/objects/traps/spinner.ogg" id="3_4icm2"]
+
+[resource]
+script = ExtResource("1_gdr2x")
+min_spins = 2
+max_spins = 4
+decal_sprite = ExtResource("1_cobqh")
+spin_sound = ExtResource("3_4icm2")
+metadata/_custom_type_script = "uid://ceunvfqs3y5as"

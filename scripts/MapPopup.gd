@@ -13,6 +13,12 @@ extends Control
 # Inspector to validate Subtask C placement (corridor coverage,
 # escape distance, fire direction toward junctions).
 @export var debug_show_projectile_traps: bool = true
+# When true, draws a small purple swirl on every explored spinner
+# cell. Mirrors `debug_show_traps` — used to validate Phase 8 Task 8
+# spinner placement (corridor coverage, room density, exclusivity vs
+# other floor hazards). Off in shipping so the spinner glyph doesn't
+# leak hazard info before the player encounters one.
+@export var debug_show_spinners: bool = true
 
 var map_data: MapData
 var generator: LevelGenerator
@@ -231,6 +237,13 @@ func _on_map_draw() -> void:
 			if debug_show_traps and cell.trap != null:
 				_draw_trap_marker(rect_pos, rect_size, cell_size, cell.trap)
 
+			# Draw spinner marker (debug only — same convention as
+			# trap / projectile-trap markers). Small purple swirl
+			# whose sweep direction reflects the spinner's resolved
+			# CW/CCW direction.
+			if debug_show_spinners and cell.spinner != null:
+				_draw_spinner_marker(rect_pos, cell_size, cell.spinner)
+
 			# Draw exit — diamond shape
 			if cell.cell_type == GridCell.CellType.EXIT:
 				var center = rect_pos + rect_size * 0.5
@@ -414,6 +427,36 @@ func _draw_projectile_trap_marker(rect_pos: Vector2, cell_size: float, ptrap: Pr
 	var lw: float = max(cell_size * 0.06, 1.0)
 	for i in range(3):
 		map_draw.draw_line(poly[i], poly[(i + 1) % 3], border, lw)
+
+func _draw_spinner_marker(rect_pos: Vector2, cell_size: float, spinner: SpinnerInstance) -> void:
+	# Phase 8 Task 8. Open-arc "swirl" glyph centred on the cell.
+	# Always drawn on explored cells (NOT debug-only) — spinners are
+	# meant to be readable from the map so players can plan around
+	# them. Purple tint to keep it distinct from trap red/orange,
+	# launcher cyan, door brown, and the player arrow.
+	#
+	# The arc's sweep direction follows the instance's resolved
+	# direction so a CW spinner reads as a CW swirl on the map.
+	# Godot draws angles in screen-space (Y down) — a positive
+	# delta from start to end therefore sweeps clockwise visually.
+	var center: Vector2 = rect_pos + Vector2(cell_size * 0.5, cell_size * 0.5)
+	var radius: float = cell_size * 0.30
+	var color := Color(0.55, 0.25, 0.75)
+	var line_width: float = max(cell_size * 0.10, 1.5)
+	# Start at the right-side (3 o'clock-ish), open the swirl with a
+	# 270° sweep. CW: positive delta. CCW: negative delta.
+	var start_angle: float = -PI * 0.25
+	var end_angle: float
+	if spinner.is_clockwise():
+		end_angle = start_angle + PI * 1.5
+	else:
+		end_angle = start_angle - PI * 1.5
+	map_draw.draw_arc(center, radius, start_angle, end_angle, 24, color, line_width)
+	# Small filled tip at the end of the arc — gives the swirl a
+	# sense of direction and reads as a comma / spiral tail.
+	var tip_radius: float = max(cell_size * 0.07, 1.5)
+	var tip_center: Vector2 = center + Vector2(cos(end_angle), sin(end_angle)) * radius
+	map_draw.draw_circle(tip_center, tip_radius, color)
 
 func _draw_projectile_plate_marker(rect_pos: Vector2, cell_size: float) -> void:
 	# Phase 8 Task 3 — Subtask C4. Small filled square in the plate

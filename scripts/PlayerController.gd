@@ -63,15 +63,17 @@ func strafe_left() -> void:
 func strafe_right() -> void:
 	_step(DIR_VECTORS[_turn_right(facing)])
 
-func turn_left() -> void:
+func turn_left(play_sound: bool = true) -> void:
 	facing = _turn_left(facing)
 	_view.rotate_camera_to(false, DIR_VECTORS[facing])
-	SoundManager.play_turn()
+	if play_sound:
+		SoundManager.play_turn()
 
-func turn_right() -> void:
+func turn_right(play_sound: bool = true) -> void:
 	facing = _turn_right(facing)
 	_view.rotate_camera_to(true, DIR_VECTORS[facing])
-	SoundManager.play_turn()
+	if play_sound:
+		SoundManager.play_turn()
 
 func _step(delta: Vector2i) -> void:
 	var target = grid_pos + delta

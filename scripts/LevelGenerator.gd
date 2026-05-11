@@ -22,6 +22,7 @@ var linked_objects_pool: Array[LinkedObjectSpawn] = []
 var key_door_spawns_pool: Array[KeyDoorSpawn] = []
 var trap_spawns_pool: Array[TrapSpawn] = []
 var projectile_trap_spawns_pool: Array[ProjectileTrapSpawn] = []
+var spinner_spawns_pool: Array[SpinnerSpawn] = []
 var wall_decorations_pool: Array[WallDecorationSpawn] = []
 
 var grid: Array = []
@@ -77,6 +78,17 @@ var projectiles: Array[ProjectileInstance] = []
 # land the player in dual line of fire when they try to escape.
 var _projectile_path_cells: Dictionary = {}
 
+# Spinners live on cells (`GridCell.spinner`) — flat list mirrors the
+# grid slots so the renderer + Game-tick can iterate without a per-
+# frame grid scan (Phase 8 Task 8). Placement enforces mutual exclusion
+# vs traps, objects (chest / lever), projectile-trap plate cells, and
+# floor items.
+var spinners: Array[SpinnerInstance] = []
+# Subset of spinner cells produced by the corridor-cluster pass —
+# scattered placements use this to avoid being 4-adjacent to a cluster
+# (mirrors `_cluster_cells` for traps).
+var _spinner_cluster_cells: Dictionary = {}
+
 func configure(biome: BiomeData) -> void:
 	if biome == null:
 		push_error("LevelGenerator: biome is null, using defaults")
@@ -102,6 +114,7 @@ func configure(biome: BiomeData) -> void:
 	key_door_spawns_pool = biome.key_door_spawns
 	trap_spawns_pool = biome.trap_spawns
 	projectile_trap_spawns_pool = biome.projectile_trap_spawns
+	spinner_spawns_pool = biome.spinner_spawns
 	wall_decorations_pool = biome.wall_decorations
 
 func generate() -> void:
@@ -115,6 +128,8 @@ func generate() -> void:
 	projectile_traps.clear()
 	projectiles.clear()
 	_projectile_path_cells.clear()
+	spinners.clear()
+	_spinner_cluster_cells.clear()
 	if room_count > 0:
 		_place_rooms()
 	_grow_maze()
@@ -134,6 +149,7 @@ func generate() -> void:
 	_place_items()
 	_validate_step_trap_reachability()
 	_place_projectile_traps()
+	_place_spinners()
 	_place_wall_decorations()
 
 # -------------------------------------------------------
@@ -2832,3 +2848,311 @@ func get_cell(x: int, y: int) -> GridCell:
 	if _in_bounds(x, y):
 		return grid[x][y]
 	return null
+
+# -------------------------------------------------------
+# Spinners (Phase 8 Task 8)
+# -------------------------------------------------------
+#
+# Spinners run LAST among floor passes (after spike traps, items, and
+# projectile traps) so the placer knows every "this cell already has
+# something on it" exclusion: chests / levers (`cell.object`), spike
+# traps (`cell.trap`), floor items (`cell.items`), and projectile-trap
+# pressure plates (collected once at pass start from
+# `projectile_traps`). The placer mirrors `_place_traps` — three
+# additive modes per spawn (corridor cluster, room density, scattered)
+# all reusing the same exclusion set.
+
+func _place_spinners() -> void:
+	if spinner_spawns_pool.is_empty():
+		return
+	# Topology hasn't changed since `_place_traps` ran. Re-detect here
+	# rather than caching across passes — cheap on a 31×31 grid and
+	# avoids subtle drift if a future pass ever mutates corridor cells.
+	var segments: Array = _detect_corridor_segments()
+	# Pressure plates live on `ProjectileTrapInstance.plate_cell` and
+	# were assigned by `_place_projectile_traps()` immediately before
+	# this pass. Collect once into a Dictionary[Vector2i -> true] for
+	# O(1) exclusion lookup inside the candidate filters.
+	var plate_cells: Dictionary = _gather_plate_cells()
+	# Build the per-classification candidate pool with all exclusions
+	# applied up-front. Same structure as `_classify_floor_cells` but
+	# additionally filters out spinner cells, floor-item cells, and
+	# plate cells — those are the late additions the existing helper
+	# doesn't know about.
+	var cells_by_type := _classify_spinner_candidate_cells(plate_cells)
+	for spawn in spinner_spawns_pool:
+		if spawn == null or spawn.spinner == null:
+			continue
+		if spawn.uses_corridor_clusters() and spawn.allows(ObjectSpawn.PLACEMENT_CORRIDOR):
+			_place_corridor_spinners(spawn, segments, cells_by_type)
+		if spawn.uses_room_density() and spawn.allows(ObjectSpawn.PLACEMENT_ROOM):
+			_place_room_spinners(spawn, cells_by_type)
+		var count := randi_range(max(0, spawn.count_min), max(spawn.count_min, spawn.count_max))
+		for _i in range(count):
+			_try_place_spinner(spawn, cells_by_type)
+
+# Builds the per-classification candidate pool used by all three
+# spinner passes. Mirrors `_classify_floor_cells` but applies the
+# spinner-specific exclusions: chest / lever (cell.object), spike trap
+# (cell.trap), floor item (cell.items), and projectile-trap plate
+# cells (passed in). Entrance / exit are excluded too — the player
+# shouldn't be spun on the level boundaries where their bearings
+# matter most.
+func _classify_spinner_candidate_cells(plate_cells: Dictionary) -> Dictionary:
+	var result := {
+		ObjectSpawn.PLACEMENT_CORRIDOR: [],
+		ObjectSpawn.PLACEMENT_ROOM:     [],
+		ObjectSpawn.PLACEMENT_DEAD_END: [],
+	}
+	for x in range(1, grid_width - 1):
+		for y in range(1, grid_height - 1):
+			var cell: GridCell = grid[x][y]
+			if cell.cell_type != GridCell.CellType.FLOOR:
+				continue
+			var pos := Vector2i(x, y)
+			if pos == entrance_pos or pos == exit_pos:
+				continue
+			# Mutual-exclusion checks — kept here (not in is_blocked)
+			# so non-blocking objects like levers still register as
+			# "occupied" for spinner purposes.
+			if cell.object != null:
+				continue
+			if cell.trap != null:
+				continue
+			if cell.spinner != null:
+				continue
+			if not cell.items.is_empty():
+				continue
+			if plate_cells.has(pos):
+				continue
+			if _is_dead_end(pos):
+				result[ObjectSpawn.PLACEMENT_DEAD_END].append(pos)
+			elif _is_in_room(pos):
+				result[ObjectSpawn.PLACEMENT_ROOM].append(pos)
+			else:
+				result[ObjectSpawn.PLACEMENT_CORRIDOR].append(pos)
+	return result
+
+# Collects every projectile-trap plate cell into a Dictionary for
+# O(1) lookup during candidate filtering. NO_PLATE sentinel is
+# filtered out (TIMED launchers have no plate).
+func _gather_plate_cells() -> Dictionary:
+	var result: Dictionary = {}
+	for ptrap in projectile_traps:
+		if ptrap == null:
+			continue
+		if not ptrap.has_plate():
+			continue
+		result[ptrap.plate_cell] = true
+	return result
+
+func _place_corridor_spinners(spawn: SpinnerSpawn, segments: Array, cells_by_type: Dictionary) -> void:
+	# One spawn per segment — same identity rule clusters use for
+	# traps. Adjacent-junction segments aren't dis-allowed for spinners
+	# the way they are for traps: a player crossing a junction between
+	# two spinner clusters gets spun in each, which is fine (and
+	# arguably the disorientation peak). Skip only the direct-overlap
+	# case so two clusters from the same biome don't carpet a single
+	# segment.
+	for segment in segments:
+		if _segment_has_spinner(segment):
+			continue
+		if randf() >= spawn.corridor_segment_chance:
+			continue
+		var eligible: Array = _eligible_spinner_segment_cells(segment)
+		var min_n: int = max(1, spawn.corridor_spinners_per_run_min)
+		if eligible.size() < min_n:
+			continue
+		var max_n: int = max(min_n, spawn.corridor_spinners_per_run_max)
+		max_n = min(max_n, eligible.size())
+		var target_n: int = randi_range(min_n, max_n)
+		var run: Array = _gather_run_in_segment(eligible, target_n)
+		for pos in run:
+			_commit_spinner_at(spawn, pos, cells_by_type)
+			_spinner_cluster_cells[pos] = true
+
+func _place_room_spinners(spawn: SpinnerSpawn, cells_by_type: Dictionary) -> void:
+	for room_obj in _room_rects:
+		var room: Rect2i = room_obj as Rect2i
+		if randf() >= spawn.room_chance:
+			continue
+		if not spawn.allow_mixed_room_spinners and _room_has_any_spinner(room):
+			continue
+		var room_cells: Array = _eligible_spinner_room_cells(room)
+		if room_cells.is_empty():
+			continue
+		var coverage_min: float = clamp(spawn.room_coverage_min_percent, 0.0, 100.0)
+		var coverage_max: float = clamp(spawn.room_coverage_max_percent, coverage_min, 100.0)
+		var coverage_pct: float = randf_range(coverage_min, coverage_max) / 100.0
+		var target_count: int = max(1, int(ceil(room_cells.size() * coverage_pct)))
+		room_cells.shuffle()
+		var placed_count: int = 0
+		for pos in room_cells:
+			if placed_count >= target_count:
+				break
+			if _too_close_to_room_spinners(pos, room, spawn.room_min_spacing):
+				continue
+			_commit_spinner_at(spawn, pos, cells_by_type)
+			placed_count += 1
+
+func _try_place_spinner(spawn: SpinnerSpawn, cells_by_type: Dictionary) -> void:
+	var base_candidates := _spinner_candidates_for_spawn(spawn, cells_by_type)
+	if base_candidates.is_empty():
+		return
+	var distance: int = max(0, spawn.min_distance_to_other_spinner)
+	while distance >= 0:
+		var candidates: Array = base_candidates
+		if distance > 0:
+			candidates = base_candidates.filter(
+				func(p): return not _too_close_to_existing_spinner(p, distance)
+			)
+		if not candidates.is_empty():
+			var pos: Vector2i = candidates[randi() % candidates.size()]
+			_commit_spinner_at(spawn, pos, cells_by_type)
+			return
+		distance -= 1
+
+# Materialises a SpinnerInstance for `spawn` at `pos`. Rolls the
+# instance's fixed direction + rotation count from the spawn's
+# SpinnerData range using the seeded RNG, stores it on the cell + flat
+# list, and removes the cell from the candidate pool so the next pass
+# (or the next spawn iteration) won't re-pick it.
+func _commit_spinner_at(spawn: SpinnerSpawn, pos: Vector2i, cells_by_type: Dictionary) -> void:
+	var data: SpinnerData = spawn.spinner
+	var rotations: int = randi_range(max(1, data.min_spins), max(data.min_spins, data.max_spins))
+	var dir: int = _roll_spinner_direction(data.direction)
+	var inst := SpinnerInstance.create(data, pos, dir, rotations)
+	grid[pos.x][pos.y].spinner = inst
+	spinners.append(inst)
+	cells_by_type[classify_cell(pos)].erase(pos)
+
+# Collapses SpinnerData.Direction.RANDOM to a concrete CLOCKWISE or
+# COUNTER_CLOCKWISE via the seeded RNG. CLOCKWISE / COUNTER_CLOCKWISE
+# pass through unchanged.
+func _roll_spinner_direction(policy: int) -> int:
+	if policy == SpinnerData.Direction.CLOCKWISE:
+		return SpinnerInstance.Direction.CLOCKWISE
+	if policy == SpinnerData.Direction.COUNTER_CLOCKWISE:
+		return SpinnerInstance.Direction.COUNTER_CLOCKWISE
+	# RANDOM (or unknown — defensive). 50/50 split.
+	if randi() % 2 == 0:
+		return SpinnerInstance.Direction.CLOCKWISE
+	return SpinnerInstance.Direction.COUNTER_CLOCKWISE
+
+func _spinner_candidates_for_spawn(spawn: SpinnerSpawn, cells_by_type: Dictionary) -> Array:
+	var result: Array = []
+	for placement_bit in [ObjectSpawn.PLACEMENT_CORRIDOR, ObjectSpawn.PLACEMENT_ROOM, ObjectSpawn.PLACEMENT_DEAD_END]:
+		if not spawn.allows(placement_bit):
+			continue
+		for pos in cells_by_type[placement_bit]:
+			# cells_by_type was filtered when built — but the in-flight
+			# additions from this same pass (spinners just placed in
+			# corridor / room sub-passes) are erased from it via
+			# `_commit_spinner_at`, so this is enough.
+			if _is_adjacent_to_spinner_cluster(pos):
+				continue
+			result.append(pos)
+	return result
+
+func _is_adjacent_to_spinner_cluster(pos: Vector2i) -> bool:
+	if _spinner_cluster_cells.is_empty():
+		return false
+	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+		if _spinner_cluster_cells.has(pos + d):
+			return true
+	return false
+
+func _too_close_to_existing_spinner(pos: Vector2i, min_distance: int) -> bool:
+	if min_distance <= 0:
+		return false
+	for inst in spinners:
+		if inst == null:
+			continue
+		var d: int = abs(pos.x - inst.cell.x) + abs(pos.y - inst.cell.y)
+		if d < min_distance:
+			return true
+	return false
+
+func _segment_has_spinner(segment: Array) -> bool:
+	for pos in segment:
+		if grid[pos.x][pos.y].spinner != null:
+			return true
+	return false
+
+func _eligible_spinner_segment_cells(segment: Array) -> Array:
+	var result: Array = []
+	for pos in segment:
+		var cell: GridCell = grid[pos.x][pos.y]
+		if pos == entrance_pos or pos == exit_pos:
+			continue
+		if cell.object != null:
+			continue
+		if cell.trap != null:
+			continue
+		if cell.spinner != null:
+			continue
+		if not cell.items.is_empty():
+			continue
+		if _cell_holds_plate(pos):
+			continue
+		result.append(pos)
+	return result
+
+func _eligible_spinner_room_cells(room: Rect2i) -> Array:
+	var result: Array = []
+	for x in range(room.position.x, room.position.x + room.size.x):
+		for y in range(room.position.y, room.position.y + room.size.y):
+			if not _in_bounds(x, y):
+				continue
+			var cell: GridCell = grid[x][y]
+			if cell.cell_type != GridCell.CellType.FLOOR:
+				continue
+			var pos := Vector2i(x, y)
+			if pos == entrance_pos or pos == exit_pos:
+				continue
+			if cell.object != null:
+				continue
+			if cell.trap != null:
+				continue
+			if cell.spinner != null:
+				continue
+			if not cell.items.is_empty():
+				continue
+			if _cell_holds_plate(pos):
+				continue
+			result.append(pos)
+	return result
+
+func _room_has_any_spinner(room: Rect2i) -> bool:
+	for inst in spinners:
+		if inst == null:
+			continue
+		if room.has_point(inst.cell):
+			return true
+	return false
+
+func _too_close_to_room_spinners(pos: Vector2i, room: Rect2i, min_spacing: int) -> bool:
+	if min_spacing <= 0:
+		return false
+	for inst in spinners:
+		if inst == null:
+			continue
+		if not room.has_point(inst.cell):
+			continue
+		var d: int = abs(pos.x - inst.cell.x) + abs(pos.y - inst.cell.y)
+		if d < min_spacing:
+			return true
+	return false
+
+# Linear scan (small N — projectile traps cap is biome-bounded). The
+# segment / room eligibility passes call this once per candidate cell,
+# so an O(P) scan per check is bounded by O(cells × P).
+func _cell_holds_plate(pos: Vector2i) -> bool:
+	for ptrap in projectile_traps:
+		if ptrap == null:
+			continue
+		if not ptrap.has_plate():
+			continue
+		if ptrap.plate_cell == pos:
+			return true
+	return false

@@ -95,6 +95,14 @@ extends Resource
 # not floor cells.
 @export var projectile_trap_spawns: Array[ProjectileTrapSpawn] = []
 
+# Spinners (Phase 8 Task 8). Floor tiles that rotate the player a
+# fixed number of 90° turns in a fixed direction when stepped on,
+# disorienting them. Placed AFTER projectile traps (so plate cells
+# are known and excluded) and BEFORE wall decorations. Each entry
+# can drive scattered + corridor-cluster + room-density placement
+# the same way `trap_spawns` does.
+@export var spinner_spawns: Array[SpinnerSpawn] = []
+
 # Wall-mounted decorations (paintings, torches, lanterns). Placed
 # LAST among scenery — they don't gate or interact with anything,
 # they just dress wall faces. Each entry attaches its decoration to

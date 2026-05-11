@@ -79,6 +79,17 @@ var _plate_triggered_state: Dictionary = {}
 # decal is permanent and not tracked here — only the spike root
 # toggles per state change.
 var _trap_visuals: Dictionary = {}
+
+# Phase 8 Task 8 — spinner rendering. Each spinner gets a `Node3D`
+# root parented to `_spinners_root`, with a flat decal `MeshInstance3D`
+# as its child. The dict stores the ROOT (whose Y rotation is animated
+# per frame) — not the decal mesh — so the visual rotation reads as
+# a clean spin around the world Y axis instead of entangling with the
+# decal's -90° X tilt. `_process` advances rotation directly each
+# frame (cheaper than a looping tween, and naturally pauses with the
+# SceneTree).
+var _spinners_root: Node3D
+var _spinner_visuals: Dictionary = {}  # SpinnerInstance -> Node3D root
 # Decorations using face_camera mode — DungeonView's `_process` rotates
 # each one each frame to face the camera, with a designer-configured
 # X-axis tilt so the top leans toward the player.
@@ -119,6 +130,7 @@ func setup(gen: LevelGenerator) -> void:
 	_ensure_traps_root()
 	_ensure_projectile_traps_root()
 	_ensure_projectiles_root()
+	_ensure_spinners_root()
 	_ensure_drop_target()
 	_build_mesh()
 	_build_objects()
@@ -127,6 +139,7 @@ func setup(gen: LevelGenerator) -> void:
 	_build_traps()
 	_build_projectile_traps()
 	_clear_projectile_visuals()
+	_build_spinners()
 	_build_wall_decorations()
 	_place_camera_at_entrance()
 	_apply_biome_environment()
@@ -181,6 +194,13 @@ func _ensure_projectiles_root() -> void:
 	_projectiles_root = Node3D.new()
 	_projectiles_root.name = "ProjectilesRoot"
 	sub_viewport.add_child(_projectiles_root)
+
+func _ensure_spinners_root() -> void:
+	if _spinners_root != null and is_instance_valid(_spinners_root):
+		return
+	_spinners_root = Node3D.new()
+	_spinners_root.name = "SpinnersRoot"
+	sub_viewport.add_child(_spinners_root)
 
 # Frees every active projectile sprite and resets the lookup dict.
 # Called from `setup()` so a level transition doesn't leak in-flight
@@ -798,6 +818,87 @@ func _build_trap_floor_material(albedo: Texture2D) -> StandardMaterial3D:
 	_trap_floor_material_cache[albedo] = mat
 	return mat
 
+# -------------------------------------------------------
+# Spinners (Phase 8 Task 8)
+# -------------------------------------------------------
+#
+# Each spinner renders as a single flat `MeshInstance3D` quad lying
+# horizontal on the floor (Y = data.y_offset, default 0.01 to dodge
+# Z-fighting with the floor plane), textured with `data.decal_sprite`
+# through the same alpha-scissor material cache spike traps use.
+#
+# The decal continuously rotates around its Y axis at
+# `data.visual_rotation_degrees_per_second` so the spinner is
+# self-advertising — players learn to read "swirling tile = spin
+# hazard". Rotation is advanced per frame in `_update_spinner_rotations`
+# so it pauses automatically when the SceneTree pauses (map popup,
+# etc.) — a looped tween would NOT pause cleanly in that case.
+
+func _build_spinners() -> void:
+	for child in _spinners_root.get_children():
+		child.queue_free()
+	_spinner_visuals.clear()
+	if generator == null:
+		return
+	for spinner in generator.spinners:
+		if spinner == null or spinner.data == null:
+			continue
+		var decal := _make_spinner_decal(spinner)
+		if decal == null:
+			continue
+		_spinners_root.add_child(decal)
+		_spinner_visuals[spinner] = decal
+
+func rebuild_spinners() -> void:
+	if _spinners_root == null:
+		return
+	_build_spinners()
+
+# Builds a Node3D root parked at the spinner cell with the flat decal
+# as a child. Per-frame rotation animates the ROOT's Y so the world
+# Y-axis rotation is unambiguous — rotating the decal mesh directly
+# would entangle with its -90° X tilt and read as a tilt-wobble.
+# Returns null when the spinner has no decal_sprite (a valid
+# "invisible" configuration: the player only feels the spin).
+func _make_spinner_decal(spinner: SpinnerInstance) -> Node3D:
+	var data: SpinnerData = spinner.data
+	if data.decal_sprite == null:
+		return null
+	var root := Node3D.new()
+	var cx: float = spinner.cell.x * CELL_SIZE + CELL_SIZE * 0.5
+	var cz: float = spinner.cell.y * CELL_SIZE + CELL_SIZE * 0.5
+	root.position = Vector3(cx, data.y_offset, cz)
+	var mesh := MeshInstance3D.new()
+	var quad := QuadMesh.new()
+	var s: float = max(0.01, data.decal_world_size) * CELL_SIZE
+	quad.size = Vector2(s, s)
+	mesh.mesh = quad
+	mesh.material_override = _build_trap_floor_material(data.decal_sprite)
+	# Decal authored on the XY plane — lay it flat onto XZ.
+	mesh.rotation = Vector3(-PI * 0.5, 0.0, 0.0)
+	root.add_child(mesh)
+	return root
+
+# Advances each spinner root's Y rotation by
+# `data.visual_rotation_degrees_per_second × delta`. Direction sign
+# matches the instance's resolved direction so a clockwise spinner
+# decal visually spins clockwise when viewed from above (Godot's
+# right-hand convention: looking down -Y, positive Y rotation is
+# counter-clockwise — hence the negation for CLOCKWISE).
+func _update_spinner_rotations(delta: float) -> void:
+	if _spinner_visuals.is_empty():
+		return
+	for spinner in _spinner_visuals.keys():
+		var root: Node3D = _spinner_visuals[spinner]
+		if not is_instance_valid(root) or spinner == null or spinner.data == null:
+			continue
+		var rate: float = spinner.data.visual_rotation_degrees_per_second
+		if rate == 0.0:
+			continue
+		var dir_sign: float = -1.0 if spinner.is_clockwise() else 1.0
+		var step: float = deg_to_rad(rate * dir_sign) * delta
+		root.rotation.y = fmod(root.rotation.y + step, TAU)
+
 func _build_wall_decorations() -> void:
 	_billboard_decorations.clear()
 	_flickering_lights.clear()
@@ -812,9 +913,10 @@ func _build_wall_decorations() -> void:
 		if node != null:
 			_decorations_root.add_child(node)
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	_update_billboard_decorations()
 	_update_flickering_lights()
+	_update_spinner_rotations(delta)
 
 func _update_billboard_decorations() -> void:
 	# Per-frame Y-billboard with X-tilt for face_camera decorations.

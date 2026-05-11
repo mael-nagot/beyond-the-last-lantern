@@ -19,6 +19,25 @@ const _DAMAGE_SHAKE_MAGNITUDE: float = 0.7
 # trap effect still resolves for the cell that was actually entered.
 const _TRAP_ACTIVATION_DELAY: float = 0.13
 
+# Phase 8 Task 8 — spinner state.
+#
+# `_spinner_spinning` gates every movement / interaction handler so
+# the player can't queue another move (or pick up an item, click a
+# chest, etc.) while a chained-rotation animation is mid-way through.
+# Folded into `_is_world_paused()` so the existing pause checks in
+# `_on_move` / `_input` honour it without duplication.
+#
+# `_spinner_just_triggered_cell` is the "armed" guard for re-entry:
+# once a spinner fires for the player on cell X, this is set to X and
+# subsequent re-checks of the same cell are no-ops. The next
+# `_on_player_entered_cell` for a DIFFERENT cell clears it, so
+# stepping off-and-back-on rearms naturally. Stepping back onto a
+# different spinner (immediately) still fires correctly. Sentinel
+# Vector2i(-1, -1) means "no spinner currently latched".
+var _spinner_spinning: bool = false
+const _SPINNER_NO_CELL := Vector2i(-1, -1)
+var _spinner_just_triggered_cell: Vector2i = _SPINNER_NO_CELL
+
 func _ready() -> void:
 	var dungeon_view      = $DungeonView
 	var player_controller = $DungeonView/PlayerController
@@ -410,7 +429,12 @@ func _is_world_paused() -> bool:
 	# HUD's pause-source registry. Game.gd doesn't need to know
 	# WHICH popup paused — only whether gameplay input should be
 	# routed through.
-	return get_tree() != null and get_tree().paused
+	if get_tree() != null and get_tree().paused:
+		return true
+	# Spinner spins also gate input — they're internal (no SceneTree
+	# pause) so they don't fight the existing pause-source registry,
+	# but they need the same "drop player input" behaviour.
+	return _spinner_spinning
 
 func _update_map() -> void:
 	if _hud and _player_controller:
@@ -571,6 +595,13 @@ func _on_player_entered_cell() -> void:
 	# await — same conservative behaviour as the spike-trap branch.
 	if _player_controller != null:
 		_check_pressure_plate_trigger(_player_controller.grid_pos)
+	# Spinner branch (Phase 8 Task 8). Last among the post-await
+	# entry handlers — runs even when the cell has no trap and no
+	# plate. The armed-cell guard prevents re-firing during a single
+	# stay; clearing it for cells that DON'T hold a spinner lets a
+	# player who steps off, then back onto a spinner rearm it.
+	if _player_controller != null:
+		_check_spinner_trigger(_player_controller.grid_pos)
 
 # Phase 8 Task 3 — Subtask C4. Scans every PRESSURE_PLATE launcher;
 # if its plate cell matches the player's current cell AND the launcher
@@ -619,6 +650,83 @@ func _check_pressure_plate_trigger(player_cell: Vector2i) -> void:
 			SoundManager.play(ptrap.data.plate_sound)
 		if ptrap.data.launch_sound != null:
 			SoundManager.play(ptrap.data.launch_sound)
+
+# Phase 8 Task 8 — Spinner trigger. Called from `_on_player_entered_cell`
+# after every other branch so spike-trap damage / plate firing always
+# resolve first (they shouldn't share a tile with a spinner anyway, but
+# the order keeps the contract clean if a future placement bug ever
+# slips through).
+#
+# Re-trigger guard: `_spinner_just_triggered_cell` records the cell of
+# the most recent spin so subsequent re-checks on the same cell (e.g.
+# the player presses a turn key while standing on the spinner) don't
+# re-fire. Stepping to ANY other cell clears the latch — the next
+# spinner step rearms naturally. This matches the "step fully off to
+# rearm" rule from the design spec.
+func _check_spinner_trigger(player_cell: Vector2i) -> void:
+	if _generator == null:
+		return
+	var pcell: GridCell = _generator.grid[player_cell.x][player_cell.y]
+	if pcell == null or pcell.spinner == null:
+		# Clear the latch when leaving the spinner cell so a step-off /
+		# step-back-on cycle re-triggers the spin.
+		_spinner_just_triggered_cell = _SPINNER_NO_CELL
+		return
+	if _spinner_just_triggered_cell == player_cell:
+		# Same cell as last trigger — still armed-down. The player
+		# turned voluntarily while standing on the spinner; don't
+		# re-fire.
+		return
+	# Latch BEFORE the await so a second step-onto-this-cell during
+	# the spin (impossible while paused, but belt-and-braces) reads
+	# as "already triggered".
+	_spinner_just_triggered_cell = player_cell
+	_trigger_spinner(pcell.spinner)
+
+# Drives the chained 90° rotations for one spinner activation. Sets
+# the input-lock flag, dispatches `rotations` turns to PlayerController
+# in the resolved direction (each turn awaits the `spin_step_duration`
+# so consecutive 0.12s tweens in DungeonView's `rotate_camera_to`
+# don't fight for `camera.rotation_degrees:y`), and clears the lock.
+#
+# Sound: per-90°-turn whoosh. Falls back to the global turn sound when
+# the spinner's `spin_sound` is empty so designers can opt out of
+# bespoke audio without going silent. The PlayerController turn is
+# called with `play_sound = false` so its own per-turn rustle doesn't
+# double up.
+func _trigger_spinner(spinner: SpinnerInstance) -> void:
+	if spinner == null or spinner.data == null:
+		return
+	if _player_controller == null:
+		return
+	_spinner_spinning = true
+	# Floor each step at the rotate tween's duration (0.12s) so the
+	# camera tween settles before the next call replaces it. Designers
+	# can speed spinners up by lowering `spin_step_duration` toward
+	# 0.12, but going below would visually fight the tween — clamp.
+	var step_dur: float = max(0.12, spinner.data.spin_step_duration)
+	var n: int = max(1, spinner.rotations)
+	var cw: bool = spinner.is_clockwise()
+	for _i in range(n):
+		if cw:
+			_player_controller.turn_right(false)
+		else:
+			_player_controller.turn_left(false)
+		var snd: AudioStream = spinner.data.spin_sound
+		if snd != null:
+			SoundManager.play(snd)
+		else:
+			SoundManager.play_turn()
+		# `process_always = false` so the timer pauses with the
+		# SceneTree — if the player opens the map mid-spin, the
+		# remaining steps wait for the resume. Matches what the
+		# rotate tween already does (it inherits process_mode).
+		await get_tree().create_timer(step_dur, false).timeout
+		if not is_instance_valid(self) or _generator == null:
+			# Level transition mid-spin — bail out, leaving the
+			# flag cleared via the defer below.
+			break
+	_spinner_spinning = false
 
 # Per-frame tick. Advances every trap's state machine and reacts to
 # observed transitions:

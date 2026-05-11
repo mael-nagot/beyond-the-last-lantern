@@ -74,3 +74,17 @@ func test_floor_with_trap_is_not_blocked() -> void:
 	var data := TrapData.new()
 	cell.trap = TrapInstance.create(data, Vector2i.ZERO)
 	assert_false(cell.is_blocked)
+
+func test_default_spinner_is_null() -> void:
+	var cell := GridCell.new()
+	assert_null(cell.spinner)
+
+func test_floor_with_spinner_is_not_blocked() -> void:
+	# Spinners don't block movement either — the player must walk
+	# onto the cell to trigger the rotation. is_blocked should ignore
+	# the spinner slot the same way it ignores the trap slot.
+	var cell := GridCell.new()
+	cell.cell_type = GridCell.CellType.FLOOR
+	var data := SpinnerData.new()
+	cell.spinner = SpinnerInstance.create(data, Vector2i.ZERO, SpinnerInstance.Direction.CLOCKWISE, 1)
+	assert_false(cell.is_blocked)

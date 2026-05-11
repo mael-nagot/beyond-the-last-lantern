@@ -3255,3 +3255,326 @@ func test_projectile_room_min_distance_keeps_launchers_apart() -> void:
 			var dist: int = abs(a.x - b.x) + abs(a.y - b.y)
 			assert_gte(dist, 5,
 				"launchers at %s and %s are %d apart (need >= 5)" % [a, b, dist])
+
+# -------------------------------------------------------
+# Spinner placement (Phase 8 Task 8)
+# -------------------------------------------------------
+
+func _make_spinner_data(min_spins: int = 1, max_spins: int = 3, direction: int = SpinnerData.Direction.RANDOM) -> SpinnerData:
+	var data := SpinnerData.new()
+	data.name_key = "test.spinner"
+	data.min_spins = min_spins
+	data.max_spins = max_spins
+	data.direction = direction
+	return data
+
+func _make_spinner_spawn(spinner: SpinnerData, count_min: int, count_max: int, placement: int = ObjectSpawn.PLACEMENT_ANY) -> SpinnerSpawn:
+	var spawn := SpinnerSpawn.new()
+	spawn.spinner = spinner
+	spawn.count_min = count_min
+	spawn.count_max = count_max
+	spawn.placement = placement
+	return spawn
+
+func _make_spinner_cluster_spawn(spinner: SpinnerData, chance: float, run_min: int, run_max: int) -> SpinnerSpawn:
+	# Cluster-only spawn: scattered count zeroed so all placements come
+	# from the corridor pass — keeps the assertions targeted.
+	var spawn := _make_spinner_spawn(spinner, 0, 0, ObjectSpawn.PLACEMENT_CORRIDOR)
+	spawn.corridor_segment_chance = chance
+	spawn.corridor_spinners_per_run_min = run_min
+	spawn.corridor_spinners_per_run_max = run_max
+	return spawn
+
+func _make_spinner_room_spawn(spinner: SpinnerData, chance: float, min_pct: float, max_pct: float, min_spacing: int = 0) -> SpinnerSpawn:
+	var spawn := _make_spinner_spawn(spinner, 0, 0, ObjectSpawn.PLACEMENT_ROOM)
+	spawn.room_chance = chance
+	spawn.room_coverage_min_percent = min_pct
+	spawn.room_coverage_max_percent = max_pct
+	spawn.room_min_spacing = min_spacing
+	return spawn
+
+func _all_spinner_cells(gen: LevelGenerator) -> Array:
+	var result: Array = []
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			if gen.grid[x][y].spinner != null:
+				result.append(Vector2i(x, y))
+	return result
+
+func test_no_spinners_placed_when_pool_is_empty() -> void:
+	var gen := _make_generator(_make_biome())
+	assert_eq(gen.spinners.size(), 0)
+	assert_eq(_all_spinner_cells(gen).size(), 0)
+
+func test_spinner_count_falls_within_min_max() -> void:
+	var biome := _make_biome()
+	biome.spinner_spawns = [_make_spinner_spawn(_make_spinner_data(), 3, 5)]
+	var gen := _make_generator(biome)
+	assert_between(gen.spinners.size(), 3, 5)
+
+func test_spinner_count_matches_authoritative_grid() -> void:
+	# `gen.spinners` (flat list) and `cell.spinner` (grid slot) must
+	# agree — drift would mean the renderer / trigger logic disagrees
+	# with the placer about what's where.
+	var biome := _make_biome()
+	biome.spinner_spawns = [_make_spinner_spawn(_make_spinner_data(), 4, 4)]
+	var gen := _make_generator(biome)
+	assert_eq(gen.spinners.size(), _all_spinner_cells(gen).size())
+	for inst in gen.spinners:
+		assert_eq(gen.grid[inst.cell.x][inst.cell.y].spinner, inst,
+			"spinner at %s in flat list must equal cell.spinner" % inst.cell)
+
+func test_spinners_never_spawn_on_entrance_or_exit() -> void:
+	var biome := _make_biome()
+	biome.spinner_spawns = [_make_spinner_spawn(_make_spinner_data(), 8, 8)]
+	var gen := _make_generator(biome)
+	assert_null(gen.grid[gen.entrance_pos.x][gen.entrance_pos.y].spinner)
+	assert_null(gen.grid[gen.exit_pos.x][gen.exit_pos.y].spinner)
+
+func test_spinners_only_appear_on_floor_cells() -> void:
+	var biome := _make_biome()
+	biome.spinner_spawns = [_make_spinner_spawn(_make_spinner_data(), 5, 5)]
+	var gen := _make_generator(biome)
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			var cell: GridCell = gen.grid[x][y]
+			if cell.cell_type == GridCell.CellType.WALL:
+				assert_null(cell.spinner,
+					"wall (%d,%d) should not hold a spinner" % [x, y])
+
+func test_corridor_only_spinners_only_spawn_in_corridors() -> void:
+	var biome := _make_biome()
+	biome.spinner_spawns = [_make_spinner_spawn(_make_spinner_data(), 5, 5, ObjectSpawn.PLACEMENT_CORRIDOR)]
+	var gen := _make_generator(biome)
+	for spinner in gen.spinners:
+		var classification: int = gen.classify_cell(spinner.cell)
+		assert_eq(classification, ObjectSpawn.PLACEMENT_CORRIDOR,
+			"spinner at %s should be on a corridor cell (got %d)" % [spinner.cell, classification])
+
+func test_spinners_never_share_cell_with_traps() -> void:
+	# User-spec exclusivity rule #1: no spinner on a trap cell.
+	var biome := _make_biome()
+	biome.trap_spawns = [_make_trap_spawn(_make_trap_data(), 6, 6, ObjectSpawn.PLACEMENT_ANY)]
+	biome.spinner_spawns = [_make_spinner_spawn(_make_spinner_data(), 6, 6, ObjectSpawn.PLACEMENT_ANY)]
+	var gen := _make_generator(biome)
+	for spinner in gen.spinners:
+		var cell: GridCell = gen.grid[spinner.cell.x][spinner.cell.y]
+		assert_null(cell.trap,
+			"spinner at %s shares cell with trap" % spinner.cell)
+
+func test_spinners_never_share_cell_with_chests() -> void:
+	# User-spec exclusivity rule #2: no spinner on a chest cell. Chest
+	# spawns reuse the generic `cell.object` slot.
+	var biome := _make_biome()
+	biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
+	biome.spinner_spawns = [_make_spinner_spawn(_make_spinner_data(), 8, 8, ObjectSpawn.PLACEMENT_ANY)]
+	var gen := _make_generator(biome)
+	for spinner in gen.spinners:
+		var cell: GridCell = gen.grid[spinner.cell.x][spinner.cell.y]
+		assert_null(cell.object,
+			"spinner at %s shares cell with object (chest)" % spinner.cell)
+
+func test_spinners_never_share_cell_with_floor_items() -> void:
+	# Picking up an item shouldn't trigger a spin — the placer treats
+	# items as an exclusion the same way traps do.
+	var item := _make_item()
+	var loot: Array[LootEntry] = [_make_loot_entry(item)]
+	var biome := _make_biome(loot, 8, 8)
+	biome.spinner_spawns = [_make_spinner_spawn(_make_spinner_data(), 6, 6)]
+	var gen := _make_generator(biome)
+	for spinner in gen.spinners:
+		var cell: GridCell = gen.grid[spinner.cell.x][spinner.cell.y]
+		assert_eq(cell.items.size(), 0,
+			"items must not pile on spinner cell %s" % spinner.cell)
+
+func test_spinners_never_share_cell_with_pressure_plates() -> void:
+	# User-spec exclusivity rule #4: no spinner on a pressure plate.
+	# Plate cells are placed by `_place_projectile_traps` before the
+	# spinner pass runs, so the placer can collect them and exclude.
+	var biome := _make_biome()
+	var ptrap_data := _make_projectile_trap_data(8, 0)
+	ptrap_data.trigger = ProjectileTrapData.Trigger.PRESSURE_PLATE
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(ptrap_data, 1.0)]
+	biome.spinner_spawns = [_make_spinner_spawn(_make_spinner_data(), 10, 10)]
+	var any_plate_seen: bool = false
+	# Iterate a few seeds because PRESSURE_PLATE placement isn't
+	# guaranteed on every seed depending on corridor topology.
+	for s in [12345, 99999, 55555, 42]:
+		var gen := _make_generator(biome, s)
+		for ptrap in gen.projectile_traps:
+			if not ptrap.has_plate():
+				continue
+			any_plate_seen = true
+			assert_null(gen.grid[ptrap.plate_cell.x][ptrap.plate_cell.y].spinner,
+				"plate at %s shares cell with spinner (seed %d)" % [ptrap.plate_cell, s])
+	# At least one of the four seeds should produce a plate; otherwise
+	# the assertion never runs and the test is meaningless.
+	assert_true(any_plate_seen,
+		"no PRESSURE_PLATE traps placed across 4 seeds — test setup too brittle to verify exclusivity")
+
+func test_spinner_instance_cell_matches_grid_position() -> void:
+	# `SpinnerInstance.cell` is used by the renderer to anchor the
+	# decal and by Game.gd's armed-cell guard — drift would land the
+	# visual on the wrong tile and break the re-trigger rule.
+	var biome := _make_biome()
+	biome.spinner_spawns = [_make_spinner_spawn(_make_spinner_data(), 4, 4)]
+	var gen := _make_generator(biome)
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			var inst: SpinnerInstance = gen.grid[x][y].spinner
+			if inst != null:
+				assert_eq(inst.cell, Vector2i(x, y))
+
+func test_spinner_instance_rotations_within_data_range() -> void:
+	# Each instance rolls its rotation count in [min_spins, max_spins]
+	# once at placement and locks it. The roll uses the seeded RNG so
+	# results are deterministic across runs.
+	var biome := _make_biome()
+	biome.spinner_spawns = [_make_spinner_spawn(_make_spinner_data(2, 5), 6, 6)]
+	var gen := _make_generator(biome)
+	for inst in gen.spinners:
+		assert_between(inst.rotations, 2, 5,
+			"spinner at %s rolled rotations=%d outside [2, 5]" % [inst.cell, inst.rotations])
+
+func test_spinner_instance_direction_is_concrete_when_data_is_random() -> void:
+	# RANDOM direction policy must collapse to CLOCKWISE or
+	# COUNTER_CLOCKWISE on every instance — never RANDOM itself
+	# (which is a SpinnerData enum value, not a SpinnerInstance one).
+	var biome := _make_biome()
+	biome.spinner_spawns = [_make_spinner_spawn(_make_spinner_data(1, 1, SpinnerData.Direction.RANDOM), 8, 8)]
+	var gen := _make_generator(biome)
+	for inst in gen.spinners:
+		assert_true(inst.direction == SpinnerInstance.Direction.CLOCKWISE or inst.direction == SpinnerInstance.Direction.COUNTER_CLOCKWISE,
+			"spinner at %s has non-concrete direction %d" % [inst.cell, inst.direction])
+
+func test_spinner_data_cw_policy_produces_cw_instances() -> void:
+	# CLOCKWISE policy on SpinnerData should ALWAYS produce CLOCKWISE
+	# instances (the RANDOM roll is only triggered by RANDOM policy).
+	var biome := _make_biome()
+	biome.spinner_spawns = [_make_spinner_spawn(_make_spinner_data(1, 1, SpinnerData.Direction.CLOCKWISE), 6, 6)]
+	var gen := _make_generator(biome)
+	for inst in gen.spinners:
+		assert_true(inst.is_clockwise(),
+			"CW policy should produce CW instance at %s (got direction %d)" % [inst.cell, inst.direction])
+
+func test_spinner_data_ccw_policy_produces_ccw_instances() -> void:
+	var biome := _make_biome()
+	biome.spinner_spawns = [_make_spinner_spawn(_make_spinner_data(1, 1, SpinnerData.Direction.COUNTER_CLOCKWISE), 6, 6)]
+	var gen := _make_generator(biome)
+	for inst in gen.spinners:
+		assert_false(inst.is_clockwise(),
+			"CCW policy should produce CCW instance at %s (got direction %d)" % [inst.cell, inst.direction])
+
+func test_min_distance_keeps_spinners_apart() -> void:
+	var biome := _make_biome()
+	var spawn := _make_spinner_spawn(_make_spinner_data(), 3, 3)
+	spawn.min_distance_to_other_spinner = 6
+	biome.spinner_spawns = [spawn]
+	var gen := _make_generator(biome)
+	var positions: Array = []
+	for spinner in gen.spinners:
+		positions.append(spinner.cell)
+	for i in range(positions.size()):
+		for j in range(i + 1, positions.size()):
+			var dist: int = abs(positions[i].x - positions[j].x) + abs(positions[i].y - positions[j].y)
+			assert_gte(dist, 6,
+				"spinners at %s and %s are %d apart (need >= 6)" % [positions[i], positions[j], dist])
+
+# --- Corridor cluster placement ---
+
+func test_corridor_cluster_chance_zero_produces_no_spinners() -> void:
+	var biome := _make_biome()
+	biome.spinner_spawns = [_make_spinner_cluster_spawn(_make_spinner_data(), 0.0, 2, 4)]
+	var gen := _make_generator(biome)
+	assert_eq(gen.spinners.size(), 0,
+		"corridor_segment_chance = 0 must produce no spinners (scattered also zero)")
+
+func test_corridor_cluster_lands_in_corridors() -> void:
+	# Use min=1 so even single-cell segments qualify — guarantees at
+	# least one placement on the 21×21 test biome regardless of how
+	# the maze generator carves segments under this seed.
+	var biome := _make_biome()
+	biome.spinner_spawns = [_make_spinner_cluster_spawn(_make_spinner_data(), 1.0, 1, 3)]
+	var gen := _make_generator(biome)
+	assert_gt(gen.spinners.size(), 0,
+		"chance=1.0 should produce at least one cluster placement (test vacuous if 0)")
+	for spinner in gen.spinners:
+		assert_eq(gen.classify_cell(spinner.cell), ObjectSpawn.PLACEMENT_CORRIDOR,
+			"corridor cluster placed non-corridor spinner at %s" % spinner.cell)
+
+# --- Room density placement ---
+
+func test_room_chance_zero_places_no_spinners() -> void:
+	var biome := _make_biome()
+	biome.spinner_spawns = [_make_spinner_room_spawn(_make_spinner_data(), 0.0, 30.0, 50.0)]
+	var gen := _make_generator(biome)
+	assert_eq(gen.spinners.size(), 0,
+		"room_chance = 0 must produce no spinners (scattered also zero)")
+
+func test_room_density_lands_in_rooms() -> void:
+	var biome := _make_biome()
+	biome.spinner_spawns = [_make_spinner_room_spawn(_make_spinner_data(), 1.0, 30.0, 50.0)]
+	var gen := _make_generator(biome)
+	# With room_chance=1.0 and 3 rooms, at least one spinner must land
+	# — guards against a vacuous pass where nothing's placed.
+	assert_gt(gen.spinners.size(), 0,
+		"room_chance=1.0 with 3 rooms should produce at least one spinner")
+	# Every placed spinner lands inside SOME room rect.
+	for spinner in gen.spinners:
+		var inside: bool = false
+		for room in gen._room_rects:
+			if (room as Rect2i).has_point(spinner.cell):
+				inside = true
+				break
+		assert_true(inside,
+			"room density placed spinner at %s outside any room rect" % spinner.cell)
+
+func test_room_min_spacing_honoured_within_a_room() -> void:
+	var biome := _make_biome()
+	# Big rooms + high coverage so spacing constraints actually bite.
+	biome.room_count = 2
+	biome.room_min_size = 4
+	biome.room_max_size = 5
+	biome.spinner_spawns = [_make_spinner_room_spawn(_make_spinner_data(), 1.0, 50.0, 80.0, 2)]
+	var gen := _make_generator(biome)
+	for room_obj in gen._room_rects:
+		var room: Rect2i = room_obj as Rect2i
+		var room_spinners: Array = []
+		for spinner in gen.spinners:
+			if room.has_point(spinner.cell):
+				room_spinners.append(spinner.cell)
+		for i in range(room_spinners.size()):
+			for j in range(i + 1, room_spinners.size()):
+				var d: int = abs(room_spinners[i].x - room_spinners[j].x) + abs(room_spinners[i].y - room_spinners[j].y)
+				assert_gte(d, 2,
+					"spinners at %s and %s in same room are %d apart (need >= 2)" % [room_spinners[i], room_spinners[j], d])
+
+func test_allow_mixed_room_spinners_false_blocks_second_spawn() -> void:
+	# Two spawns of mismatched directions; the second has
+	# allow_mixed_room_spinners=false so it must skip rooms already
+	# holding the first spawn's spinners.
+	var biome := _make_biome()
+	biome.room_count = 4
+	biome.room_min_size = 3
+	biome.room_max_size = 4
+	var spawn_a := _make_spinner_room_spawn(_make_spinner_data(1, 1, SpinnerData.Direction.CLOCKWISE), 1.0, 30.0, 50.0)
+	var spawn_b := _make_spinner_room_spawn(_make_spinner_data(1, 1, SpinnerData.Direction.COUNTER_CLOCKWISE), 1.0, 30.0, 50.0)
+	spawn_b.allow_mixed_room_spinners = false
+	biome.spinner_spawns = [spawn_a, spawn_b]
+	var gen := _make_generator(biome)
+	# Bucket by room and assert each room contains spinners of AT MOST
+	# one direction (either all CW or all CCW), confirming the second
+	# spawn skipped rooms the first spawn claimed.
+	for room_obj in gen._room_rects:
+		var room: Rect2i = room_obj as Rect2i
+		var seen_cw: bool = false
+		var seen_ccw: bool = false
+		for spinner in gen.spinners:
+			if not room.has_point(spinner.cell):
+				continue
+			if spinner.is_clockwise():
+				seen_cw = true
+			else:
+				seen_ccw = true
+		assert_false(seen_cw and seen_ccw,
+			"room %s holds both CW and CCW spinners — second spawn ignored allow_mixed_room_spinners=false" % room)

@@ -210,6 +210,7 @@ Objects that sit on tiles. Can occupy 1 or more tiles (e.g., a table covering 4 
 | Campfire | Rest point, interrupted if zone not cleared first | No |
 | Swamp/Mud | Slows movement, levitation spell bypasses | No |
 | Damage Floor | 50% of tiles in a biome deal heavy damage if stopped for >10 seconds | No |
+| Spinner | Rotates the player a fixed number of 90° turns when stepped on (direction + count rolled once per spinner). Re-arms when the player steps off. | No |
 
 ### Wall Objects
 
