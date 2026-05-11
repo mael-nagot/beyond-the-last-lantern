@@ -66,7 +66,7 @@ const COLLAPSED_SCALE := Vector2(0.05, 1.0)
 # SECRET wall on the map. Low enough that an attentive player can spot
 # the lighter line, high enough that a casual glance reads it as a
 # wall. Tune in the Inspector via a debug build if needed.
-const SECRET_WALL_MAP_ALPHA := 0.22
+const SECRET_WALL_MAP_ALPHA := 0.7
 
 var _anim_tween: Tween = null
 
