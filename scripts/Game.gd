@@ -586,6 +586,18 @@ func _on_player_entered_cell() -> void:
 func _check_pressure_plate_trigger(player_cell: Vector2i) -> void:
 	if _generator == null:
 		return
+	# An item sitting on the plate cell holds the plate in the
+	# triggered (depressed) position — the plate is already "down",
+	# so the player's step doesn't sense a fresh pressure transition.
+	# Sacrifices the item but disables the trap until the item is
+	# picked up. After pickup the plate re-arms; the next FRESH step
+	# onto the plate fires normally. This is interpretation A from
+	# the design check — pickup itself doesn't fire even if the
+	# player is standing on the plate (plate fires only on step-on
+	# events, not on weight-change events).
+	var pcell: GridCell = _generator.grid[player_cell.x][player_cell.y]
+	if pcell != null and not pcell.items.is_empty():
+		return
 	for ptrap in _generator.projectile_traps:
 		if ptrap == null or ptrap.data == null:
 			continue
