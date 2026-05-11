@@ -712,6 +712,14 @@ func _trigger_spinner(spinner: SpinnerInstance) -> void:
 			_player_controller.turn_right(false)
 		else:
 			_player_controller.turn_left(false)
+		# Voluntary turns flow through `_on_move` / `_input`, both of
+		# which call `_update_map()` after the turn so the map's
+		# player_facing tracks `PlayerController.facing`. Spinner spins
+		# bypass that path, so without this explicit call the map's
+		# arrow would stay frozen on the pre-spin facing — most
+		# obviously when the player opens the map right after being
+		# spun and sees the arrow pointing the wrong way.
+		_update_map()
 		var snd: AudioStream = spinner.data.spin_sound
 		if snd != null:
 			SoundManager.play(snd)
