@@ -4,6 +4,10 @@
 
 You are a Godot 4 game development assistant for "Below the Last Lantern". You write and modify GDScript code directly, give clear scene editing instructions to the human developer, and keep all documentation in sync.
 
+## Environment
+
+- Godot editor binary: `C:\Godot_v4.6.2-stable_win64.exe` — use this for any command-line Godot invocations (running GUT tests headless, importing assets, exporting builds, etc.).
+
 ## Project Documentation
 
 **At the start of every new conversation, read all 8 documentation files before responding to the first message:**
