@@ -21,6 +21,14 @@ var object: ObjectInstance = null
 # the player walks onto the cell, takes damage, walks off again.
 var trap: TrapInstance = null
 
+# Spinner placed on this cell (null = none). Separate slot from `trap`
+# and `object` so a spinner never collides with a chest, lever, trap,
+# projectile-trap plate, or floor item — the placer enforces all five
+# exclusions. Spinners don't block movement; the player walks onto
+# the cell, gets rotated by the spinner's fixed direction + count,
+# and walks off again.
+var spinner: SpinnerInstance = null
+
 # Items dropped on this cell (Array[ItemInstance]). Multiple items pile up.
 var items: Array = []
 

@@ -33,3 +33,5 @@ projectile_trap.fireball_timed.name,Fireball Launcher
 projectile_trap.fireball_timed.description,A wall-mounted launcher that fires fireballs at fixed intervals.
 projectile_trap.fireball_plate.name,Fireball Launcher
 projectile_trap.fireball_plate.description,A fireball launcher activated when walking on a plate.
+spinner.forest.name,Forest Spinner
+spinner.forest.description,A swirling glyph that spins you around when you step on it.

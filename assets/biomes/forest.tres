@@ -24,7 +24,9 @@
 [ext_resource type="Script" uid="uid://bpkkmcjv0jnht" path="res://scripts/TrapSpawn.gd" id="20_obsjo"]
 [ext_resource type="Resource" uid="uid://df3vqllijxj7l" path="res://assets/objects/traps/trap_spike_timed.tres" id="21_3vyya"]
 [ext_resource type="Script" uid="uid://c4fbuyttq7iik" path="res://scripts/WallDecorationSpawn.gd" id="21_evnw4"]
+[ext_resource type="Script" uid="uid://cnxm6kno1kh3w" path="res://scripts/SpinnerSpawn.gd" id="22_28y6b"]
 [ext_resource type="Resource" uid="uid://bcwekrkc5e52" path="res://assets/decorations/torch01.tres" id="22_obsjo"]
+[ext_resource type="Resource" uid="uid://d2xgveel38bwc" path="res://assets/objects/traps/spinner.tres" id="23_213mq"]
 [ext_resource type="Texture2D" uid="uid://b0mt2xvmng0ww" path="res://assets/textures/biomes/forest/walls/forest_wall_02_big_tree.jpg" id="23_evnw4"]
 [ext_resource type="Script" uid="uid://bjkjhbhykhrmp" path="res://scripts/BiomeTextureEntry.gd" id="30_tex"]
 
@@ -103,6 +105,15 @@ room_chance = 0.379
 room_max_per_room = 2
 metadata/_custom_type_script = "uid://bqw57pqm6wjbx"
 
+[sub_resource type="Resource" id="Resource_ha57c"]
+script = ExtResource("22_28y6b")
+spinner = ExtResource("23_213mq")
+count_min = 4
+count_max = 6
+corridor_segment_chance = 0.23
+room_chance = 0.379
+metadata/_custom_type_script = "uid://cnxm6kno1kh3w"
+
 [sub_resource type="Resource" id="Resource_1qwx2"]
 script = ExtResource("20_obsjo")
 trap = ExtResource("21_3vyya")
@@ -156,5 +167,6 @@ linked_objects = Array[ExtResource("7_fvx5y")]([SubResource("Resource_ivfat")])
 key_door_spawns = Array[ExtResource("7_w7wxy")]([SubResource("Resource_evnw4")])
 trap_spawns = Array[ExtResource("20_obsjo")]([SubResource("Resource_1qwx2")])
 projectile_trap_spawns = Array[ExtResource("19_1qwx2")]([SubResource("Resource_213mq")])
+spinner_spawns = Array[ExtResource("22_28y6b")]([SubResource("Resource_ha57c")])
 wall_decorations = Array[ExtResource("21_evnw4")]([SubResource("Resource_3vyya")])
 move_sounds = Array[AudioStream]([ExtResource("7_sstbg"), ExtResource("8_0wobd"), ExtResource("9_nhtug")])

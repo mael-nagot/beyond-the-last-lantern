@@ -33,6 +33,7 @@ Examples:
 | `items/` | `potion_pickup_drop1.ogg`, `potion_use1.ogg`, … | individual item `.tres` files |
 | `biomes/<biome>/move/` | `step_*.ogg` | the biome's `.tres` (`move_sounds` array) |
 | `traps/` | `spike_activate.ogg`, `spike_deactivate.ogg`, … | individual trap `.tres` files (Phase 8 Task 3) |
+| `spinners/` | `spin_whoosh.ogg`, … | individual spinner `.tres` files (Phase 8 Task 8 — optional; spinners fall back to the global `play_turn()` sound when their `spin_sound` is null) |
 
 Trap sounds are referenced from per-variant `TrapData` `.tres` files via `activate_sound` / `deactivate_sound`. STEP traps play these non-spatially through SoundManager (the player is at the trap's feet — distance falloff would feel wrong); TIMED traps play them through a per-instance `AudioStreamPlayer3D` so the player hears them coming from across the dungeon. The 3D player's `max_distance` is set from `TrapData.hearing_distance` (linear-feeling falloff via inverse-distance attenuation).
 
