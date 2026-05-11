@@ -128,3 +128,18 @@ If the developer reports the test failed: iterate on the same branch (more commi
 This rule does NOT block intermediate pushes — those are part of the iteration loop. It also does NOT apply to roadmap-only or documentation-only changes (no runtime behaviour to verify; still describe what you changed).
 
 Failure mode this prevents: the developer merges a PR that didn't actually fix the bug, the broken behaviour now lives in `main`, and the next conversation starts from a worse baseline than the previous one.
+
+### PR link must pre-fill title and body
+
+Whenever you fall back to handing the developer a GitHub "create PR" link (because `gh pr create` isn't available, isn't authenticated, etc.), the link MUST pre-fill the title and body via query params. Never paste the bare `/pull/new/<branch>` URL and rely on the developer to copy your suggested title/body into the form.
+
+Format:
+
+```
+https://github.com/<owner>/<repo>/compare/<base>...<head>?quick_pull=1&title=<url-encoded-title>&body=<url-encoded-body>
+```
+
+- `<base>` is usually `main`; `<head>` is the current branch.
+- URL-encode the title and body (spaces → `%20`, newlines → `%0A`, `#` → `%23`, etc.).
+- Keep the same title and body you would have passed to `gh pr create` — Summary bullets, Test plan, Claude Code footer.
+- If the encoded URL is very long, still produce it — GitHub accepts long query strings. Don't truncate the body to shorten the link.
