@@ -16,6 +16,13 @@ const ITEM_STACK_OFFSETS: Array[Vector3] = [
 	Vector3( 0.5, 0.0, -0.4),
 	Vector3(-0.5, 0.0,  0.3),
 ]
+# When the player stands ON a cell that holds items, the item sprites
+# slide this many world units along the player's facing direction so
+# they sit in the bottom of the view (otherwise they'd be directly
+# under the camera and off-screen, given camera_eye_height vs item
+# world_height). Snapped on cell-change and on turn — same trigger
+# pattern as the chest-lean (`_object_position`).
+const ITEM_ON_TILE_FORWARD_OFFSET: float = 1.5
 const FACING_ANGLES = {
 	Vector2i( 0, -1):    0.0,   # North
 	Vector2i( 1,  0):  -90.0,   # East
@@ -82,6 +89,16 @@ var _billboard_decorations: Array[Node3D] = []
 # and a per-placement phase so torches don't flicker in sync.
 var _flickering_lights: Array[OmniLight3D] = []
 var _object_sprites: Dictionary = {}  # Vector2i -> Sprite3D (for cheap per-move repositioning)
+# Vector2i -> Array[Sprite3D]. Lookup so `_refresh_item_positions` can
+# touch the visible stack on the player's current cell (and the cell
+# they just left) without walking the scene tree. Populated by
+# `_build_items`, cleared at the top of every rebuild.
+var _item_sprites: Dictionary = {}
+# Tween that slides item sprites between centred and shifted-forward
+# positions in sync with the 0.12s camera move / rotate tween. Tracked
+# so consecutive steps / turns kill the prior tween instead of fighting
+# it for the sprite's position property.
+var _item_tween: Tween = null
 # One StandardMaterial3D per BiomeTextureEntry, reused across every
 # quad that resolves to the same entry. Without this each quad allocated
 # its own material, which costs hundreds of duplicate materials per
@@ -1241,24 +1258,80 @@ func _projectile_view_for(proj: ProjectileInstance) -> int:
 func _build_items() -> void:
 	for child in _items_root.get_children():
 		child.queue_free()
+	_item_sprites.clear()
 
 	for x in range(generator.grid_width):
 		for y in range(generator.grid_height):
 			var cell: GridCell = generator.get_cell(x, y)
 			if cell == null or cell.items.is_empty():
 				continue
-			var cx := x * CELL_SIZE + CELL_SIZE * 0.5
-			var cz := y * CELL_SIZE + CELL_SIZE * 0.5
+			var grid_pos := Vector2i(x, y)
 			var visible_count: int = min(cell.items.size(), ITEM_MAX_VISIBLE_PER_TILE)
+			var cell_sprites: Array[Sprite3D] = []
 			for i in range(visible_count):
 				var inst: ItemInstance = cell.items[i]
 				if inst == null or inst.data == null or inst.data.dungeon_sprite == null:
 					continue
 				var sprite := _make_item_sprite(inst)
-				var offset: Vector3 = ITEM_STACK_OFFSETS[i]
-				var sprite_y: float = inst.data.dungeon_sprite_world_height * 0.5 + inst.data.dungeon_sprite_y_offset
-				sprite.position = Vector3(cx + offset.x, sprite_y, cz + offset.z)
+				sprite.position = _item_world_position(grid_pos, i, inst)
 				_items_root.add_child(sprite)
+				cell_sprites.append(sprite)
+			if not cell_sprites.is_empty():
+				_item_sprites[grid_pos] = cell_sprites
+
+# Positions a single item sprite on its cell. When `grid_pos` is the
+# player's current cell the whole stack slides forward along the
+# player's facing direction so items appear at the bottom of view
+# instead of directly under the camera. Otherwise the stack stays
+# centred so a pile across the corridor reads as one cluster.
+func _item_world_position(grid_pos: Vector2i, stack_index: int, inst: ItemInstance) -> Vector3:
+	var cx: float = grid_pos.x * CELL_SIZE + CELL_SIZE * 0.5
+	var cz: float = grid_pos.y * CELL_SIZE + CELL_SIZE * 0.5
+	var offset: Vector3 = ITEM_STACK_OFFSETS[stack_index]
+	var shift_x: float = 0.0
+	var shift_z: float = 0.0
+	if grid_pos == _current_grid_pos:
+		shift_x = float(_current_facing.x) * ITEM_ON_TILE_FORWARD_OFFSET
+		shift_z = float(_current_facing.y) * ITEM_ON_TILE_FORWARD_OFFSET
+	var sprite_y: float = inst.data.dungeon_sprite_world_height * 0.5 + inst.data.dungeon_sprite_y_offset
+	return Vector3(cx + offset.x + shift_x, sprite_y, cz + offset.z + shift_z)
+
+# Re-positions every item sprite. Cheap (O(num items on level) — a few
+# dozen) so we just iterate them all instead of diffing previous /
+# current cell. Called from `set_initial_facing` (animated = false —
+# initial-frame snap, no camera animation to sync with), `move_camera_to`
+# (animated = true — items on the entered cell glide forward, items on
+# the cell we just left glide back to centre, in sync with the 0.12s
+# camera move), and `rotate_camera_to` (animated = true — stack
+# rotates around cell centre in sync with the 0.12s camera turn).
+# A previous `_item_tween` is killed so consecutive moves / turns don't
+# fight each other for the sprite's position property.
+func _refresh_item_positions(animated: bool = false) -> void:
+	if _item_tween != null and _item_tween.is_valid():
+		_item_tween.kill()
+		_item_tween = null
+	if animated:
+		_item_tween = create_tween()
+		_item_tween.set_parallel(true)
+	for grid_pos in _item_sprites.keys():
+		var cell: GridCell = generator.get_cell(grid_pos.x, grid_pos.y)
+		if cell == null:
+			continue
+		var sprites: Array = _item_sprites[grid_pos]
+		for i in range(sprites.size()):
+			var sprite: Sprite3D = sprites[i]
+			if not is_instance_valid(sprite):
+				continue
+			if i >= cell.items.size():
+				continue
+			var inst: ItemInstance = cell.items[i]
+			if inst == null or inst.data == null:
+				continue
+			var target_pos: Vector3 = _item_world_position(grid_pos, i, inst)
+			if animated and sprite.position != target_pos:
+				_item_tween.tween_property(sprite, "position", target_pos, 0.12)
+			else:
+				sprite.position = target_pos
 
 func _make_item_sprite(inst: ItemInstance) -> Sprite3D:
 	var data: ItemData = inst.data
@@ -1353,6 +1426,7 @@ func set_initial_facing(facing: Vector2i) -> void:
 	camera.rotation_degrees.y = _current_angle
 	camera.position           = _grid_to_world(_current_grid_pos.x, _current_grid_pos.y)
 	_refresh_object_positions()
+	_refresh_item_positions()
 	_refresh_trap_spike_positions()
 	# Snap every plate's Y rotation to the new camera angle so they
 	# render correctly from the very first frame after a level setup
@@ -1376,6 +1450,12 @@ func move_camera_to(grid_pos: Vector2i, facing: Vector2i) -> void:
 	# Object positions are intentionally NOT refreshed here — the lean
 	# axis is tied to facing, so the chest only re-leans when the player
 	# turns. Refreshing on move would visibly snap the chest mid-step.
+	# Item positions DO refresh on move: the on-tile shift is keyed to
+	# cell-residency, not facing, so cell-change is exactly when it
+	# needs to update — items on the destination slide forward into
+	# view, items on the cell we just left slide back to centre, in
+	# sync with the 0.12s camera tween.
+	_refresh_item_positions(true)
 	# Pressure-plate visual state (Subtask C4) — diff against the
 	# previous-frame state and only swap material on actual change.
 	_update_plate_visual_states()
@@ -1398,6 +1478,7 @@ func rotate_camera_to(turn_right: bool, facing: Vector2i = Vector2i.ZERO) -> voi
 		if root != null and is_instance_valid(root):
 			tween.tween_property(root, "rotation_degrees:y", _current_angle, 0.12)
 	_refresh_object_positions()
+	_refresh_item_positions(true)
 	_refresh_trap_spike_positions()
 
 const SHAKE_INTENSITY := 0.12

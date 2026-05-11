@@ -24,6 +24,7 @@ projectile_world_height = 2.0
 projectile_y_offset = -1.0
 plate_texture_idle = ExtResource("5_0lc7w")
 plate_texture_triggered = ExtResource("6_jh88n")
+plate_world_size = 1.0
 launch_sound = ExtResource("2_n6vl5")
 impact_sound = ExtResource("1_u0842")
 plate_sound = ExtResource("4_in34o")
