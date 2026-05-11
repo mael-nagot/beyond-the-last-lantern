@@ -175,7 +175,7 @@ Single-click (not drag) on a populated item-bar slot opens a centered modal show
 
 #### Deferred (blocked by other phases)
 - Drag-to-equip (Phase 9 — character inventory)
-- Drag-to-throw / throwables (Phase 10 — combat targeting)
+- Drag-to-throw / throwables (Phase 10 — combat targeting). **Cross-reference:** thrown items that LAND on a tile (i.e., persist after throw — anything that isn't an instant-effect bomb / breakable flask) must use the same `cell.items.append(...)` path the existing drag-drop uses, so the projectile-trap pressure-plate-item-block mechanic just works: a thrown rock / spare potion / quest object that lands on a plate cell holds it down and disables the trap, same as a manually dropped item. Verify `DungeonView.rebuild_items()` is called after the throw lands so the plate visual flips to triggered. The opposite question — should an in-flight projectile (`ProjectileInstance`) that hits a thrown item collide with it? — is out of scope for this note; today projectiles only interact with the player.
 - Item drops from enemy deaths (Phase 10)
 - Chest loot tables (Phase 8 — objects/chests)
 
