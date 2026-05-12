@@ -29,6 +29,8 @@
 [ext_resource type="Resource" uid="uid://bcwekrkc5e52" path="res://assets/decorations/torch01.tres" id="22_obsjo"]
 [ext_resource type="Resource" uid="uid://d2xgveel38bwc" path="res://assets/objects/traps/spinner.tres" id="23_213mq"]
 [ext_resource type="Texture2D" uid="uid://b0mt2xvmng0ww" path="res://assets/textures/biomes/forest/walls/forest_wall_02_big_tree.jpg" id="23_evnw4"]
+[ext_resource type="Script" uid="uid://c141nsmnc7en" path="res://scripts/TeleporterSpawn.gd" id="25_48wqn"]
+[ext_resource type="Resource" uid="uid://dnf4n7i60a5kp" path="res://assets/objects/teleporter/teleporter.tres" id="25_lrnxp"]
 [ext_resource type="Script" uid="uid://bjkjhbhykhrmp" path="res://scripts/BiomeTextureEntry.gd" id="30_tex"]
 
 [sub_resource type="Resource" id="Resource_ceiling_default"]
@@ -123,6 +125,13 @@ corridor_segment_chance = 0.23
 room_chance = 0.379
 metadata/_custom_type_script = "uid://cnxm6kno1kh3w"
 
+[sub_resource type="Resource" id="Resource_lrnxp"]
+script = ExtResource("25_48wqn")
+data = ExtResource("25_lrnxp")
+count_min = 2
+count_max = 2
+metadata/_custom_type_script = "uid://c141nsmnc7en"
+
 [sub_resource type="Resource" id="Resource_1qwx2"]
 script = ExtResource("20_obsjo")
 trap = ExtResource("21_3vyya")
@@ -181,4 +190,5 @@ projectile_trap_spawns = Array[ExtResource("19_1qwx2")]([SubResource("Resource_2
 spinner_spawns = Array[ExtResource("22_28y6b")]([SubResource("Resource_ha57c")])
 wall_decorations = Array[ExtResource("21_evnw4")]([SubResource("Resource_3vyya")])
 secret_wall_spawns = Array[ExtResource("22_ha57c")]([SubResource("Resource_48wqn")])
+teleporter_spawn = SubResource("Resource_lrnxp")
 move_sounds = Array[AudioStream]([ExtResource("7_sstbg"), ExtResource("8_0wobd"), ExtResource("9_nhtug")])

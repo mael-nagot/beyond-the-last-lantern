@@ -448,15 +448,76 @@ Paintings, torches, lanterns mounted on wall faces (a side of a floor cell that 
 - Rest point (heal HP/MP, save?)
 - Must clear nearby enemies before resting (needs Phase 10)
 
-#### Task 6 — Teleporters
-Pairs of floor tiles that warp the player from one to the other. Adds shortcut topology to large biomes and unlocks puzzle layouts where two regions share a teleporter pair instead of a corridor.
-- New `TeleporterInstance` (RefCounted) — holds the two paired cells; `partner_of(cell)` resolves the destination
-- Per-biome `Array[TeleporterSpawn]` on `BiomeData` (count_min/max, placement flags, min_distance_between_pair so pairs aren't visually next to each other, max_distance_between_pair so pairs aren't degenerate)
-- Generator places pairs after standard objects but before items; both endpoints must be chain-reachable from the entrance (separately — a teleporter mustn't be the only way to reach its destination, otherwise locked-door / lever puzzles get bypassed)
-- `Game.gd` triggers the warp when the player steps on a teleporter cell — fades camera, snaps to partner, plays warp sound. Prevents immediate re-trigger by remembering the cell the player just arrived on (stepping off + back on re-arms)
-- Map: paired teleporters drawn as matching coloured glyphs (per-pair hue rotation, same trick as Phase 8 Task 2c keys) so the player can see which goes where on explored tiles
-- Visual: animated rune-circle Sprite3D on the floor (FIXED_Y billboard), warm glow via OmniLight3D
-- Localization: `object.teleporter_forest.{name,description}`, `ui.feedback.teleporter_warped`
+#### Task 6 — Teleporters (island topology)
+Floor-tile pairs that warp the player between **disconnected islands** of the same level. The level is partitioned into K islands (K ∈ [2, biome.island_count]) by sealing K-1 narrow-corridor cells with walls; each teleporter pair bridges two islands. **Teleporters are the only way to cross island boundaries** — every key, lever, chest, and exit gated behind a seal is reachable purely through the teleporter graph. Original "shortcut topology" framing replaced because the gameplay payoff of disconnection (a stronger sense of place + cross-island puzzles) is bigger than that of pure shortcuts.
+
+**Why this replaces the previous design.** The old draft required both teleporter endpoints to be chain-reachable from the entrance via corridors alone, on the grounds that "a teleporter mustn't be the only way to reach its destination, otherwise locked-door / lever puzzles get bypassed." The new chain-reachability extension (see below) makes teleporters themselves participate in chain reachability, so puzzle gating still validates correctly — a key on island B is chain-reachable iff some entrance→corridors→teleporter→island-B path exists. The old constraint is no longer needed.
+
+**Phased rollout** (each phase ends at a developer in-engine checkpoint, not just at PR time):
+- **A. Dumb warp** — data + random-pair placement + renderer + runtime fade/warp + biome wiring. Equivalent to the old Task 6 design; ships a working teleporter pair with no partitioning. Validates the warp UX in isolation.
+- **B. Map glyph** — per-pair hue rotation in `MapPopup`.
+- **C. Island topology** — chain reachability v3 extension, partition pass (seals + spanning-tree placement), downstream pass co-location guards, stress test. Replaces phase A's dumb placement.
+- **D. Docs + PR** — final sweep, manual asset checklist, PR test plan.
+
+**Data:**
+- `TeleporterData.gd` (Resource): floor sprite (`decal_sprite` or `frames` for animated), `world_size`, `y_offset`, `light_color`/`light_energy`, `warp_sound`, optional `seal_sound` (played when player walks into a sealed wall — feedback that there's no way through here).
+- `TeleporterInstance.gd` (RefCounted): `data`, `cell_a`, `cell_b`, `pair_index` (drives the map glyph hue), helpers `partner_of(cell) -> Vector2i`, `endpoints() -> Array[Vector2i]`.
+- `TeleporterSpawn.gd` (Resource, biome-level): `data`, `island_count_min`/`island_count_max` (drives K — final K rolled once per level), `min_distance_between_partners` (Manhattan, so a pair doesn't feel like a single step), `min_distance_to_other_object`, `min_seal_distance_to_entrance_exit`, `min_seal_distance_between_seals`.
+- `BiomeData.teleporter_spawn: TeleporterSpawn` (single — one teleporter config per biome; pair count is K-1 driven by `island_count`).
+- `GridCell.teleporter: TeleporterInstance` — fourth parallel slot alongside `object`, `trap`, `spinner`. Teleporters never block movement.
+
+**Generator pipeline.** New pass `_partition_and_place_teleporters()` runs RIGHT AFTER `_validate_path()` succeeds, BEFORE every object / door / lever / trap / item / secret-wall pass. Running it early means all downstream passes see the partitioned topology and naturally place across islands.
+1. Roll K in `[island_count_min, island_count_max]`. If K ≤ 1 or no `teleporter_spawn`, skip.
+2. Find seal candidates: floor cells with exactly two opposite floor neighbours in line (1-wide-corridor interior), not entrance / exit, not adjacent to entrance / exit, distance ≥ `min_seal_distance_to_entrance_exit`.
+3. For each picked seal cell, confirm it's a graph articulation point (BFS from entrance with that cell removed must leave at least one floor cell unreachable). Pick K-1 seal cells incrementally, each chosen against the post-previous-seals grid so seals don't cluster (Manhattan ≥ `min_seal_distance_between_seals`).
+4. Convert the K-1 seal cells to WALL. Now the floor splits into K connected components — BFS once per component to label cells with their island id.
+5. Build a spanning tree over the K islands: pick K-1 island-pairs forming a tree rooted at the entrance's island. For each pair, place two teleporter endpoints (one per island) satisfying `min_distance_between_partners`, never on entrance / exit, never on a seal-adjacent dead-end if any other cell is available (the warp should feel like fast travel, not a forced retreat).
+6. **Atomic rollback** on any failure (no valid seal candidates, no valid endpoint cell, validation fails): restore every sealed cell to FLOOR, clear placed teleporters, log `push_warning`, skip teleporter generation for this level. A flat / shortcut-free level is fine; a broken level is not.
+7. Final validation: teleporter-aware `_chain_reachable_from_entrance` reaches every floor cell + the exit.
+
+**Chain reachability v3.** Extend the existing fixed-point machinery:
+- `_chain_reachable_from_entrance(excluded_door_keys, extra_closed_edges)` → `_chain_reachable_from_entrance(excluded_door_keys, extra_closed_edges, suppressed_teleporters)`. By default, ALL `teleporters` participate.
+- `_bfs_walkable_with_closed_edges(origin, closed_edges)` → also accepts a teleporter-links dict (Vector2i → Vector2i, bidirectional). When BFS visits a teleporter endpoint, it enqueues the partner. This is permission-free (no key required), so it slots cleanly into the BFS without needing a new fixed-point iteration.
+- All existing callers (linked-object placement, key-door placement, secret-wall gating) automatically benefit: teleporter cells are graph edges in the reachability simulation.
+
+**Downstream pass guards.** Every placement-pass candidate filter excludes teleporter cells (parallel to existing entrance / exit / chest exclusions). Concretely:
+- `_place_objects` / `_place_doors` / `_place_linked_objects` / `_place_key_doors`: skip cells whose `cell.teleporter != null`.
+- `_place_traps` / `_place_projectile_traps` / `_place_spinners`: same exclusion (existing helpers already check `cell.object`, `cell.trap`, `cell.spinner`; we add `cell.teleporter`).
+- `_place_items` / chest contents: items can sit on a teleporter cell IF we want — but for V1 forbid it (the visual stack would clash with the rune circle).
+- `_place_secret_walls`: secret walls can sit between two cells, neither of which may be a teleporter endpoint (avoids visual confusion).
+- `_too_close_to_existing_object` and similar Manhattan-spacing helpers: include teleporter cells in the "existing object" set.
+
+**Runtime (`Game.gd`):**
+- `_check_teleporter_trigger(player_cell)` runs LAST in `_on_player_entered_cell` (after spike-trap, plate, spinner). Armed-cell latch `_teleporter_just_arrived_cell: Vector2i` prevents bounce-back: set to the destination cell on warp-in, cleared whenever the player enters a DIFFERENT cell. Mirrors `_spinner_just_triggered_cell` exactly.
+- `_trigger_teleporter(inst)`: flips a `_teleporter_warping` flag (folded into `_is_world_paused()` so input drops mid-warp), fade-to-black 0.18s, snap `PlayerController.grid_pos` + camera to partner, fade-out, latch destination cell, clear flag.
+- Fade helper extracted as `DungeonView.fade_to_black(duration) -> Signal` so Phase 15 Task 1 (sub-level transitions) can reuse it. Single owner of the fade overlay node — no double-add.
+- SFX: `data.warp_sound` plays once at the start of the warp via `SoundManager` (non-spatial — the warp is a UI-feeling event).
+
+**Map UI (`MapPopup`):**
+- Each pair gets a hue (HSV rotation across `pair_index` like the keys' per-pair palette in Phase 8 Task 2c). Both endpoints draw a small filled circle in that hue.
+- Glyph appears only when the endpoint cell is explored — players still have to find each teleporter the first time.
+- Optional: when one endpoint is explored and its partner isn't, draw the partner's circle in a desaturated colour as a hint (V1: skip; collect feedback first).
+
+**Sealed-wall feedback (small but worth specifying):** because the player will sometimes walk up to what *looks* like an ordinary corridor wall but is actually a seal, hitting it should feel slightly different. Option: when the player attempts to move into a former-seal cell (we tag seal cells in a `_seal_cells: Dictionary` registry), play `seal_sound` once (a low resonant thud) instead of the default movement-blocked silence. Map: optionally draw the sealed edge with a slight tint so observant players notice. **V1: skip both** — ship plain wall behaviour, revisit after we see how the partitioning reads in-game.
+
+**Dungeon view (`DungeonView`):** `TeleportersRoot` Node3D. Each teleporter gets a child `Node3D` parent at the cell with a flat `MeshInstance3D` (QuadMesh, rotated -π/2 around X) textured via a teleporter-specific material cache (alpha-scissor + NEAREST filter, same shape as `_trap_floor_material_cache`). If `data.frames` is set, swap the static decal for `AnimatedSprite3D` auto-playing `default_animation`. Add `OmniLight3D` child when `data.light_energy > 0`.
+
+**Localization:** `object.teleporter.{name, description}`, `ui.feedback.teleporter_warped`.
+
+**Tests:**
+- Unit: `test_teleporter_data` (defaults), `test_teleporter_instance` (`partner_of` symmetry + bad-input fail-safe, `endpoints` order independence, `pair_index` carried through), `test_teleporter_spawn` (defaults, K-range validation), `test_grid_cell` extended (default teleporter is null, teleporter cell isn't blocked).
+- Unit: chain reachability with teleporter links on a synthetic grid — partner cell is enqueued, key on island B counts as collected, locked door whose key is across a teleporter unlocks correctly.
+- Integration (`test_level_generator` extended): K=2 produces exactly 1 seal + 1 pair; K=3 produces 2 seals + 2 pairs; entrance reaches exit across multiple seeds; every floor cell chain-reachable; `min_distance_between_partners` honoured; teleporter cells never overlap entrance / exit / chests / levers / traps / spinners / floor items; rollback path exercised (force K=4 on a 10×10 grid with no available bridges → no partial state); locked-door + lever puzzles still validate when their key is on a different island; secret-wall LOOT_ONLY still rejects exit-gating placements after partitioning.
+- Stress: 25-seed sweep on a forest-sized grid at K=3 (catches placement-failure regressions, same as the secret-wall stress test).
+
+**Manual asset work (developer, listed for visibility — not blocking):**
+- `res://assets/textures/objects/teleporter_frames/*.png` (animated rune-circle frames, ~128×128 transparent, 4–8 frames).
+- `res://assets/objects/teleporter/teleporter_frames.tres` (SpriteFrames).
+- `res://assets/objects/teleporter/teleporter.tres` (TeleporterData) referencing the frames + a warm light + warp SFX.
+- `res://assets/sounds/teleporter/warp.ogg`.
+- Add a `teleporter_spawn` entry to `forest.tres` (start with `island_count_min/max = 2` for V1 validation).
+
+**Tradeoff and risk.** Sealing corridor cells reduces floor count, which can starve downstream placement budgets (chests, traps, items scale with floor count). Phase 8 placement formulas absorb small reductions, but high `island_count` on a small biome will visibly thin the loot. Ship V1 with `island_count = 2` on forest, validate in-engine, then consider K=3 once the validation pipeline is stable. Secondary risk: small islands (1–3 cells) may be unable to host a teleporter endpoint + meet `min_distance_between_partners`. The atomic-rollback path catches this, but tune `min_seal_distance_to_entrance_exit` and `min_seal_distance_between_seals` to bias toward roughly-equal islands.
 
 #### Task 7 — Trade doors
 A door that demands a fixed cost in consumables (food, potions, weapons, armour) instead of a key. Always guards a chest (the cost has to feel worth paying), so the placement code requires a chest in the gated region.
