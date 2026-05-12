@@ -19,6 +19,14 @@ extends Control
 # other floor hazards). Off in shipping so the spinner glyph doesn't
 # leak hazard info before the player encounters one.
 @export var debug_show_spinners: bool = true
+# When true, draws a filled circle glyph on every explored teleporter
+# endpoint cell. Hue is rotated per pair via `TeleporterInstance.pair_index`
+# (modulo `_TELEPORTER_HUE_COUNT`) so the player can see at a glance
+# which two cells link. Unlike traps/spinners, teleporters are meant
+# to be readable on the map — finding the matched pair is the whole
+# point of the glyph. Defaults to true; left as an export so it can
+# be flipped off for screenshots / level-design tests if needed.
+@export var debug_show_teleporters: bool = true
 
 var map_data: MapData
 var generator: LevelGenerator
@@ -250,6 +258,15 @@ func _on_map_draw() -> void:
 			if debug_show_spinners and cell.spinner != null:
 				_draw_spinner_marker(rect_pos, cell_size, cell.spinner)
 
+			# Draw teleporter marker — filled circle whose hue is
+			# rotated per pair so matched endpoints share a colour.
+			# Drawn above object markers so a teleporter on the same
+			# cell as a chest (which placement forbids today, but
+			# keeps the layering correct in case it changes) reads as
+			# the warp glyph.
+			if debug_show_teleporters and cell.teleporter != null:
+				_draw_teleporter_marker(rect_pos, cell_size, cell.teleporter)
+
 			# Draw exit — diamond shape
 			if cell.cell_type == GridCell.CellType.EXIT:
 				var center = rect_pos + rect_size * 0.5
@@ -479,6 +496,35 @@ func _draw_spinner_marker(rect_pos: Vector2, cell_size: float, spinner: SpinnerI
 	var tip_radius: float = max(cell_size * 0.07, 1.5)
 	var tip_center: Vector2 = center + Vector2(cos(end_angle), sin(end_angle)) * radius
 	map_draw.draw_circle(tip_center, tip_radius, color)
+
+# Phase 15 Task 6 — Phase B. Filled circle marker for a teleporter
+# endpoint. Hue is derived from `inst.pair_index` so both endpoints of
+# the same pair render in the same colour and different pairs never
+# collide visually until the index wraps past `_TELEPORTER_HUE_COUNT`.
+# Saturated, bright colour with a dark ring so the glyph reads clearly
+# against the parchment-yellow floor cell.
+const _TELEPORTER_HUE_COUNT: int = 8
+
+func _draw_teleporter_marker(rect_pos: Vector2, cell_size: float, inst: TeleporterInstance) -> void:
+	var center: Vector2 = rect_pos + Vector2(cell_size * 0.5, cell_size * 0.5)
+	var radius: float = cell_size * 0.30
+	# Hue rotation in [0, 1) — pair_index 0 -> red, then orange,
+	# yellow, green, cyan, blue, purple, magenta around the wheel.
+	# Saturation 0.75 and value 0.95 keep every hue legible on the
+	# parchment background (pure saturation looks neon, low value
+	# disappears under the wall colour).
+	var hue: float = float(inst.pair_index % _TELEPORTER_HUE_COUNT) / float(_TELEPORTER_HUE_COUNT)
+	var fill: Color = Color.from_hsv(hue, 0.75, 0.95)
+	var ring: Color = Color.from_hsv(hue, 0.85, 0.45)
+	map_draw.draw_circle(center, radius, fill)
+	# Outline ring — same hue but darker so the glyph stays
+	# colour-identifiable while gaining a hard edge against pale floor.
+	map_draw.draw_arc(center, radius, 0.0, TAU, 24, ring, max(cell_size * 0.08, 1.5))
+	# Inner dot at the centre — same darker shade as the ring.
+	# Gives the marker a "portal eye" silhouette so two glyphs of
+	# similar hues (e.g. pair 0 and pair 7 wrap-around) still read as
+	# the SAME pair when both endpoints are in view.
+	map_draw.draw_circle(center, radius * 0.22, ring)
 
 func _draw_projectile_plate_marker(rect_pos: Vector2, cell_size: float) -> void:
 	# Phase 8 Task 3 — Subtask C4. Small filled square in the plate

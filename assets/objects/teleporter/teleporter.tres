@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="TeleporterData" format=3 uid="uid://dnf4n7i60a5kp"]
+
+[ext_resource type="Script" uid="uid://bqbod3hu8aqcg" path="res://scripts/TeleporterData.gd" id="1_41xkn"]
+[ext_resource type="AudioStream" uid="uid://kcf60fg4rmg1" path="res://assets/sounds/objects/teleport/teleport.ogg" id="2_d4dp1"]
+
+[resource]
+script = ExtResource("1_41xkn")
+name_key = "object.teleporter.name"
+description_key = "object.teleporter.description"
+light_color = Color(1, 0.85430586, 0.6651851, 1)
+light_energy = 2.0
+light_range = 4.0
+warp_sound = ExtResource("2_d4dp1")
+metadata/_custom_type_script = "uid://bqbod3hu8aqcg"

@@ -25,6 +25,9 @@ var projectile_trap_spawns_pool: Array[ProjectileTrapSpawn] = []
 var spinner_spawns_pool: Array[SpinnerSpawn] = []
 var wall_decorations_pool: Array[WallDecorationSpawn] = []
 var secret_wall_spawns_pool: Array[SecretWallSpawn] = []
+# Phase 15 Task 6 — Phase A. Singular (NOT array) — one teleporter
+# config per biome. Null = no teleporters this biome.
+var teleporter_spawn_config: TeleporterSpawn = null
 
 var grid: Array = []
 var entrance_pos: Vector2i = Vector2i.ZERO
@@ -100,6 +103,13 @@ var spinners: Array[SpinnerInstance] = []
 # (mirrors `_cluster_cells` for traps).
 var _spinner_cluster_cells: Dictionary = {}
 
+# Teleporter pairs (Phase 15 Task 6). Both endpoints of a pair point
+# to the SAME instance — `cell.teleporter` on each endpoint cell is
+# the per-cell lookup; this list is the renderer + map iteration
+# source. Phase A places pairs at random non-special floor cells;
+# Phase C will replace this with island-topology partitioning.
+var teleporters: Array[TeleporterInstance] = []
+
 func configure(biome: BiomeData) -> void:
 	if biome == null:
 		push_error("LevelGenerator: biome is null, using defaults")
@@ -128,6 +138,7 @@ func configure(biome: BiomeData) -> void:
 	spinner_spawns_pool = biome.spinner_spawns
 	wall_decorations_pool = biome.wall_decorations
 	secret_wall_spawns_pool = biome.secret_wall_spawns
+	teleporter_spawn_config = biome.teleporter_spawn
 
 func generate() -> void:
 	_fill_with_walls()
@@ -144,6 +155,7 @@ func generate() -> void:
 	_spinner_cluster_cells.clear()
 	secret_walls.clear()
 	_secret_walls_by_edge.clear()
+	teleporters.clear()
 	if room_count > 0:
 		_place_rooms()
 	_grow_maze()
@@ -165,6 +177,7 @@ func generate() -> void:
 	_place_projectile_traps()
 	_place_spinners()
 	_place_secret_walls()
+	_place_teleporters()
 	_place_wall_decorations()
 
 # -------------------------------------------------------
@@ -3040,6 +3053,187 @@ func _secret_wall_gates_content(a: Vector2i, b: Vector2i, gate_mode: int) -> boo
 # this helper is here for symmetry with `get_door_at_edge`.
 func get_secret_wall_at_edge(a: Vector2i, b: Vector2i) -> SecretWallInstance:
 	return _secret_walls_by_edge.get(SecretWallInstance.edge_key(a, b), null)
+
+# -------------------------------------------------------
+# Teleporters (Phase 15 Task 6 — Phase A: dumb placement)
+# -------------------------------------------------------
+# Phase A places `count` random teleporter PAIRS on non-special floor
+# cells. No partitioning — the warp is a pure shortcut. Phase C will
+# replace this with the island-topology variant where the level is
+# split into K islands and each pair bridges two of them.
+#
+# Order: runs AFTER `_place_secret_walls()` and BEFORE
+# `_place_wall_decorations()` — last among floor passes so every other
+# pass's placements are known and the exclusion set is complete.
+# Wall decorations don't share cells with teleporters (one's on a wall
+# face, the other on a floor cell), so coming last among floor passes
+# is enough.
+func _place_teleporters() -> void:
+	if teleporter_spawn_config == null:
+		return
+	var spawn := teleporter_spawn_config
+	if spawn.data == null:
+		push_warning("LevelGenerator: teleporter_spawn set but data is null — skipping teleporter placement")
+		return
+	var lo: int = max(0, spawn.count_min)
+	var hi: int = max(lo, spawn.count_max)
+	var count: int = randi_range(lo, hi)
+	if count <= 0:
+		return
+	var special_cells: Dictionary = _gather_teleporter_excluded_cells()
+	var pair_index: int = 0
+	for _i in range(count):
+		if _try_place_teleporter_pair(spawn, special_cells, pair_index):
+			# Newly placed teleporter endpoints become "special" for
+			# subsequent pairs — this is in addition to the per-pair
+			# `min_distance_to_other_teleporter` check, which gives a
+			# spacing buffer even between the cells themselves. We add
+			# them to `special_cells` so the `min_distance_to_other_object`
+			# check (which is usually smaller) doesn't let a new pair
+			# land directly ON an existing endpoint.
+			special_cells[teleporters[-1].cell_a] = true
+			special_cells[teleporters[-1].cell_b] = true
+			pair_index += 1
+
+func _try_place_teleporter_pair(spawn: TeleporterSpawn, special_cells: Dictionary, pair_index: int) -> bool:
+	# Graceful-degrade BOTH "distance to other special content" and
+	# "distance to other teleporter" — same pattern as spinner /
+	# trap / item placement. Distance between partners is degraded
+	# separately AFTER the candidate pool is locked in, so a tight
+	# config can still produce a pair on the available cells.
+	var min_obj: int = max(0, spawn.min_distance_to_other_object)
+	var min_tele: int = max(0, spawn.min_distance_to_other_teleporter)
+	var pool: Array = []
+	var d_obj := min_obj
+	while d_obj >= 0 and pool.size() < 2:
+		var d_tele := min_tele
+		while d_tele >= 0:
+			pool = _build_teleporter_candidate_pool(special_cells, d_obj, d_tele)
+			if pool.size() >= 2:
+				break
+			d_tele -= 1
+		if pool.size() >= 2:
+			break
+		d_obj -= 1
+	if pool.size() < 2:
+		push_warning("LevelGenerator: could not place teleporter pair %d — no eligible floor cells" % pair_index)
+		return false
+	pool.shuffle()
+	var cell_a: Vector2i = pool[0]
+	# Pick partner with graceful-degrade on min_distance_between_partners.
+	var min_partner: int = max(0, spawn.min_distance_between_partners)
+	var cell_b: Vector2i = Vector2i(-1, -1)
+	var d_partner := min_partner
+	while d_partner >= 0:
+		for cand in pool:
+			if cand == cell_a:
+				continue
+			if _manhattan(cell_a, cand) >= d_partner:
+				cell_b = cand
+				break
+		if cell_b != Vector2i(-1, -1):
+			break
+		d_partner -= 1
+	if cell_b == Vector2i(-1, -1):
+		push_warning("LevelGenerator: could not satisfy min_distance_between_partners for teleporter pair %d" % pair_index)
+		return false
+	var inst := TeleporterInstance.create(spawn.data, cell_a, cell_b, pair_index)
+	grid[cell_a.x][cell_a.y].teleporter = inst
+	grid[cell_b.x][cell_b.y].teleporter = inst
+	teleporters.append(inst)
+	return true
+
+func _build_teleporter_candidate_pool(special_cells: Dictionary, min_to_object: int, min_to_other_teleporter: int) -> Array:
+	# Returns every FLOOR cell that:
+	#   - is not entrance / exit
+	#   - holds NO object, trap, spinner, item, or existing teleporter
+	#     endpoint (these are hard exclusions — `special_cells` carries
+	#     them plus door endpoint cells + projectile-trap plates +
+	#     entrance / exit)
+	#   - is at least `min_to_object` Manhattan tiles from every cell
+	#     in `special_cells` (buffer — graceful-degrade by caller)
+	#   - is at least `min_to_other_teleporter` Manhattan tiles from
+	#     every PREVIOUSLY placed teleporter endpoint (buffer between
+	#     pairs — graceful-degrade by caller)
+	var result: Array = []
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var pos := Vector2i(x, y)
+			var cell: GridCell = grid[x][y]
+			if cell.cell_type != GridCell.CellType.FLOOR:
+				continue
+			if special_cells.has(pos):
+				continue
+			if cell.teleporter != null:
+				continue
+			if min_to_object > 0 and _too_close_to_special_cell(pos, special_cells, min_to_object):
+				continue
+			if min_to_other_teleporter > 0 and _too_close_to_existing_teleporter(pos, min_to_other_teleporter):
+				continue
+			result.append(pos)
+	return result
+
+func _gather_teleporter_excluded_cells() -> Dictionary:
+	# Cells that are FORBIDDEN for teleporter placement AND drive the
+	# `min_distance_to_other_object` buffer. The two roles use the same
+	# set: a cell with content is hard-excluded; cells WITHIN
+	# min_distance of one are buffer-excluded. Includes:
+	#   - entrance + exit (the player should never warp out of the start
+	#     tile or onto the exit tile, and visually a teleporter glued to
+	#     either is confusing)
+	#   - chest / lever cells (cell.object)
+	#   - trap cells (cell.trap)
+	#   - spinner cells (cell.spinner)
+	#   - floor item cells (cell.items not empty)
+	#   - door endpoint cells (doors are edge-bound; both endpoint cells
+	#     get excluded so a teleporter doesn't sit right at a door)
+	#   - projectile-trap pressure plate cells (cell-bound floor decals)
+	var result: Dictionary = {}
+	result[entrance_pos] = true
+	result[exit_pos] = true
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var pos := Vector2i(x, y)
+			var cell: GridCell = grid[x][y]
+			if cell.object != null:
+				result[pos] = true
+			if cell.trap != null:
+				result[pos] = true
+			if cell.spinner != null:
+				result[pos] = true
+			if not cell.items.is_empty():
+				result[pos] = true
+	for door in doors:
+		result[door.cell_a] = true
+		result[door.cell_b] = true
+	for ptrap in projectile_traps:
+		if ptrap == null:
+			continue
+		if ptrap.has_plate():
+			result[ptrap.plate_cell] = true
+	return result
+
+func _too_close_to_special_cell(pos: Vector2i, special_cells: Dictionary, min_distance: int) -> bool:
+	for k in special_cells:
+		if _manhattan(pos, k) < min_distance:
+			return true
+	return false
+
+func _too_close_to_existing_teleporter(pos: Vector2i, min_distance: int) -> bool:
+	for inst in teleporters:
+		if _manhattan(pos, inst.cell_a) < min_distance:
+			return true
+		if _manhattan(pos, inst.cell_b) < min_distance:
+			return true
+	return false
+
+# Public — Game.gd uses this to resolve the partner cell when the
+# player steps onto a teleporter. Mirrors the shape of
+# `get_door_at_edge` / `get_secret_wall_at_edge`.
+func get_teleporter_at(cell: Vector2i) -> TeleporterInstance:
+	if not _in_bounds(cell.x, cell.y):
+		return null
+	return grid[cell.x][cell.y].teleporter
 
 # -------------------------------------------------------
 # BFS validation

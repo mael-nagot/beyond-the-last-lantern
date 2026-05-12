@@ -118,6 +118,15 @@ extends Resource
 # actually hides a chest or floor item.
 @export var secret_wall_spawns: Array[SecretWallSpawn] = []
 
+# Teleporters (Phase 15 Task 6). Single config per biome (NOT an
+# array) — `count_min`/`count_max` on the spawn drives the number of
+# pairs. Phase A places each pair at random non-special floor cells
+# (shortcut warps). Phase C will replace this with island-topology
+# partitioning where the level is split into K islands by walling
+# off K-1 corridor cells and each pair bridges two islands. Leave
+# null to disable teleporters for the biome.
+@export var teleporter_spawn: TeleporterSpawn
+
 @export_group("Sound")
 # One sound is picked at random per step (forward/back/strafe). Empty
 # array = silent. Per-biome so forest leaves and dungeon stone differ.
