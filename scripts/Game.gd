@@ -38,6 +38,24 @@ var _spinner_spinning: bool = false
 const _SPINNER_NO_CELL := Vector2i(-1, -1)
 var _spinner_just_triggered_cell: Vector2i = _SPINNER_NO_CELL
 
+# Phase 15 Task 6 — teleporter state. Mirrors the spinner pattern:
+#   - `_teleporter_warping` gates every movement / interaction handler
+#     while the fade-warp-fade chain is mid-flight. Folded into
+#     `_is_world_paused()` so `_on_move` / `_input` honour it without
+#     duplicate logic.
+#   - `_teleporter_just_arrived_cell` is the armed-cell latch that
+#     prevents an immediate bounce-back: after a warp lands the player
+#     on cell X, this is set to X, and subsequent re-checks of cell X
+#     are no-ops. The next `_check_teleporter_trigger` on a DIFFERENT
+#     cell clears the latch, so stepping off-and-back-on re-warps.
+var _teleporter_warping: bool = false
+const _TELEPORTER_NO_CELL := Vector2i(-1, -1)
+var _teleporter_just_arrived_cell: Vector2i = _TELEPORTER_NO_CELL
+# Default fade duration on each leg (in → snap → out) of the warp.
+# Lifted into a constant so the spinner-style cell tests below can
+# document the timing intent without re-reading the magic number.
+const _TELEPORTER_FADE_DURATION: float = 0.18
+
 func _ready() -> void:
 	var dungeon_view      = $DungeonView
 	var player_controller = $DungeonView/PlayerController
@@ -433,8 +451,9 @@ func _is_world_paused() -> bool:
 		return true
 	# Spinner spins also gate input — they're internal (no SceneTree
 	# pause) so they don't fight the existing pause-source registry,
-	# but they need the same "drop player input" behaviour.
-	return _spinner_spinning
+	# but they need the same "drop player input" behaviour. Teleporter
+	# warps share the same model.
+	return _spinner_spinning or _teleporter_warping
 
 func _update_map() -> void:
 	if _hud and _player_controller:
@@ -595,13 +614,21 @@ func _on_player_entered_cell() -> void:
 	# await — same conservative behaviour as the spike-trap branch.
 	if _player_controller != null:
 		_check_pressure_plate_trigger(_player_controller.grid_pos)
-	# Spinner branch (Phase 8 Task 8). Last among the post-await
-	# entry handlers — runs even when the cell has no trap and no
-	# plate. The armed-cell guard prevents re-firing during a single
-	# stay; clearing it for cells that DON'T hold a spinner lets a
-	# player who steps off, then back onto a spinner rearm it.
+	# Spinner branch (Phase 8 Task 8). Runs even when the cell has no
+	# trap and no plate. The armed-cell guard prevents re-firing
+	# during a single stay; clearing it for cells that DON'T hold a
+	# spinner lets a player who steps off, then back onto a spinner
+	# rearm it.
 	if _player_controller != null:
 		_check_spinner_trigger(_player_controller.grid_pos)
+	# Teleporter branch (Phase 15 Task 6 — Phase A). Runs LAST so the
+	# spike/plate/spinner branches always resolve for the source cell
+	# before the warp fires. The armed-cell guard
+	# (`_teleporter_just_arrived_cell`) is the bounce-back prevention
+	# for the warp itself; stepping off the teleporter cell clears it
+	# and a return step rearms naturally.
+	if _player_controller != null:
+		_check_teleporter_trigger(_player_controller.grid_pos)
 
 # Phase 8 Task 3 — Subtask C4. Scans every PRESSURE_PLATE launcher;
 # if its plate cell matches the player's current cell AND the launcher
@@ -735,6 +762,90 @@ func _trigger_spinner(spinner: SpinnerInstance) -> void:
 			# flag cleared via the defer below.
 			break
 	_spinner_spinning = false
+
+# Phase 15 Task 6 — Phase A teleporter trigger. Called from
+# `_on_player_entered_cell` after every other branch so a spinner /
+# trap / plate on the source cell resolves before we warp away. The
+# armed-cell latch (`_teleporter_just_arrived_cell`) prevents bounce-
+# back: when we land on a cell via warp the latch is set to that cell,
+# and subsequent entry-checks for the same cell exit early. Stepping
+# off the teleporter to any other cell clears the latch so a return
+# step rearms naturally — mirrors the spinner re-trigger pattern.
+func _check_teleporter_trigger(player_cell: Vector2i) -> void:
+	if _generator == null:
+		return
+	var inst: TeleporterInstance = _generator.get_teleporter_at(player_cell)
+	if inst == null:
+		# Stepped onto a non-teleporter cell — clear the latch so a
+		# future return to either endpoint re-fires the warp.
+		_teleporter_just_arrived_cell = _TELEPORTER_NO_CELL
+		return
+	if _teleporter_just_arrived_cell == player_cell:
+		# Just warped onto this cell — don't re-fire.
+		return
+	var partner: Vector2i = inst.partner_of(player_cell)
+	if partner == _TELEPORTER_NO_CELL:
+		push_error("Game._check_teleporter_trigger: teleporter at %s missing partner endpoint" % player_cell)
+		return
+	# Latch the DESTINATION up front so any re-entry check during the
+	# warp (defensive — shouldn't happen because `_teleporter_warping`
+	# also gates input) returns false. Fire-and-forget the warp; the
+	# `_teleporter_warping` flag set inside `_trigger_teleporter` takes
+	# effect synchronously (before the first await) so the input lock
+	# is active by the time this function returns.
+	_teleporter_just_arrived_cell = partner
+	_trigger_teleporter(inst, partner)
+
+# Async warp driver. Sequence:
+#   1. Set `_teleporter_warping` (input lock).
+#   2. Play warp sound at the moment of decision.
+#   3. Fade-to-black.
+#   4. Snap player + camera to the partner cell. PlayerController's
+#      grid_pos is set directly; DungeonView's `snap_camera_to` kills
+#      any in-flight move tween and resets via `set_initial_facing` so
+#      every per-cell visual (chest leans, item shift, plate rotations,
+#      spike spikes) recalibrates to the new cell.
+#   5. Reveal the destination on the map + refresh pickup prompt.
+#   6. Fade-from-black.
+#   7. Clear `_teleporter_warping`.
+#   8. Re-fire `_on_player_entered_cell` so any spike trap / plate /
+#      spinner ON the destination cell still resolves (the armed-cell
+#      latch keeps this from re-warping).
+#
+# Robustness: bails out cleanly if the level transitions mid-warp
+# (`is_instance_valid(self)` checks after each await). The fade tween
+# is owned by DungeonView, so it pauses naturally with the SceneTree.
+func _trigger_teleporter(inst: TeleporterInstance, destination: Vector2i) -> void:
+	if _dungeon_view == null or _player_controller == null:
+		return
+	if inst == null or inst.data == null:
+		return
+	_teleporter_warping = true
+	# Play the warp cue BEFORE the fade so the audio leads the visual —
+	# the player hears "something happened" the instant they step on
+	# the cell, even before the screen darkens.
+	if inst.data.warp_sound != null:
+		SoundManager.play(inst.data.warp_sound)
+	await _dungeon_view.fade_to_black(_TELEPORTER_FADE_DURATION)
+	if not is_instance_valid(self) or _generator == null or _player_controller == null:
+		return
+	_player_controller.grid_pos = destination
+	_dungeon_view.snap_camera_to(destination, PlayerController.DIR_VECTORS[_player_controller.facing])
+	# Clear the spinner armed-cell latch so a spinner on the
+	# destination (or a return to a previously-spun cell via warp) is
+	# treated as a fresh step-on, not a re-trigger of an existing stay.
+	_spinner_just_triggered_cell = _SPINNER_NO_CELL
+	_update_map()
+	_update_pickup_prompt()
+	await _dungeon_view.fade_from_black(_TELEPORTER_FADE_DURATION)
+	if not is_instance_valid(self):
+		return
+	_teleporter_warping = false
+	# Re-fire cell-entry handlers on the destination so traps / plates
+	# / spinners there still resolve. The teleporter-armed-cell latch
+	# (`_teleporter_just_arrived_cell == destination`) prevents the
+	# warp from re-firing on this re-entry.
+	_on_player_entered_cell()
 
 # Per-frame tick. Advances every trap's state machine and reacts to
 # observed transitions:

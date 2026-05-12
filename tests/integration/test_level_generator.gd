@@ -3765,3 +3765,172 @@ func test_placed_secret_walls_are_always_on_bridges_stress() -> void:
 				var bridge: bool = not restricted.has(sw.cell_a) or not restricted.has(sw.cell_b)
 				assert_true(bridge,
 					"mode=%d seed=%d: wall at %s/%s is on a LOOP — both endpoints reachable when sealed (player gains nothing by walking through)" % [mode, s, sw.cell_a, sw.cell_b])
+
+# -------------------------------------------------------
+# Teleporter placement (Phase 15 Task 6 — Phase A: dumb warp)
+# -------------------------------------------------------
+
+func _make_teleporter_data() -> TeleporterData:
+	var data := TeleporterData.new()
+	data.name_key = "test.teleporter"
+	return data
+
+func _make_teleporter_spawn(data: TeleporterData, count_min: int, count_max: int) -> TeleporterSpawn:
+	var spawn := TeleporterSpawn.new()
+	spawn.data = data
+	spawn.count_min = count_min
+	spawn.count_max = count_max
+	# Phase A defaults are biased toward varied-map (21x21) configs;
+	# integration tests use a smaller map so loosen the geometry so
+	# placements succeed on every seed without graceful degrade noise.
+	spawn.min_distance_between_partners = 3
+	spawn.min_distance_to_other_object = 1
+	spawn.min_distance_to_other_teleporter = 1
+	return spawn
+
+func _all_teleporter_cells(gen: LevelGenerator) -> Array:
+	var result: Array = []
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			if gen.grid[x][y].teleporter != null:
+				result.append(Vector2i(x, y))
+	return result
+
+func test_no_teleporters_placed_when_spawn_is_null() -> void:
+	var gen := _make_generator(_make_biome())
+	assert_eq(gen.teleporters.size(), 0)
+	assert_eq(_all_teleporter_cells(gen).size(), 0)
+
+func test_no_teleporters_placed_when_count_max_is_zero() -> void:
+	# Documents the "disable teleporters for this biome" idiom.
+	var biome := _make_biome()
+	biome.teleporter_spawn = _make_teleporter_spawn(_make_teleporter_data(), 0, 0)
+	var gen := _make_generator(biome)
+	assert_eq(gen.teleporters.size(), 0)
+
+func test_teleporter_pair_count_falls_within_min_max() -> void:
+	var biome := _make_biome()
+	biome.teleporter_spawn = _make_teleporter_spawn(_make_teleporter_data(), 2, 3)
+	var gen := _make_generator(biome)
+	assert_between(gen.teleporters.size(), 2, 3)
+
+func test_each_teleporter_pair_occupies_two_distinct_cells() -> void:
+	var biome := _make_biome()
+	biome.teleporter_spawn = _make_teleporter_spawn(_make_teleporter_data(), 2, 2)
+	var gen := _make_generator(biome)
+	for inst in gen.teleporters:
+		assert_ne(inst.cell_a, inst.cell_b,
+			"teleporter pair must have two distinct endpoints, got %s == %s" % [inst.cell_a, inst.cell_b])
+
+func test_teleporter_flat_list_matches_authoritative_grid_slot() -> void:
+	# Each placed pair must register on BOTH endpoint cells; the flat
+	# list and the per-cell slot must agree across both endpoints.
+	var biome := _make_biome()
+	biome.teleporter_spawn = _make_teleporter_spawn(_make_teleporter_data(), 2, 2)
+	var gen := _make_generator(biome)
+	# Each pair contributes 2 endpoint cells.
+	assert_eq(_all_teleporter_cells(gen).size(), gen.teleporters.size() * 2)
+	for inst in gen.teleporters:
+		assert_eq(gen.grid[inst.cell_a.x][inst.cell_a.y].teleporter, inst,
+			"cell_a slot must point to its pair's instance")
+		assert_eq(gen.grid[inst.cell_b.x][inst.cell_b.y].teleporter, inst,
+			"cell_b slot must point to its pair's instance")
+
+func test_pair_indices_are_unique_and_sequential() -> void:
+	# 0, 1, 2, ... in placement order — MapPopup's hue rotation depends
+	# on stable pair indices so the same pair always gets the same colour.
+	var biome := _make_biome()
+	biome.teleporter_spawn = _make_teleporter_spawn(_make_teleporter_data(), 3, 3)
+	var gen := _make_generator(biome)
+	var seen: Dictionary = {}
+	for inst in gen.teleporters:
+		assert_false(seen.has(inst.pair_index),
+			"duplicate pair_index %d" % inst.pair_index)
+		seen[inst.pair_index] = true
+		assert_between(inst.pair_index, 0, gen.teleporters.size() - 1)
+
+func test_teleporters_only_appear_on_floor_cells() -> void:
+	var biome := _make_biome()
+	biome.teleporter_spawn = _make_teleporter_spawn(_make_teleporter_data(), 3, 3)
+	var gen := _make_generator(biome)
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			var cell: GridCell = gen.grid[x][y]
+			if cell.cell_type == GridCell.CellType.WALL:
+				assert_null(cell.teleporter,
+					"wall (%d,%d) should not hold a teleporter" % [x, y])
+
+func test_teleporters_never_spawn_on_entrance_or_exit() -> void:
+	var biome := _make_biome()
+	biome.teleporter_spawn = _make_teleporter_spawn(_make_teleporter_data(), 3, 3)
+	var gen := _make_generator(biome)
+	assert_null(gen.grid[gen.entrance_pos.x][gen.entrance_pos.y].teleporter,
+		"entrance must never hold a teleporter — player would warp on step 1")
+	assert_null(gen.grid[gen.exit_pos.x][gen.exit_pos.y].teleporter,
+		"exit must never hold a teleporter — would short-circuit the run")
+
+func test_teleporters_never_share_cell_with_chests() -> void:
+	var biome := _make_biome()
+	biome.objects = [_make_object_spawn(_make_chest(), 3, 3, ObjectSpawn.PLACEMENT_ANY)]
+	biome.teleporter_spawn = _make_teleporter_spawn(_make_teleporter_data(), 2, 2)
+	var gen := _make_generator(biome)
+	for inst in gen.teleporters:
+		for endpoint in inst.endpoints():
+			var cell: GridCell = gen.grid[endpoint.x][endpoint.y]
+			assert_null(cell.object,
+				"teleporter endpoint %s overlaps a chest / lever object" % endpoint)
+
+func test_teleporters_never_share_cell_with_floor_items() -> void:
+	var biome := _make_biome([_make_loot_entry(_make_item(), 1)], 4, 6)
+	biome.teleporter_spawn = _make_teleporter_spawn(_make_teleporter_data(), 2, 2)
+	var gen := _make_generator(biome)
+	for inst in gen.teleporters:
+		for endpoint in inst.endpoints():
+			var cell: GridCell = gen.grid[endpoint.x][endpoint.y]
+			assert_true(cell.items.is_empty(),
+				"teleporter endpoint %s overlaps floor items" % endpoint)
+
+func test_min_distance_between_partners_honoured() -> void:
+	# Lock the constraint above the graceful-degrade threshold so a
+	# tighter map doesn't fall back to a smaller distance. 7 on a
+	# 21x21 grid leaves plenty of room.
+	var biome := _make_biome()
+	var spawn := _make_teleporter_spawn(_make_teleporter_data(), 1, 1)
+	spawn.min_distance_between_partners = 7
+	biome.teleporter_spawn = spawn
+	var gen := _make_generator(biome)
+	for inst in gen.teleporters:
+		var d: int = absi(inst.cell_a.x - inst.cell_b.x) + absi(inst.cell_a.y - inst.cell_b.y)
+		assert_gte(d, 7,
+			"pair %s/%s only %d apart, expected >= 7" % [inst.cell_a, inst.cell_b, d])
+
+func test_partner_of_round_trips_for_every_pair() -> void:
+	# partner_of(cell_a) == cell_b AND partner_of(cell_b) == cell_a for
+	# every placed pair — the runtime warp logic depends on this.
+	var biome := _make_biome()
+	biome.teleporter_spawn = _make_teleporter_spawn(_make_teleporter_data(), 2, 2)
+	var gen := _make_generator(biome)
+	for inst in gen.teleporters:
+		assert_eq(inst.partner_of(inst.cell_a), inst.cell_b)
+		assert_eq(inst.partner_of(inst.cell_b), inst.cell_a)
+
+func test_get_teleporter_at_returns_null_for_non_endpoint_cells() -> void:
+	var biome := _make_biome()
+	biome.teleporter_spawn = _make_teleporter_spawn(_make_teleporter_data(), 1, 1)
+	var gen := _make_generator(biome)
+	# Pick a floor cell that's NOT a teleporter endpoint.
+	var inst: TeleporterInstance = gen.teleporters[0]
+	for pos in _all_floor_cells(gen):
+		if pos == inst.cell_a or pos == inst.cell_b:
+			continue
+		assert_null(gen.get_teleporter_at(pos),
+			"non-endpoint cell %s should return null" % pos)
+		break  # one is enough
+
+func test_get_teleporter_at_returns_instance_for_endpoints() -> void:
+	var biome := _make_biome()
+	biome.teleporter_spawn = _make_teleporter_spawn(_make_teleporter_data(), 1, 1)
+	var gen := _make_generator(biome)
+	var inst: TeleporterInstance = gen.teleporters[0]
+	assert_eq(gen.get_teleporter_at(inst.cell_a), inst)
+	assert_eq(gen.get_teleporter_at(inst.cell_b), inst)

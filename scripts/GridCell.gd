@@ -29,6 +29,16 @@ var trap: TrapInstance = null
 # and walks off again.
 var spinner: SpinnerInstance = null
 
+# Teleporter endpoint placed on this cell (null = none). Fourth
+# parallel slot alongside `object`, `trap`, and `spinner`. Placement
+# enforces mutual exclusion against every other special-content slot
+# AND against floor items / entrance / exit. Teleporters don't block
+# movement; the player walks onto the cell and is warped to the
+# pair's partner cell. Both endpoints of a pair point to the SAME
+# TeleporterInstance — use `inst.partner_of(this_cell_pos)` to resolve
+# the destination.
+var teleporter: TeleporterInstance = null
+
 # Items dropped on this cell (Array[ItemInstance]). Multiple items pile up.
 var items: Array = []
 

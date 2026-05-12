@@ -88,3 +88,17 @@ func test_floor_with_spinner_is_not_blocked() -> void:
 	var data := SpinnerData.new()
 	cell.spinner = SpinnerInstance.create(data, Vector2i.ZERO, SpinnerInstance.Direction.CLOCKWISE, 1)
 	assert_false(cell.is_blocked)
+
+func test_default_teleporter_is_null() -> void:
+	var cell := GridCell.new()
+	assert_null(cell.teleporter)
+
+func test_floor_with_teleporter_is_not_blocked() -> void:
+	# Teleporters never block movement — the player must step onto
+	# the cell to trigger the warp. is_blocked should ignore the
+	# teleporter slot the same way it ignores trap and spinner.
+	var cell := GridCell.new()
+	cell.cell_type = GridCell.CellType.FLOOR
+	var data := TeleporterData.new()
+	cell.teleporter = TeleporterInstance.create(data, Vector2i(1, 1), Vector2i(5, 5), 0)
+	assert_false(cell.is_blocked)

@@ -90,6 +90,16 @@ var _trap_visuals: Dictionary = {}
 # SceneTree).
 var _spinners_root: Node3D
 var _spinner_visuals: Dictionary = {}  # SpinnerInstance -> Node3D root
+# Teleporters (Phase 15 Task 6 — Phase A). One Node3D per endpoint
+# cell (so a single pair has TWO entries — one per endpoint). The
+# Node3D parents a flat MeshInstance3D decal and an optional
+# OmniLight3D. Keyed by endpoint cell (Vector2i) because each cell
+# holds at most one teleporter endpoint, and Game.gd will look up
+# visuals by the player's grid cell when triggering the warp. The
+# TeleporterInstance for either endpoint can be recovered through
+# `grid[cell.x][cell.y].teleporter` if ever needed.
+var _teleporters_root: Node3D
+var _teleporter_visuals: Dictionary = {}  # Vector2i (endpoint cell) -> Node3D root
 # Decorations using face_camera mode — DungeonView's `_process` rotates
 # each one each frame to face the camera, with a designer-configured
 # X-axis tilt so the top leans toward the player.
@@ -131,6 +141,7 @@ func setup(gen: LevelGenerator) -> void:
 	_ensure_projectile_traps_root()
 	_ensure_projectiles_root()
 	_ensure_spinners_root()
+	_ensure_teleporters_root()
 	_ensure_drop_target()
 	_build_mesh()
 	_build_objects()
@@ -140,6 +151,7 @@ func setup(gen: LevelGenerator) -> void:
 	_build_projectile_traps()
 	_clear_projectile_visuals()
 	_build_spinners()
+	_build_teleporters()
 	_build_wall_decorations()
 	_place_camera_at_entrance()
 	_apply_biome_environment()
@@ -201,6 +213,13 @@ func _ensure_spinners_root() -> void:
 	_spinners_root = Node3D.new()
 	_spinners_root.name = "SpinnersRoot"
 	sub_viewport.add_child(_spinners_root)
+
+func _ensure_teleporters_root() -> void:
+	if _teleporters_root != null and is_instance_valid(_teleporters_root):
+		return
+	_teleporters_root = Node3D.new()
+	_teleporters_root.name = "TeleportersRoot"
+	sub_viewport.add_child(_teleporters_root)
 
 # Frees every active projectile sprite and resets the lookup dict.
 # Called from `setup()` so a level transition doesn't leak in-flight
@@ -908,6 +927,76 @@ func _update_spinner_rotations(delta: float) -> void:
 		var step: float = deg_to_rad(rate * dir_sign) * delta
 		root.rotation.y = fmod(root.rotation.y + step, TAU)
 
+# Phase 15 Task 6 — Phase A teleporter rendering. Each TeleporterInstance
+# has TWO endpoints; we render BOTH as identical-looking floor decals
+# (the same TeleporterData drives both). Visuals are keyed by endpoint
+# cell (Vector2i) in `_teleporter_visuals`, not by instance — Game.gd
+# triggers the warp from the player's current cell, so a cell-keyed
+# lookup is the natural fit. Phase A uses ONLY `data.decal_sprite` for
+# the floor visual (static); `data.frames` is a forward-compat field
+# the renderer doesn't consume yet — Phase B/C will add animated decals
+# via a shader pass when we have art to test against.
+func _build_teleporters() -> void:
+	for child in _teleporters_root.get_children():
+		child.queue_free()
+	_teleporter_visuals.clear()
+	if generator == null:
+		return
+	for inst in generator.teleporters:
+		if inst == null or inst.data == null:
+			continue
+		for endpoint in inst.endpoints():
+			var root := _make_teleporter_visual(inst, endpoint)
+			if root == null:
+				continue
+			_teleporters_root.add_child(root)
+			_teleporter_visuals[endpoint] = root
+
+func rebuild_teleporters() -> void:
+	if _teleporters_root == null:
+		return
+	_build_teleporters()
+
+# Returns a Node3D anchored at the endpoint cell with a flat decal
+# child (and an OmniLight3D child when `data.light_energy > 0`).
+# Returns null when the data has no decal_sprite AND no light to spawn
+# — designers can ship a "ghost" teleporter (the warp still fires
+# because it's keyed off `cell.teleporter`, not the visual), but a
+# fully-empty Node3D would be wasted scene-tree weight, so we drop it.
+func _make_teleporter_visual(inst: TeleporterInstance, endpoint: Vector2i) -> Node3D:
+	var data: TeleporterData = inst.data
+	var has_decal: bool = data.decal_sprite != null
+	var has_light: bool = data.light_energy > 0.0
+	if not has_decal and not has_light:
+		return null
+	var root := Node3D.new()
+	var cx: float = endpoint.x * CELL_SIZE + CELL_SIZE * 0.5
+	var cz: float = endpoint.y * CELL_SIZE + CELL_SIZE * 0.5
+	root.position = Vector3(cx, data.y_offset, cz)
+	if has_decal:
+		var mesh := MeshInstance3D.new()
+		var quad := QuadMesh.new()
+		var s: float = max(0.01, data.decal_world_size) * CELL_SIZE
+		quad.size = Vector2(s, s)
+		mesh.mesh = quad
+		mesh.material_override = _build_trap_floor_material(data.decal_sprite)
+		# Decal authored on the XY plane — lay it flat onto XZ. Same
+		# convention as the spinner / spike-trap decals so designers
+		# author every floor decal identically.
+		mesh.rotation = Vector3(-PI * 0.5, 0.0, 0.0)
+		root.add_child(mesh)
+	if has_light:
+		var light := OmniLight3D.new()
+		light.light_color = data.light_color
+		light.light_energy = data.light_energy
+		light.omni_range = max(0.01, data.light_range)
+		# Raise the bulb slightly above the floor so it lights the
+		# surrounding walls (a light AT y=0 only illuminates upward).
+		# Half a unit reads as a glow seeping from the rune circle.
+		light.position = Vector3(0.0, 0.5, 0.0)
+		root.add_child(light)
+	return root
+
 func _build_wall_decorations() -> void:
 	_billboard_decorations.clear()
 	_flickering_lights.clear()
@@ -1606,6 +1695,15 @@ var _shake_origin: Vector3 = Vector3.ZERO
 # onto (the original "step trap pushes you back" bug).
 var _move_tween: Tween = null
 
+# Phase 15 Task 6 — fade-to-black overlay used by the teleporter warp
+# (and reusable by Phase 15 Task 1 sub-level transitions). Lazily
+# constructed on first use as a child of `viewport_container` so it
+# covers the 3D view; alpha tweens between 0 and 1. Tween tracked so
+# back-to-back warps don't fight each other for the alpha property.
+var _fade_overlay: ColorRect = null
+var _fade_tween: Tween = null
+const _DEFAULT_FADE_DURATION: float = 0.18
+
 # Brief omni-directional jolt of the camera position. Used for wall
 # bumps and rejected interactions (locked-door click feedback).
 # `magnitude` scales the base SHAKE_INTENSITY: 1.0 = full wall bump,
@@ -1660,3 +1758,64 @@ func _grid_to_world(x: int, y: int) -> Vector3:
 		camera_eye_height,
 		y * CELL_SIZE + CELL_SIZE * 0.5
 	)
+
+# Phase 15 Task 6 — teleporter warp + Phase 15 Task 1 sub-level
+# transitions both want a fade-to-black / fade-from-black overlay to
+# hide a discontinuous camera move. The overlay is a single ColorRect
+# parented to the SubViewportContainer so it covers the 3D view but
+# not the HUD. Lazily constructed; cleaned up automatically on
+# `viewport_container` free.
+func _ensure_fade_overlay() -> void:
+	if _fade_overlay != null and is_instance_valid(_fade_overlay):
+		return
+	_fade_overlay = ColorRect.new()
+	_fade_overlay.name = "FadeOverlay"
+	_fade_overlay.color = Color(0.0, 0.0, 0.0, 0.0)
+	# MOUSE_FILTER_IGNORE so the overlay never eats clicks even while
+	# fully opaque — input gating during the warp is the caller's job
+	# (Game._is_world_paused), not the renderer's.
+	_fade_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	viewport_container.add_child(_fade_overlay)
+	_fade_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Render on top of the SubViewportContainer's content — ColorRect
+	# is a sibling of the SubViewport's render output and draws in
+	# child order, so being added last is enough.
+
+# Fades the overlay from current alpha to opaque black over `duration`.
+# Returns the tween's `finished` Signal so callers can `await` it. A
+# duration <= 0 snaps immediately (still returns a one-shot Signal so
+# callers don't have to special-case it).
+func fade_to_black(duration: float = _DEFAULT_FADE_DURATION) -> Signal:
+	_ensure_fade_overlay()
+	if _fade_tween != null and _fade_tween.is_valid():
+		_fade_tween.kill()
+	_fade_tween = create_tween()
+	if duration <= 0.0:
+		_fade_overlay.color = Color(0.0, 0.0, 0.0, 1.0)
+	else:
+		_fade_tween.tween_property(_fade_overlay, "color", Color(0.0, 0.0, 0.0, 1.0), duration)
+	return _fade_tween.finished
+
+# Reverse of `fade_to_black`. Returns the tween's `finished` Signal.
+func fade_from_black(duration: float = _DEFAULT_FADE_DURATION) -> Signal:
+	_ensure_fade_overlay()
+	if _fade_tween != null and _fade_tween.is_valid():
+		_fade_tween.kill()
+	_fade_tween = create_tween()
+	if duration <= 0.0:
+		_fade_overlay.color = Color(0.0, 0.0, 0.0, 0.0)
+	else:
+		_fade_tween.tween_property(_fade_overlay, "color", Color(0.0, 0.0, 0.0, 0.0), duration)
+	return _fade_tween.finished
+
+# Hard-snap the camera to `grid_pos` with the given `facing`. Kills any
+# in-flight move tween so a teleporter warp's discontinuous cell change
+# isn't interpolated from the source cell (which would defeat the fade).
+# Mirrors `set_initial_facing` but takes the target cell explicitly so
+# the caller doesn't have to mutate `_current_grid_pos` first.
+func snap_camera_to(grid_pos: Vector2i, facing: Vector2i) -> void:
+	if _move_tween != null and _move_tween.is_valid():
+		_move_tween.kill()
+		_move_tween = null
+	_current_grid_pos = grid_pos
+	set_initial_facing(facing)
