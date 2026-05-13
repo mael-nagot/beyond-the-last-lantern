@@ -20,16 +20,16 @@ Use the same `[item_id]` for both files so they pair up obviously with the `.tre
 
 **Icons (UI):**
 ```
-Compress > Mode: Lossless (UI clarity)
+Compress > Mode: Lossless
 Process > sRGB: on
 Mipmaps > Generate: on
-Filter: off (preserves pixel art crispness)
 ```
 
 **Dungeon sprites (Sprite3D):**
 ```
-Compress > Mode: VRAM Compressed
+Compress > Mode: Lossless
 Process > sRGB: on
 Mipmaps > Generate: on
-Filter: off (preserves pixel art crispness)
 ```
+
+> Lossless (not VRAM Compressed) for pixel art — see `res://assets/README.md` "Texture filtering" section for the full explanation. Filter mode is NOT an import setting; it's set on the consuming `Sprite3D` (`TEXTURE_FILTER_NEAREST` in `DungeonView.gd`).

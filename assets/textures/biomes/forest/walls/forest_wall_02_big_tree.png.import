@@ -2,27 +2,26 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://ebx3msr2yhig"
-path.s3tc="res://.godot/imported/forest ceiling_01.jpg-040adbaf3a89c9c908f106ac808d86c7.s3tc.ctex"
+uid="uid://de24b5ka6n8w0"
+path="res://.godot/imported/forest_wall_02_big_tree.png-06ecd7a01fd6389637e161e6f8395c3d.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
-"vram_texture": true
+"vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/textures/biomes/forest/ceilings/forest ceiling_01.jpg"
-dest_files=["res://.godot/imported/forest ceiling_01.jpg-040adbaf3a89c9c908f106ac808d86c7.s3tc.ctex"]
+source_file="res://assets/textures/biomes/forest/walls/forest_wall_02_big_tree.png"
+dest_files=["res://.godot/imported/forest_wall_02_big_tree.png-06ecd7a01fd6389637e161e6f8395c3d.ctex"]
 
 [params]
 
-compress/mode=2
+compress/mode=0
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
-compress/normal_map=2
+compress/normal_map=0
 compress/channel_pack=0
 mipmaps/generate=true
 mipmaps/limit=-1
@@ -35,7 +34,7 @@ process/channel_remap/alpha=3
 process/fix_alpha_border=true
 process/premult_alpha=false
 process/normal_map_invert_y=false
-process/hdr_as_srgb=true
+process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
 detect_3d/compress_to=1

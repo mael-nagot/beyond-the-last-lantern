@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://b0mt2xvmng0ww"
-path="res://.godot/imported/forest_wall_02_big_tree.jpg-81651c7ccb5ed1a9a6d0e4828277932d.ctex"
+uid="uid://byxe65cung0w8"
+path="res://.godot/imported/forest floor_01.png-fa2340825e14e058996f7853c5fdb7c5.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/textures/biomes/forest/walls/forest_wall_02_big_tree.jpg"
-dest_files=["res://.godot/imported/forest_wall_02_big_tree.jpg-81651c7ccb5ed1a9a6d0e4828277932d.ctex"]
+source_file="res://assets/textures/biomes/forest/floors/forest floor_01.png"
+dest_files=["res://.godot/imported/forest floor_01.png-fa2340825e14e058996f7853c5fdb7c5.ctex"]
 
 [params]
 
@@ -23,7 +23,7 @@ compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
 compress/normal_map=0
 compress/channel_pack=0
-mipmaps/generate=false
+mipmaps/generate=true
 mipmaps/limit=-1
 roughness/mode=0
 roughness/src_normal=""

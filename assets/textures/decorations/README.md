@@ -19,8 +19,10 @@ One subfolder per decoration. For animated decorations, each folder holds the mu
 ## Import settings
 
 For each frame, in the Godot Import tab:
-- `Compress > Mode`: VRAM Compressed (or Lossless if pixel-art crispness suffers)
+- `Compress > Mode`: Lossless
 - `Process > sRGB`: on
 - `Mipmaps > Generate`: on
+
+Lossless (not VRAM Compressed) — VRAM block compression is lossy and softens pixel-art edges. See `res://assets/README.md` "Texture filtering" section.
 
 Note: Godot 4 has no per-texture `Filter` import setting — nearest-neighbour filtering is enforced project-wide by `rendering/textures/canvas_textures/default_texture_filter=0` in `project.godot` (covers 2D), and per-`Sprite3D` via `TEXTURE_FILTER_NEAREST` set in the dungeon renderer (`DungeonView.gd`).

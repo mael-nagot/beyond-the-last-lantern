@@ -26,7 +26,8 @@ campfire/campfire_lit.png      (future)
 ## Import Settings
 
 Same as item dungeon sprites:
-- `Compress > Mode: VRAM Compressed`
+- `Compress > Mode: Lossless`
 - `Process > sRGB: on`
 - `Mipmaps > Generate: on`
-- `Filter: off` (preserves pixel-art crispness)
+
+Lossless (not VRAM Compressed) for pixel art — see `res://assets/README.md` "Texture filtering" section. Filter mode is NOT an import setting; it's set on the consuming `Sprite3D` (`TEXTURE_FILTER_NEAREST` in `DungeonView.gd`).

@@ -1,12 +1,11 @@
 [gd_resource type="Resource" script_class="BiomeData" format=3 uid="uid://xevqf0q5x5fk"]
 
 [ext_resource type="Script" uid="uid://bentd6twklhjr" path="res://scripts/BiomeData.gd" id="1_5w715"]
-[ext_resource type="Texture2D" uid="uid://ebx3msr2yhig" path="res://assets/textures/biomes/forest/ceilings/forest ceiling_01.jpg" id="1_bq1p8"]
-[ext_resource type="Texture2D" uid="uid://do12vq4fygnrp" path="res://assets/textures/biomes/forest/floors/forest floor_01.jpg" id="1_ve4a7"]
-[ext_resource type="Texture2D" uid="uid://b1s2v6l44cc8k" path="res://assets/textures/biomes/forest/ceilings/forest ceiling_02_sky.jpg" id="3_xwfpp"]
+[ext_resource type="Texture2D" uid="uid://cj2q5k8f4f71r" path="res://assets/textures/biomes/forest/ceilings/forest ceiling_01.png" id="2_ha57c"]
+[ext_resource type="Texture2D" uid="uid://0dehivh0qw1r" path="res://assets/textures/biomes/forest/ceilings/forest ceiling_02_sky.png" id="3_lrnxp"]
 [ext_resource type="Script" uid="uid://dwvpkpfjm8dyn" path="res://scripts/LootEntry.gd" id="4_458bs"]
 [ext_resource type="Resource" uid="uid://dltjjt1nys4br" path="res://assets/items/health_potion.tres" id="5_plw3j"]
-[ext_resource type="Texture2D" uid="uid://eaqrrmrm74gy" path="res://assets/textures/biomes/forest/walls/forest_wall_01.jpg" id="7_bq1p8"]
+[ext_resource type="Texture2D" uid="uid://byxe65cung0w8" path="res://assets/textures/biomes/forest/floors/forest floor_01.png" id="6_lrnxp"]
 [ext_resource type="Script" uid="uid://c716yxx8rccyt" path="res://scripts/LinkedObjectSpawn.gd" id="7_fvx5y"]
 [ext_resource type="AudioStream" uid="uid://demirrr5g78xj" path="res://assets/sounds/biomes/forest/move/step_01.ogg" id="7_sstbg"]
 [ext_resource type="Script" uid="uid://duxnh0exbhpst" path="res://scripts/KeyDoorSpawn.gd" id="7_w7wxy"]
@@ -28,19 +27,20 @@
 [ext_resource type="Script" uid="uid://dgfmk8c0mn1uj" path="res://scripts/SecretWallSpawn.gd" id="22_ha57c"]
 [ext_resource type="Resource" uid="uid://bcwekrkc5e52" path="res://assets/decorations/torch01.tres" id="22_obsjo"]
 [ext_resource type="Resource" uid="uid://d2xgveel38bwc" path="res://assets/objects/traps/spinner.tres" id="23_213mq"]
-[ext_resource type="Texture2D" uid="uid://b0mt2xvmng0ww" path="res://assets/textures/biomes/forest/walls/forest_wall_02_big_tree.jpg" id="23_evnw4"]
 [ext_resource type="Script" uid="uid://c141nsmnc7en" path="res://scripts/TeleporterSpawn.gd" id="25_48wqn"]
 [ext_resource type="Resource" uid="uid://dnf4n7i60a5kp" path="res://assets/objects/teleporter/teleporter.tres" id="25_lrnxp"]
 [ext_resource type="Script" uid="uid://bjkjhbhykhrmp" path="res://scripts/BiomeTextureEntry.gd" id="30_tex"]
+[ext_resource type="Texture2D" uid="uid://de24b5ka6n8w0" path="res://assets/textures/biomes/forest/walls/forest_wall_02_big_tree.png" id="31_48wqn"]
+[ext_resource type="Texture2D" uid="uid://doh71lmimyin8" path="res://assets/textures/biomes/forest/walls/forest_wall_01.png" id="31_xxo23"]
 
 [sub_resource type="Resource" id="Resource_ceiling_default"]
 script = ExtResource("30_tex")
-albedo = ExtResource("1_bq1p8")
+albedo = ExtResource("2_ha57c")
 weight = 4
 
 [sub_resource type="Resource" id="Resource_obsjo"]
 script = ExtResource("30_tex")
-albedo = ExtResource("3_xwfpp")
+albedo = ExtResource("3_lrnxp")
 placement = 2
 min_distance_to_same = 2
 metadata/_custom_type_script = "uid://bjkjhbhykhrmp"
@@ -53,7 +53,7 @@ metadata/_custom_type_script = "uid://dwvpkpfjm8dyn"
 
 [sub_resource type="Resource" id="Resource_floor_default"]
 script = ExtResource("30_tex")
-albedo = ExtResource("1_ve4a7")
+albedo = ExtResource("6_lrnxp")
 
 [sub_resource type="Resource" id="Resource_evnw4"]
 script = ExtResource("7_w7wxy")
@@ -158,12 +158,12 @@ metadata/_custom_type_script = "uid://c4fbuyttq7iik"
 
 [sub_resource type="Resource" id="Resource_wall_default"]
 script = ExtResource("30_tex")
-albedo = ExtResource("7_bq1p8")
+albedo = ExtResource("31_xxo23")
 weight = 4
 
 [sub_resource type="Resource" id="Resource_bssym"]
 script = ExtResource("30_tex")
-albedo = ExtResource("23_evnw4")
+albedo = ExtResource("31_48wqn")
 placement = 4
 min_distance_to_same = 4
 metadata/_custom_type_script = "uid://bjkjhbhykhrmp"

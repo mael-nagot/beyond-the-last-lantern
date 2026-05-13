@@ -1574,7 +1574,10 @@ func _build_material(albedo: Texture2D) -> StandardMaterial3D:
 		mat.uv1_scale               = Vector3(scale_x, scale_y, scale_z)
 		mat.uv1_offset              = Vector3(0.0, biome.triplanar_y_offset, 0.0)
 
-	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	# Nearest (not linear) keeps pixel-art textures crisp — linear blends
+	# neighbouring texels and turns hand-drawn pixel walls to mush. Mipmaps
+	# are kept on so distant walls in fog don't sparkle/moiré.
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 
 	return mat
 
