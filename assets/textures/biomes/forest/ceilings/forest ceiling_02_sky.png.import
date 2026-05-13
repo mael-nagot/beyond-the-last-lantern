@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://b1s2v6l44cc8k"
-path="res://.godot/imported/forest ceiling_02_sky.jpg-d7ee46407cf0acc96cc6042fa6a77f0c.ctex"
+uid="uid://0dehivh0qw1r"
+path="res://.godot/imported/forest ceiling_02_sky.png-23fb4ac27e17c1e5a5c19c05af6322c6.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/textures/biomes/forest/ceilings/forest ceiling_02_sky.jpg"
-dest_files=["res://.godot/imported/forest ceiling_02_sky.jpg-d7ee46407cf0acc96cc6042fa6a77f0c.ctex"]
+source_file="res://assets/textures/biomes/forest/ceilings/forest ceiling_02_sky.png"
+dest_files=["res://.godot/imported/forest ceiling_02_sky.png-23fb4ac27e17c1e5a5c19c05af6322c6.ctex"]
 
 [params]
 

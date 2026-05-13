@@ -116,16 +116,20 @@ Additional texture types may be added later (roughness, AO, specular) but are no
 
 When importing textures in Godot, click the file in the FileSystem panel, go to the Import tab, and set:
 
-**Albedo textures:**
+**Albedo textures (pixel art):**
 ```
-Compress > Mode: VRAM Compressed
+Compress > Mode: Lossless
 Process > sRGB: on
 Mipmaps > Generate: on
 ```
 
-**Normal map textures:**
+> **Why Lossless, not VRAM Compressed?** VRAM Compressed (BCn / DXT block compression) is lossy — it averages 4×4 texel blocks and visibly softens hard pixel-art edges. Lossless keeps the source PNG pixels exactly as authored. The game's whole aesthetic is hand-drawn pixel art, so every albedo should be Lossless. (VRAM Compressed only makes sense for photographic textures or games that aren't pixel art.)
+
+> **Source files must be PNG.** JPEG bakes lossy color smear into pixel-art edges before Godot ever sees the file — a `.jpg` will look soft no matter what the import settings say. Re-export from GIMP as PNG.
+
+**Normal map textures:** (currently unused — see "no normal maps" under Art Style Guidelines below; kept here for reference if a future biome wants surface relief)
 ```
-Compress > Mode: VRAM Compressed
+Compress > Mode: Lossless
 Process > sRGB: off
 Process > Normal Map Invert Y: off (try on if normals look inverted)
 Mipmaps > Generate: on
@@ -133,6 +137,18 @@ Detect 3D: off
 ```
 
 Click **Reimport** after changing any setting.
+
+### Texture filtering (where pixel-art crispness actually comes from)
+
+Godot 4 has no per-texture "Filter" import setting. Filter is set on the *consumer* (the material or sprite that samples the texture), and pixel art only stays crisp if every consumer uses **Nearest** filtering:
+
+| Consumer | Where it's set | Mode |
+|---|---|---|
+| Biome wall / floor / ceiling materials | `DungeonView._build_material` | `TEXTURE_FILTER_NEAREST_WITH_MIPMAPS` |
+| All in-world `Sprite3D` billboards (items, chests, traps, decorations, projectiles) | per-sprite `texture_filter` in `DungeonView.gd` | `TEXTURE_FILTER_NEAREST` |
+| All 2D / UI textures | `project.godot` → `rendering/textures/canvas_textures/default_texture_filter=0` | Nearest (project-wide) |
+
+If a new wall/floor/ceiling texture looks blurry in-engine while looking crisp in GIMP, the problem is almost always (a) the source file is JPEG, or (b) a new code path built a material without setting `texture_filter` to a Nearest variant. The "_WITH_MIPMAPS" suffix matters for the biome material because walls in fog get sampled at small screen sizes and pure Nearest sparkles/moirés at distance.
 
 ---
 
