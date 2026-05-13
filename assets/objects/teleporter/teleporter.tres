@@ -2,12 +2,19 @@
 
 [ext_resource type="Script" uid="uid://bqbod3hu8aqcg" path="res://scripts/TeleporterData.gd" id="1_41xkn"]
 [ext_resource type="AudioStream" uid="uid://kcf60fg4rmg1" path="res://assets/sounds/objects/teleport/teleport.ogg" id="2_d4dp1"]
+[ext_resource type="Texture2D" uid="uid://deli4dh7i5d50" path="res://assets/textures/objects/teleporter/teleporter.png" id="2_ryj8h"]
 
 [resource]
 script = ExtResource("1_41xkn")
 name_key = "object.teleporter.name"
 description_key = "object.teleporter.description"
-light_color = Color(1, 0.85430586, 0.6651851, 1)
+sprite = ExtResource("2_ryj8h")
+world_height = 5.4
+glow_multiplier = 1.1
+pulse_amount = 0.25
+pulse_speed = 4.1
+lean_toward_player = 1.5
+light_color = Color(0.60067844, 0.9551669, 0.9398262, 1)
 light_energy = 2.0
 light_range = 4.0
 warp_sound = ExtResource("2_d4dp1")

@@ -454,10 +454,10 @@ Floor-tile pairs that warp the player between **disconnected islands** of the sa
 **Why this replaces the previous design.** The old draft required both teleporter endpoints to be chain-reachable from the entrance via corridors alone, on the grounds that "a teleporter mustn't be the only way to reach its destination, otherwise locked-door / lever puzzles get bypassed." The new chain-reachability extension (see below) makes teleporters themselves participate in chain reachability, so puzzle gating still validates correctly — a key on island B is chain-reachable iff some entrance→corridors→teleporter→island-B path exists. The old constraint is no longer needed.
 
 **Phased rollout** (each phase ends at a developer in-engine checkpoint, not just at PR time):
-- **A. Dumb warp** — data + random-pair placement + renderer + runtime fade/warp + biome wiring. Equivalent to the old Task 6 design; ships a working teleporter pair with no partitioning. Validates the warp UX in isolation.
-- **B. Map glyph** — per-pair hue rotation in `MapPopup`.
-- **C. Island topology** — chain reachability v3 extension, partition pass (seals + spanning-tree placement), downstream pass co-location guards, stress test. Replaces phase A's dumb placement.
-- **D. Docs + PR** — final sweep, manual asset checklist, PR test plan.
+- ✅ **A. Dumb warp** — data + random-pair placement + renderer + runtime fade/warp + biome wiring. Equivalent to the old Task 6 design; ships a working teleporter pair with no partitioning. Validates the warp UX in isolation.
+- ✅ **B. Map glyph** — per-pair hue rotation in `MapPopup`.
+- ✅ **C. Island topology** — chain reachability v3 extension, partition pass (seals + spanning-tree placement), downstream pass co-location guards, 25-seed stress test. Backwards-compat: a biome with `island_count_max <= 1` keeps Phase A behaviour; `>= 2` opts into partition mode. Phase A and Phase C are mutually exclusive — partition mode IGNORES `count_min/count_max` because pair count is derived from K-1.
+- **D. Future polish** — animated rune-circle decal, K=3+ tuning across more biomes, sub-level transitions reusing the fade helper.
 
 **Data:**
 - `TeleporterData.gd` (Resource): floor sprite (`decal_sprite` or `frames` for animated), `world_size`, `y_offset`, `light_color`/`light_energy`, `warp_sound`, optional `seal_sound` (played when player walks into a sealed wall — feedback that there's no way through here).
