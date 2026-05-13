@@ -4,10 +4,20 @@ func test_default_field_values() -> void:
 	var data := TeleporterData.new()
 	assert_eq(data.name_key, "")
 	assert_eq(data.description_key, "")
-	assert_null(data.decal_sprite)
+	assert_null(data.sprite)
 	assert_null(data.frames)
-	assert_eq(data.decal_world_size, 1.0)
-	assert_eq(data.y_offset, 0.01)
+	assert_eq(data.world_height, 1.8)
+	assert_eq(data.y_offset, 0.0)
+	# Slightly transparent + glowing + pulsing by default — sells the
+	# "living energy ball" feel without designer wiring. All tunable.
+	assert_eq(data.alpha, 0.8)
+	assert_eq(data.glow_multiplier, 1.5)
+	assert_eq(data.pulse_amount, 0.5)
+	assert_eq(data.pulse_speed, 3.0)
+	assert_eq(data.pulse_phase_per_pair, 1.6)
+	# Lean defaults to 0 — designers opt into the "rune leans toward
+	# the player" effect per-biome.
+	assert_eq(data.lean_toward_player, 0.0)
 	assert_eq(data.light_color, Color(1.0, 0.7, 0.4))
 	assert_eq(data.light_energy, 1.0)
 	assert_eq(data.light_range, 3.0)
@@ -33,10 +43,10 @@ func test_is_animated_true_when_frames_set() -> void:
 	data.frames = SpriteFrames.new()
 	assert_true(data.is_animated())
 
-func test_is_animated_prefers_frames_even_when_decal_also_set() -> void:
-	# Renderer precedence: frames > decal_sprite. Lock the rule so a
-	# future refactor that flips it gets caught by tests.
+func test_is_animated_prefers_frames_even_when_sprite_also_set() -> void:
+	# Renderer precedence: frames > sprite. Lock the rule so a future
+	# refactor that flips it gets caught by tests.
 	var data := TeleporterData.new()
-	data.decal_sprite = PlaceholderTexture2D.new()
+	data.sprite = PlaceholderTexture2D.new()
 	data.frames = SpriteFrames.new()
 	assert_true(data.is_animated())

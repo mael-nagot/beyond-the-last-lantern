@@ -165,6 +165,13 @@ func generate() -> void:
 		push_warning("LevelGenerator: regenerating...")
 		generate()
 		return
+	# Phase 15 Task 6 — Phase C. Partition pass runs FIRST (right after
+	# _validate_path) so every downstream placement pass sees the
+	# island-split topology. Only fires if the biome opts in via
+	# `island_count_max >= 2`; otherwise the legacy Phase A
+	# `_place_teleporters()` at the end of the pipeline handles
+	# shortcut pairs instead. The two modes are mutually exclusive.
+	_partition_and_place_teleporters_if_enabled()
 	_place_objects()
 	_place_doors()
 	_place_linked_objects()
@@ -675,7 +682,11 @@ func _is_door_endpoint(pos: Vector2i) -> bool:
 	#   - it has exactly 2 non-wall orthogonal neighbours (1-wide
 	#     corridor — straight or bend; T-junctions, dead-ends, room
 	#     interiors are excluded by this count),
-	#   - it isn't already holding a chest / blocking object.
+	#   - it isn't already holding a chest / blocking object,
+	#   - it isn't already a teleporter endpoint (Phase 15 Task 6 —
+	#     Phase C: the partition pass runs before doors / secret walls,
+	#     so a teleporter endpoint shouldn't double-host a door slab or
+	#     a secret-wall edge endpoint).
 	if not _in_bounds(pos.x, pos.y):
 		return false
 	var cell: GridCell = grid[pos.x][pos.y]
@@ -686,6 +697,8 @@ func _is_door_endpoint(pos: Vector2i) -> bool:
 	if cell.cell_type == GridCell.CellType.ENTRANCE or cell.cell_type == GridCell.CellType.EXIT:
 		return false
 	if cell.object != null:
+		return false
+	if cell.teleporter != null:
 		return false
 	var floor_neighbours := 0
 	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
@@ -1334,9 +1347,18 @@ func _chain_reachable_from_entrance(excluded_door_keys: Dictionary = {}, extra_c
 			continue
 		if door.data != null and door.data.interactable and not door.is_key_locked() and door.linked_levers.is_empty():
 			open_door_keys[k0] = true
+	# Phase 15 Task 6 — Phase C / chain reachability v3. Build the
+	# teleporter-links dict once at the top so every BFS iteration of
+	# the fixed-point loop sees the same warp graph. Each endpoint
+	# maps to its partner; the BFS enqueues the partner whenever it
+	# visits an endpoint, modelling teleporter pairs as bidirectional
+	# permission-free edges. Empty when the level has no teleporters
+	# (Phase A levels still set this), so this is a strict superset of
+	# the legacy chain-reachability behaviour.
+	var teleporter_links: Dictionary = _build_teleporter_links()
 	var reachable: Dictionary = {}
 	while true:
-		reachable = _bfs_with_doors_state(entrance_pos, open_door_keys, extra_closed_edges)
+		reachable = _bfs_with_doors_state(entrance_pos, open_door_keys, extra_closed_edges, teleporter_links)
 		var progressed: bool = false
 		# Collect keys lying on the floor or inside reachable chests.
 		for x in range(grid_width):
@@ -1415,18 +1437,40 @@ func _chain_reachable_from_entrance(excluded_door_keys: Dictionary = {}, extra_c
 			return reachable
 	return {}
 
-func _bfs_with_doors_state(origin: Vector2i, open_door_keys: Dictionary, extra_closed_edges: Dictionary = {}) -> Dictionary:
+func _bfs_with_doors_state(origin: Vector2i, open_door_keys: Dictionary, extra_closed_edges: Dictionary = {}, teleporter_links: Dictionary = {}) -> Dictionary:
 	# BFS treating each door in `doors` as closed UNLESS its edge_key
 	# is in `open_door_keys`. `extra_closed_edges` lets callers seal
 	# additional edges that aren't doors (used by the secret-wall
 	# gating check to simulate "what if this corridor edge were a
-	# real wall?"). Powers the chain-reachability loop.
+	# real wall?"). `teleporter_links` (Phase 15 Task 6 — Phase C
+	# / chain reachability v3) maps each teleporter endpoint cell to
+	# its partner, so BFS enqueues the partner whenever it visits an
+	# endpoint — teleporters participate as bidirectional graph edges.
+	# Powers the chain-reachability loop.
 	var closed_edges: Dictionary = extra_closed_edges.duplicate()
 	for door in doors:
 		var key := DoorInstance.edge_key(door.cell_a, door.cell_b)
 		if not open_door_keys.has(key):
 			closed_edges[key] = true
-	return _bfs_walkable_with_closed_edges(origin, closed_edges)
+	return _bfs_walkable_with_closed_edges(origin, closed_edges, teleporter_links)
+
+# Phase 15 Task 6 — Phase C / chain reachability v3. Flattens
+# `self.teleporters` into the {endpoint → partner} dict the BFS
+# consumes. Each pair contributes BOTH directions so the BFS doesn't
+# need to know which endpoint it visited first. Cheap O(N) where N is
+# the number of placed pairs (typically 1–3 per level); built once
+# per `_chain_reachable_from_entrance` call rather than per BFS pass
+# inside the fixed-point loop. Empty when no pairs are placed (Phase A
+# levels with no teleporter_spawn OR Phase A levels where placement
+# rolled count = 0).
+func _build_teleporter_links() -> Dictionary:
+	var result: Dictionary = {}
+	for inst in teleporters:
+		if inst == null:
+			continue
+		result[inst.cell_a] = inst.cell_b
+		result[inst.cell_b] = inst.cell_a
+	return result
 
 func _has_reachable_neighbour(pos: Vector2i, reachable: Dictionary) -> bool:
 	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
@@ -1435,11 +1479,32 @@ func _has_reachable_neighbour(pos: Vector2i, reachable: Dictionary) -> bool:
 	return false
 
 
-func _bfs_walkable_with_closed_edges(origin: Vector2i, closed_edges: Dictionary) -> Dictionary:
+func _bfs_walkable_with_closed_edges(origin: Vector2i, closed_edges: Dictionary, teleporter_links: Dictionary = {}) -> Dictionary:
 	# Same as _bfs_walkable_from but treats the given edges as walls.
 	# Powers chain reachability for linked-pair validation.
+	#
+	# `teleporter_links` (Phase 15 Task 6 — Phase C / chain reachability
+	# v3) maps each teleporter endpoint cell to its partner. Whenever
+	# BFS visits an endpoint, it enqueues the partner — this models
+	# teleporters as bidirectional graph edges in the reachability
+	# simulation. Permission-free (no key required), so it slots
+	# cleanly into BFS without needing a separate fixed-point pass —
+	# every existing chain-reachability caller (linked-object placement,
+	# key-door placement, secret-wall gating) gets island-aware
+	# reachability transparently. Empty dict means "no teleporters" —
+	# legacy callers and Phase A levels are unaffected.
 	var visited: Dictionary = {origin: true}
 	var queue: Array = [origin]
+	# If the origin itself is a teleporter endpoint, seed its partner.
+	# Edge case — would only fire if a future caller starts a BFS from
+	# a teleporter cell (today the entrance is always the origin and
+	# the placer excludes entrance from teleporter endpoints), but
+	# documents the symmetric semantics.
+	if teleporter_links.has(origin):
+		var seed_partner: Vector2i = teleporter_links[origin]
+		if not visited.has(seed_partner) and _in_bounds(seed_partner.x, seed_partner.y) and not grid[seed_partner.x][seed_partner.y].is_blocked:
+			visited[seed_partner] = true
+			queue.append(seed_partner)
 	while not queue.is_empty():
 		var current: Vector2i = queue.pop_front()
 		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
@@ -1457,6 +1522,18 @@ func _bfs_walkable_with_closed_edges(origin: Vector2i, closed_edges: Dictionary)
 				continue
 			visited[npos] = true
 			queue.append(npos)
+			# Phase 15 Task 6 — Phase C / chain reachability v3.
+			# Teleporter participation: if the cell we just enqueued
+			# is an endpoint, also enqueue its partner. Bidirectional
+			# by construction (each pair seeds both directions in the
+			# links dict), so we never miss the reverse warp. Visited
+			# check above prevents re-enqueueing once the partner is
+			# already reached via corridors.
+			if teleporter_links.has(npos):
+				var partner: Vector2i = teleporter_links[npos]
+				if not visited.has(partner) and _in_bounds(partner.x, partner.y) and not grid[partner.x][partner.y].is_blocked:
+					visited[partner] = true
+					queue.append(partner)
 	return visited
 
 func _obj_label(data: ObjectData) -> String:
@@ -1687,6 +1764,8 @@ func _eligible_segment_cells(segment: Array) -> Array:
 			continue
 		if cell.trap != null:
 			continue
+		if cell.teleporter != null:
+			continue
 		if not cell.items.is_empty():
 			continue
 		result.append(pos)
@@ -1780,6 +1859,8 @@ func _eligible_room_cells(room: Rect2i) -> Array:
 			if cell.object != null:
 				continue
 			if cell.trap != null:
+				continue
+			if cell.teleporter != null:
 				continue
 			if not cell.items.is_empty():
 				continue
@@ -1907,6 +1988,8 @@ func _trap_candidates_for_spawn(spawn: TrapSpawn, cells_by_type: Dictionary) -> 
 			if cell.object != null:
 				continue
 			if cell.trap != null:
+				continue
+			if cell.teleporter != null:
 				continue
 			if not cell.items.is_empty():
 				continue
@@ -2490,6 +2573,12 @@ func _pick_plate_cell_for_room(path: Array, launcher_cell: Vector2i, data: Proje
 		# time, and the decals must not z-fight.
 		if grid[plate_pos.x][plate_pos.y].trap != null:
 			continue
+		# Phase 15 Task 6 — Phase C. Skip plate placements that land on
+		# a teleporter endpoint. A warp glyph and a pressure-plate decal
+		# would z-fight visually, and stepping onto the plate to trigger
+		# the launcher mid-warp would be unreadable.
+		if grid[plate_pos.x][plate_pos.y].teleporter != null:
+			continue
 		if _manhattan(plate_pos, launcher_cell) < min_to_launcher:
 			continue
 		candidates.append(plate_pos)
@@ -2535,6 +2624,13 @@ func _pick_plate_cell_for_corridor(path: Array, launcher_cell: Vector2i, junctio
 		# so the check is simply "is `cell.trap` non-null at this
 		# moment".
 		if grid[plate_pos.x][plate_pos.y].trap != null:
+			continue
+		# Phase 15 Task 6 — Phase C. Same z-fight + "stepping on this
+		# triggers something the player can't make sense of" reasoning
+		# as spike-trap exclusion: a plate decal under a teleporter
+		# rune circle would be visually unreadable, and the player
+		# warps mid-step before the launcher could meaningfully react.
+		if grid[plate_pos.x][plate_pos.y].teleporter != null:
 			continue
 		# Step distance from launcher along the fire direction equals
 		# Manhattan distance for cardinal flight.
@@ -2794,6 +2890,14 @@ func _classify_floor_cells() -> Dictionary:
 			# to consider trap cells (none today) would build their own
 			# candidate set instead of going through this helper.
 			if cell.trap != null:
+				continue
+			# Teleporter cells are also walkable but reserved — Phase 15
+			# Task 6 / Phase C places teleporter pairs BEFORE all other
+			# floor passes, so a chest / item / trap on the same cell as
+			# a rune circle would visually overlap the warp glyph and
+			# step-on a teleporter while standing on a trap. Same
+			# exclusion treatment as trap cells.
+			if cell.teleporter != null:
 				continue
 			var pos := Vector2i(x, y)
 			if _is_dead_end(pos):
@@ -3055,6 +3159,450 @@ func get_secret_wall_at_edge(a: Vector2i, b: Vector2i) -> SecretWallInstance:
 	return _secret_walls_by_edge.get(SecretWallInstance.edge_key(a, b), null)
 
 # -------------------------------------------------------
+# Teleporters (Phase 15 Task 6 — Phase C: island topology)
+# -------------------------------------------------------
+# Partition pass runs RIGHT AFTER `_validate_path()` and BEFORE every
+# object / door / trap / item pass. It seals K-1 articulation corridor
+# cells (converting them to WALL) and places K-1 teleporter pairs as
+# a spanning tree connecting the K resulting islands. After this
+# pass, every downstream placement pass sees the partitioned topology
+# and chain reachability v3 (`_chain_reachable_from_entrance`)
+# transparently treats teleporters as bidirectional graph edges, so
+# lever / key / chest placement keeps validating correctly even when
+# the chain crosses an island boundary via a warp.
+#
+# Atomic rollback: any failure (no articulation candidates, no valid
+# spanning-tree placement, chain reachability fails) restores every
+# sealed cell to FLOOR and clears placed teleporters. A flat level
+# is fine; a broken one is not.
+
+# Maximum attempts to find a viable seal-then-place configuration
+# before giving up and shipping a flat (no partition) level. Each
+# attempt rolls fresh seal candidates because the order of articulation
+# checks depends on RNG via _pick_seal_cells's pool shuffle.
+const _PARTITION_OUTER_ATTEMPTS := 8
+
+func _partition_and_place_teleporters_if_enabled() -> void:
+	if teleporter_spawn_config == null:
+		return
+	var spawn := teleporter_spawn_config
+	if not spawn.uses_partition():
+		return
+	if spawn.data == null:
+		push_warning("LevelGenerator: teleporter_spawn set with island_count >= 2 but data is null — partition disabled this level")
+		return
+	# Roll K (number of islands) once per level. Clamped to >= 2 since
+	# partition mode requires at least one split.
+	var k_min: int = max(2, spawn.island_count_min)
+	var k_max: int = max(k_min, spawn.island_count_max)
+	var K: int = randi_range(k_min, k_max)
+	# Outer retry loop: a single set of seal cells might happen to leave
+	# an island that's too small to host a teleporter endpoint with the
+	# configured min_distance_between_partners. Reroll seals up to
+	# `_PARTITION_OUTER_ATTEMPTS` times before falling through to a
+	# flat level.
+	for attempt in range(_PARTITION_OUTER_ATTEMPTS):
+		if _try_partition_attempt(spawn, K):
+			return
+	push_warning("LevelGenerator: partition failed after %d attempts (K=%d) — shipping a flat level" % [_PARTITION_OUTER_ATTEMPTS, K])
+
+# One attempt at the seal + spanning-tree pipeline. Returns true on
+# success (level is partitioned + warps placed), false on rollback.
+# Failure modes — each rolls back atomically:
+#   - fewer than K-1 viable seal candidates (loopy maze)
+#   - seals don't produce exactly K islands (rare; defensive against
+#     a bug in `_pick_seal_cells` that picked non-articulation cells)
+#   - any spanning-tree pair fails to find two valid endpoints across
+#     its assigned island pair (island too small / too cramped)
+#   - final chain reachability fails (exit unreachable from entrance
+#     under the warp graph — would mean the spanning tree didn't
+#     actually connect the entrance's island to the exit's island)
+func _try_partition_attempt(spawn: TeleporterSpawn, K: int) -> bool:
+	# Snapshot for atomic rollback. teleporters was empty at the start
+	# of generate(), but we snapshot defensively in case a future
+	# pipeline change places some teleporters earlier.
+	var teleporters_snapshot: Array = teleporters.duplicate()
+	var seal_cells: Array[Vector2i] = []
+	# 1. Pick K-1 articulation corridor cells.
+	var picked: Array[Vector2i] = _pick_seal_cells(K - 1, spawn)
+	if picked.size() < K - 1:
+		return false
+	# 2. Apply seals (convert each picked cell to WALL).
+	for cell in picked:
+		grid[cell.x][cell.y].cell_type = GridCell.CellType.WALL
+		seal_cells.append(cell)
+	# 3. Identify K connected components.
+	var islands: Array = _identify_islands()
+	if islands.size() != K:
+		# Defensive — the articulation check should guarantee this, but
+		# a degenerate maze (e.g. a tight T-junction whose three arms
+		# are each one cell long) could in theory produce a different
+		# count. Roll back and let the outer loop retry.
+		_rollback_partition(seal_cells, teleporters_snapshot)
+		return false
+	# 4. Build spanning tree of islands rooted at the entrance's
+	# island. Tree edges are pairs of island indices.
+	var entrance_island: int = _island_index_for(islands, entrance_pos)
+	if entrance_island < 0:
+		_rollback_partition(seal_cells, teleporters_snapshot)
+		return false
+	var tree_edges: Array = _spanning_tree_of_islands(islands, entrance_island)
+	if tree_edges.size() != K - 1:
+		# Shouldn't happen — a spanning tree over K nodes has exactly
+		# K-1 edges by definition. Defensive guard.
+		_rollback_partition(seal_cells, teleporters_snapshot)
+		return false
+	# 5. Place K-1 teleporter pairs, one per tree edge.
+	var pair_index: int = 0
+	for edge in tree_edges:
+		var island_a: Array = islands[edge[0]]
+		var island_b: Array = islands[edge[1]]
+		var ok: bool = _place_teleporter_pair_across_islands(spawn, island_a, island_b, pair_index)
+		if not ok:
+			_rollback_partition(seal_cells, teleporters_snapshot)
+			return false
+		pair_index += 1
+	# 6. Final validation: chain reachability from entrance reaches
+	# the exit. Without this check, a buggy spanning tree could leave
+	# the exit's island unreachable even though structurally the
+	# islands are bridged.
+	var reachable: Dictionary = _chain_reachable_from_entrance()
+	if not reachable.has(exit_pos):
+		push_warning("LevelGenerator: partition broke entrance→exit reachability — rolling back")
+		_rollback_partition(seal_cells, teleporters_snapshot)
+		return false
+	return true
+
+# Picks `count` articulation corridor cells. An articulation cell is
+# a 1-wide corridor floor cell (exactly 2 non-wall neighbours, which
+# `_is_door_endpoint` already captures) whose removal disconnects the
+# graph. The picker is QUALITY-DRIVEN, not random:
+#   1. Find every articulation candidate on the original grid.
+#   2. Score each by the size of the SMALLER component it produces
+#      (large = more balanced split, small = the cell strands a stub).
+#   3. Reject candidates below `spawn.min_island_size` — a 1-3 cell
+#      stub strands the warp on nothing for the player to do.
+#   4. Sort the remaining candidates by smaller-component-size descending
+#      and incrementally seal them (each new seal is re-evaluated
+#      against the post-previous-seals grid). Adds light jitter — pick
+#      randomly among the top quartile — so different seeds don't all
+#      land on the same maximally-balanced seal cell.
+#
+# Greedy on the SORTED order is good enough for K=2 (the common case).
+# For K=3+ the second seal is scored against the post-first-seal grid,
+# which can leave fewer balanced options; the outer retry loop reseeds
+# if we run out of candidates.
+func _pick_seal_cells(count: int, spawn: TeleporterSpawn) -> Array[Vector2i]:
+	var picked: Array[Vector2i] = []
+	if count <= 0:
+		return picked
+	var min_to_ee: int = max(0, spawn.min_seal_distance_to_entrance_exit)
+	var min_between: int = max(0, spawn.min_seal_distance_between_seals)
+	var min_island: int = max(1, spawn.min_island_size)
+	# Each iteration picks ONE seal. Re-scoring per iteration means K=3+
+	# picks are evaluated against the post-previous-seals grid (so the
+	# second seal doesn't accidentally re-strand a tiny piece of what
+	# was a healthy island).
+	for _i in range(count):
+		var scored: Array = _score_seal_candidates(min_to_ee, min_island, picked, min_between)
+		if scored.is_empty():
+			break
+		# Pick from the top quartile to add seed-to-seed variety while
+		# still biasing toward balanced splits. With 20 candidates the
+		# top 5 typically share similar "smaller component" sizes.
+		var top_n: int = max(1, scored.size() / 4)
+		var pick_entry: Dictionary = scored[randi() % top_n]
+		var cand: Vector2i = pick_entry["cell"]
+		# Commit this seal temporarily so the next iteration's scoring
+		# sees the updated grid. The outer pipeline owns the atomic
+		# commit; we roll these back below before returning.
+		grid[cand.x][cand.y].cell_type = GridCell.CellType.WALL
+		picked.append(cand)
+	# Roll back the temporary seals — the outer pipeline applies them
+	# atomically alongside the teleporter placements. Keeping the
+	# state machine in `_try_partition_attempt` instead of `_pick_seal_cells`
+	# means rollback paths only have to undo one layer of state, not two.
+	for p in picked:
+		grid[p.x][p.y].cell_type = GridCell.CellType.FLOOR
+	return picked
+
+# Scoring pass for `_pick_seal_cells`. Returns an Array of
+# `{cell: Vector2i, smaller_size: int}` dicts SORTED descending by
+# `smaller_size`. Each candidate must be:
+#   - a 1-wide corridor cell on the CURRENT grid (`_is_door_endpoint`)
+#   - ≥ `min_to_ee` Manhattan tiles from entrance AND exit
+#   - ≥ `min_between` Manhattan tiles from every already-picked seal
+#   - an articulation point on the CURRENT grid
+#   - produces a smaller component of ≥ `min_island_size` cells
+# The smaller component size is computed via
+# `_smaller_component_size_if_sealed`, which runs one BFS per candidate
+# — O(V * pool_size) total, well under a millisecond on a 21x21 grid.
+func _score_seal_candidates(min_to_ee: int, min_island_size: int, already_picked: Array, min_between: int) -> Array:
+	var scored: Array = []
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var pos := Vector2i(x, y)
+			if not _is_door_endpoint(pos):
+				continue
+			if _manhattan(pos, entrance_pos) < min_to_ee:
+				continue
+			if _manhattan(pos, exit_pos) < min_to_ee:
+				continue
+			var too_close: bool = false
+			for p in already_picked:
+				if _manhattan(pos, p) < min_between:
+					too_close = true
+					break
+			if too_close:
+				continue
+			if not _is_articulation_cell(pos):
+				continue
+			var smaller_size: int = _smaller_component_size_if_sealed(pos)
+			if smaller_size < min_island_size:
+				continue
+			scored.append({"cell": pos, "smaller_size": smaller_size})
+	scored.sort_custom(func(a, b): return a["smaller_size"] > b["smaller_size"])
+	return scored
+
+# Returns the size of the SMALLER component produced by virtually
+# sealing `pos`. Uses the existing `_bfs_walkable_skipping` helper to
+# count entrance-reachable floor cells; the other component's size is
+# `total_floor - 1 - reachable_count` (subtract 1 for `pos` itself,
+# which is virtually walled). The minimum of these two is the
+# "smaller-component" score the seal picker uses to balance splits.
+# A non-articulation cell would produce smaller_size = 0 (the seal
+# doesn't disconnect anything) — but the picker filters those out via
+# `_is_articulation_cell` before calling this, so we always return a
+# meaningful number.
+func _smaller_component_size_if_sealed(pos: Vector2i) -> int:
+	var skip := {pos: true}
+	var entrance_side: Dictionary = _bfs_walkable_skipping(entrance_pos, skip)
+	var total: int = 0
+	for x in range(grid_width):
+		for y in range(grid_height):
+			if grid[x][y].cell_type != GridCell.CellType.WALL:
+				total += 1
+	# `pos` is non-wall but skipped — subtract it from the total floor
+	# count so the two sides sum correctly.
+	var other_side: int = total - 1 - entrance_side.size()
+	return min(entrance_side.size(), other_side)
+
+# True iff converting `pos` to WALL would disconnect the floor graph.
+# BFS from entrance with `pos` treated as wall — if any floor cell
+# (other than `pos` itself) becomes unreachable, `pos` is an
+# articulation point. O(V) per call; called O(pool_size) times per
+# partition attempt, so total cost is O(V * pool_size) ≈ O(V²) on a
+# typical 21x21 grid — well under a millisecond.
+func _is_articulation_cell(pos: Vector2i) -> bool:
+	if pos == entrance_pos or pos == exit_pos:
+		return false
+	if grid[pos.x][pos.y].cell_type == GridCell.CellType.WALL:
+		return false
+	# Count floor cells reachable from entrance WITHOUT going through
+	# `pos`. If that count is less than (total_floor_cells - 1),
+	# removing `pos` strands at least one cell.
+	var skip := {pos: true}
+	var visited: Dictionary = _bfs_walkable_skipping(entrance_pos, skip)
+	# Total non-wall cells minus `pos` (which we're virtually removing).
+	var total: int = 0
+	for x in range(grid_width):
+		for y in range(grid_height):
+			if grid[x][y].cell_type != GridCell.CellType.WALL:
+				total += 1
+	# `pos` itself is a non-wall but skip'd, so subtract 1.
+	return visited.size() < (total - 1)
+
+# BFS from `origin` skipping cells in `skip_cells`. Used by the
+# articulation check; intentionally simpler than the chain-reachability
+# BFS (no doors / teleporters considered — the question is purely
+# "if I delete this cell, does the floor graph stay connected?").
+func _bfs_walkable_skipping(origin: Vector2i, skip_cells: Dictionary) -> Dictionary:
+	if skip_cells.has(origin):
+		return {}
+	var visited: Dictionary = {origin: true}
+	var queue: Array = [origin]
+	while not queue.is_empty():
+		var current: Vector2i = queue.pop_front()
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			var nx: int = current.x + d.x
+			var ny: int = current.y + d.y
+			if not _in_bounds(nx, ny):
+				continue
+			var npos := Vector2i(nx, ny)
+			if visited.has(npos):
+				continue
+			if skip_cells.has(npos):
+				continue
+			if grid[nx][ny].cell_type == GridCell.CellType.WALL:
+				continue
+			visited[npos] = true
+			queue.append(npos)
+	return visited
+
+# Computes the K connected components of the floor graph (post-seal).
+# Returns an Array of Arrays — each inner array is the list of cells
+# belonging to that island. Order matches BFS discovery order; the
+# entrance's island always exists and `_island_index_for` finds it.
+func _identify_islands() -> Array:
+	var islands: Array = []
+	var visited: Dictionary = {}
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var pos := Vector2i(x, y)
+			if visited.has(pos):
+				continue
+			if grid[x][y].cell_type == GridCell.CellType.WALL:
+				continue
+			# Flood-fill from this cell to discover a new island.
+			var island_cells: Array[Vector2i] = []
+			var queue: Array = [pos]
+			visited[pos] = true
+			while not queue.is_empty():
+				var current: Vector2i = queue.pop_front()
+				island_cells.append(current)
+				for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+					var nx: int = current.x + d.x
+					var ny: int = current.y + d.y
+					if not _in_bounds(nx, ny):
+						continue
+					var npos := Vector2i(nx, ny)
+					if visited.has(npos):
+						continue
+					if grid[nx][ny].cell_type == GridCell.CellType.WALL:
+						continue
+					visited[npos] = true
+					queue.append(npos)
+			islands.append(island_cells)
+	return islands
+
+# Linear scan for the island containing `target`. Returns -1 if no
+# island matches — shouldn't happen for valid entrance / exit cells
+# since both are floor by construction, but defensive.
+func _island_index_for(islands: Array, target: Vector2i) -> int:
+	for i in range(islands.size()):
+		if (islands[i] as Array).has(target):
+			return i
+	return -1
+
+# Builds a spanning tree over K islands as a sequence of (a, b) index
+# pairs. Rooted at `root_index` (the entrance's island) so the tree
+# expands outward — a BFS over the "two islands are adjacent if a
+# cell in one is 4-adjacent to a sealed cell that borders the other"
+# graph. Simpler model used here: greedily connect each unvisited
+# island to the closest visited one (Manhattan between any pair of
+# cells across the two islands). Produces K-1 edges by induction.
+func _spanning_tree_of_islands(islands: Array, root_index: int) -> Array:
+	var tree: Array = []
+	var in_tree: Dictionary = {root_index: true}
+	var n: int = islands.size()
+	# K-1 iterations — each adds one previously-unconnected island.
+	while in_tree.size() < n:
+		var best_in: int = -1
+		var best_out: int = -1
+		var best_dist: int = -1  # -1 sentinel = "no candidate yet"
+		for i in in_tree.keys():
+			for j in range(n):
+				if in_tree.has(j):
+					continue
+				var dist: int = _islands_closest_distance(islands[i], islands[j])
+				if best_dist < 0 or dist < best_dist:
+					best_dist = dist
+					best_in = i
+					best_out = j
+		if best_out < 0:
+			# All remaining islands are unreachable from the seed tree
+			# — shouldn't happen with a well-formed sealed grid where
+			# every island has SOME cell pair within reasonable distance.
+			break
+		tree.append([best_in, best_out])
+		in_tree[best_out] = true
+	return tree
+
+# Cheapest Manhattan between any cell of `a` and any cell of `b`.
+# Quadratic in the island sizes but island sizes are typically small
+# (< 100 cells each), so total cost stays tiny.
+func _islands_closest_distance(a: Array, b: Array) -> int:
+	var best: int = -1
+	for ca in a:
+		for cb in b:
+			var d: int = _manhattan(ca, cb)
+			if best < 0 or d < best:
+				best = d
+	return best
+
+# Place one teleporter pair across `island_a` and `island_b`. The two
+# endpoints sit one in each island; they satisfy
+# `min_distance_between_partners` (graceful-degrade), avoid entrance /
+# exit, and avoid any cells already holding objects / traps / items /
+# previous teleporter endpoints (defensive even though Phase C runs
+# before every other placement pass — keeps the function reusable if
+# the order ever shifts).
+func _place_teleporter_pair_across_islands(spawn: TeleporterSpawn, island_a: Array, island_b: Array, pair_index: int) -> bool:
+	var pool_a: Array[Vector2i] = _filter_island_for_teleporter(island_a)
+	var pool_b: Array[Vector2i] = _filter_island_for_teleporter(island_b)
+	if pool_a.is_empty() or pool_b.is_empty():
+		return false
+	pool_a.shuffle()
+	pool_b.shuffle()
+	# Graceful-degrade on min_distance_between_partners. The picked
+	# pair is the first (a, b) the shuffle order produces that meets
+	# the current distance threshold.
+	var min_partner: int = max(0, spawn.min_distance_between_partners)
+	var d := min_partner
+	while d >= 0:
+		for cell_a in pool_a:
+			for cell_b in pool_b:
+				if _manhattan(cell_a, cell_b) < d:
+					continue
+				var inst := TeleporterInstance.create(spawn.data, cell_a, cell_b, pair_index)
+				grid[cell_a.x][cell_a.y].teleporter = inst
+				grid[cell_b.x][cell_b.y].teleporter = inst
+				teleporters.append(inst)
+				return true
+		d -= 1
+	return false
+
+# Returns the subset of `island` cells eligible to host a teleporter
+# endpoint: floor cells, not entrance / exit, no object / trap /
+# spinner / item / existing teleporter. In partition mode this runs
+# BEFORE all other placement passes so the per-cell check is mostly
+# defensive — entrance / exit and current teleporters are the only
+# real exclusions today.
+func _filter_island_for_teleporter(island: Array) -> Array[Vector2i]:
+	var result: Array[Vector2i] = []
+	for pos in island:
+		if pos == entrance_pos or pos == exit_pos:
+			continue
+		var cell: GridCell = grid[pos.x][pos.y]
+		if cell.cell_type != GridCell.CellType.FLOOR:
+			continue
+		if cell.object != null or cell.trap != null or cell.spinner != null:
+			continue
+		if not cell.items.is_empty():
+			continue
+		if cell.teleporter != null:
+			continue
+		result.append(pos)
+	return result
+
+# Undo a partition attempt atomically. Restores every sealed cell to
+# FLOOR and clears the teleporters list back to the snapshot. Per-cell
+# teleporter slot pointers are cleared by iterating the discarded
+# instances (rather than walking the whole grid).
+func _rollback_partition(seal_cells: Array, teleporters_snapshot: Array) -> void:
+	for pos in seal_cells:
+		grid[pos.x][pos.y].cell_type = GridCell.CellType.FLOOR
+	# Clear per-cell teleporter slots for any instance added since the
+	# snapshot.
+	for i in range(teleporters_snapshot.size(), teleporters.size()):
+		var inst: TeleporterInstance = teleporters[i]
+		if inst == null:
+			continue
+		grid[inst.cell_a.x][inst.cell_a.y].teleporter = null
+		grid[inst.cell_b.x][inst.cell_b.y].teleporter = null
+	teleporters = teleporters_snapshot
+
+# -------------------------------------------------------
 # Teleporters (Phase 15 Task 6 — Phase A: dumb placement)
 # -------------------------------------------------------
 # Phase A places `count` random teleporter PAIRS on non-special floor
@@ -3072,6 +3620,11 @@ func _place_teleporters() -> void:
 	if teleporter_spawn_config == null:
 		return
 	var spawn := teleporter_spawn_config
+	# Phase 15 Task 6 — Phase C. When partition mode is active the
+	# partition pass at the START of generation has already placed
+	# the spanning-tree pairs; skip the legacy Phase A shortcut pass.
+	if spawn.uses_partition():
+		return
 	if spawn.data == null:
 		push_warning("LevelGenerator: teleporter_spawn set but data is null — skipping teleporter placement")
 		return
@@ -3340,6 +3893,12 @@ func _classify_spinner_candidate_cells(plate_cells: Dictionary) -> Dictionary:
 				continue
 			if cell.spinner != null:
 				continue
+			# Phase 15 Task 6 — Phase C. Teleporters placed FIRST in
+			# partition mode; a spinner on a teleporter endpoint would
+			# spin the player after the warp lands, undoing the warp's
+			# directional intent + double-stacking decals.
+			if cell.teleporter != null:
+				continue
 			if not cell.items.is_empty():
 				continue
 			if plate_cells.has(pos):
@@ -3510,6 +4069,14 @@ func _eligible_spinner_segment_cells(segment: Array) -> Array:
 			continue
 		if cell.spinner != null:
 			continue
+		# Phase 15 Task 6 — Phase C. Teleporters placed FIRST in
+		# partition mode; a spinner co-located with a warp would spin
+		# the player on warp-in and stack two decals on the same cell.
+		# The corridor-cluster pass needs this check independently of
+		# `_classify_spinner_candidate_cells` (the scattered pass) —
+		# without it, cluster placements bypass the exclusion entirely.
+		if cell.teleporter != null:
+			continue
 		if not cell.items.is_empty():
 			continue
 		if _cell_holds_plate(pos):
@@ -3534,6 +4101,11 @@ func _eligible_spinner_room_cells(room: Rect2i) -> Array:
 			if cell.trap != null:
 				continue
 			if cell.spinner != null:
+				continue
+			# Phase 15 Task 6 — Phase C. Same teleporter exclusion as
+			# the corridor-cluster filter above; without it, the
+			# room-density pass can drop a spinner on a warp endpoint.
+			if cell.teleporter != null:
 				continue
 			if not cell.items.is_empty():
 				continue

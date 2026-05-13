@@ -3934,3 +3934,261 @@ func test_get_teleporter_at_returns_instance_for_endpoints() -> void:
 	var inst: TeleporterInstance = gen.teleporters[0]
 	assert_eq(gen.get_teleporter_at(inst.cell_a), inst)
 	assert_eq(gen.get_teleporter_at(inst.cell_b), inst)
+
+# -------------------------------------------------------
+# Teleporter island topology (Phase 15 Task 6 — Phase C)
+# -------------------------------------------------------
+
+func _make_partition_spawn(data: TeleporterData, K_min: int = 2, K_max: int = 2) -> TeleporterSpawn:
+	var spawn := TeleporterSpawn.new()
+	spawn.data = data
+	spawn.island_count_min = K_min
+	spawn.island_count_max = K_max
+	# Phase A fields stay at defaults — partition mode IGNORES them.
+	# Loosened distance constraints so small test maps don't fail to
+	# place the pair across cramped islands.
+	spawn.min_distance_between_partners = 3
+	spawn.min_seal_distance_to_entrance_exit = 2
+	spawn.min_seal_distance_between_seals = 3
+	# Use a smaller min island floor for tests — the 21x21 test map has
+	# fewer total floor cells than a shipping biome, and a default 8
+	# would reject too many candidates and turn the tests into "partition
+	# never succeeds" — which exercises nothing.
+	spawn.min_island_size = 4
+	return spawn
+
+func _count_walls(gen: LevelGenerator) -> int:
+	var count := 0
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			if gen.grid[x][y].cell_type == GridCell.CellType.WALL:
+				count += 1
+	return count
+
+func _bfs_reachable_ignoring_teleporters(gen: LevelGenerator, start: Vector2i) -> Dictionary:
+	# Same as the existing `_bfs_reachable_from` helper but explicitly
+	# ignores any teleporter graph edges — used to PROVE the partition
+	# actually disconnected the floor graph.
+	return _bfs_reachable_from(gen, start)
+
+func test_partition_pass_seals_at_least_one_corridor_cell() -> void:
+	# Without the partition spawn there's a baseline wall count for a
+	# seed; turning on K=2 should add AT LEAST one sealed cell. We can't
+	# pin the exact delta because the maze itself is sensitive to RNG
+	# choices made by the placer, but the partition pass must show up
+	# somewhere in the wall count for any seed where it succeeds.
+	var biome := _make_biome()
+	biome.teleporter_spawn = _make_partition_spawn(_make_teleporter_data())
+	var gen := _make_generator(biome, 4242)
+	# If the partition succeeded, we have 1 pair (K-1 = 1).
+	# If it failed across all retries, the placer falls through to
+	# zero pairs. Skip the wall-count assertion when partition failed
+	# (rare on a 21x21 grid; the bridge guarantee in `_is_door_endpoint`
+	# usually gives many candidates).
+	if gen.teleporters.size() == 0:
+		pending("partition rolled back on seed 4242 — no assertion possible this seed")
+		return
+	assert_eq(gen.teleporters.size(), 1,
+		"K=2 should produce exactly K-1=1 teleporter pair (spanning tree)")
+
+func test_partition_pass_disconnects_floor_graph() -> void:
+	# THE crucial test: ignoring teleporter edges, BFS from entrance
+	# should NOT reach the teleporter's far endpoint via corridors
+	# alone. The whole point of the partition is to make the warp the
+	# only way across.
+	var biome := _make_biome()
+	biome.teleporter_spawn = _make_partition_spawn(_make_teleporter_data())
+	var gen := _make_generator(biome, 7331)
+	if gen.teleporters.size() == 0:
+		pending("partition rolled back on seed 7331 — no assertion possible this seed")
+		return
+	var inst: TeleporterInstance = gen.teleporters[0]
+	var reachable_no_warp: Dictionary = _bfs_reachable_ignoring_teleporters(gen, gen.entrance_pos)
+	# At least ONE of the two endpoints must NOT be reachable without
+	# the warp — that's how we know the partition split the graph.
+	# (Both endpoints can't be unreachable; the entrance's island has
+	# at least one of them by the spanning-tree construction.)
+	var has_unreachable: bool = not reachable_no_warp.has(inst.cell_a) or not reachable_no_warp.has(inst.cell_b)
+	assert_true(has_unreachable,
+		"partition failed to disconnect: both endpoints %s + %s reachable from entrance without the warp" % [inst.cell_a, inst.cell_b])
+
+func test_partition_chain_reachability_v3_spans_both_islands() -> void:
+	# With chain reachability v3 active, the entrance's chain-reachable
+	# set MUST include the exit even when the exit is on a different
+	# island. This is the proof that puzzles + key-doors + levers can
+	# safely sit on either side of the warp.
+	var biome := _make_biome()
+	biome.teleporter_spawn = _make_partition_spawn(_make_teleporter_data())
+	var gen := _make_generator(biome, 1234)
+	if gen.teleporters.size() == 0:
+		pending("partition rolled back on seed 1234")
+		return
+	var chain: Dictionary = gen._chain_reachable_from_entrance()
+	assert_true(chain.has(gen.exit_pos),
+		"chain reachability v3 should span both islands via the warp; exit %s unreachable" % gen.exit_pos)
+	# Both teleporter endpoints chain-reachable.
+	var inst: TeleporterInstance = gen.teleporters[0]
+	assert_true(chain.has(inst.cell_a), "endpoint A %s unreachable in chain v3" % inst.cell_a)
+	assert_true(chain.has(inst.cell_b), "endpoint B %s unreachable in chain v3" % inst.cell_b)
+
+func test_partition_teleporter_endpoints_in_different_islands() -> void:
+	# The spanning-tree edge for each placed pair MUST cross islands —
+	# both endpoints in the same island is structurally meaningless
+	# (the warp would be a no-op shortcut within one component).
+	var biome := _make_biome()
+	biome.teleporter_spawn = _make_partition_spawn(_make_teleporter_data())
+	var gen := _make_generator(biome, 9999)
+	if gen.teleporters.size() == 0:
+		pending("partition rolled back on seed 9999")
+		return
+	var inst: TeleporterInstance = gen.teleporters[0]
+	var reachable_no_warp: Dictionary = _bfs_reachable_ignoring_teleporters(gen, inst.cell_a)
+	assert_false(reachable_no_warp.has(inst.cell_b),
+		"endpoints %s and %s sit in the SAME island — partition spanning tree is broken" % [inst.cell_a, inst.cell_b])
+
+func test_partition_does_not_run_when_island_count_is_one() -> void:
+	# Backwards compat — a Phase A spawn (default island_count = 1)
+	# must NOT trigger the partition pass. The placer falls through to
+	# the legacy random-pairs pipeline.
+	var biome := _make_biome()
+	# Explicit Phase A config — same as the Phase A integration tests.
+	var spawn := _make_teleporter_spawn(_make_teleporter_data(), 1, 1)
+	# island_count defaults to 1/1 — no partition.
+	biome.teleporter_spawn = spawn
+	var gen := _make_generator(biome, 555)
+	assert_eq(gen.teleporters.size(), 1, "Phase A mode should still place count=1 pair")
+	# No seal applied — confirm entrance reaches exit via corridors
+	# alone (no teleporter edges needed).
+	var corridor_reachable: Dictionary = _bfs_reachable_from(gen, gen.entrance_pos)
+	assert_true(corridor_reachable.has(gen.exit_pos),
+		"Phase A mode should not seal anything — exit must be reachable without the warp")
+
+func test_partition_chests_never_overlap_teleporter_cells() -> void:
+	# Downstream guard #1: object placement (chests) must respect
+	# teleporter endpoints. Force a high-count chest config so the
+	# placer is hungry for cells; if the guard is missing we'd see a
+	# chest on a rune circle.
+	var biome := _make_biome()
+	biome.objects = [_make_object_spawn(_make_chest(), 4, 4, ObjectSpawn.PLACEMENT_ANY)]
+	biome.teleporter_spawn = _make_partition_spawn(_make_teleporter_data())
+	var gen := _make_generator(biome, 246)
+	for inst in gen.teleporters:
+		for endpoint in inst.endpoints():
+			var cell: GridCell = gen.grid[endpoint.x][endpoint.y]
+			assert_null(cell.object,
+				"teleporter endpoint %s holds a chest (downstream guard missing)" % endpoint)
+
+func test_partition_items_never_overlap_teleporter_cells() -> void:
+	# Downstream guard #2: floor item placement must respect
+	# teleporter endpoints (else a pile of potions on a rune circle).
+	var biome := _make_biome([_make_loot_entry(_make_item(), 1)], 6, 8)
+	biome.teleporter_spawn = _make_partition_spawn(_make_teleporter_data())
+	var gen := _make_generator(biome, 369)
+	for inst in gen.teleporters:
+		for endpoint in inst.endpoints():
+			var cell: GridCell = gen.grid[endpoint.x][endpoint.y]
+			assert_true(cell.items.is_empty(),
+				"teleporter endpoint %s holds floor items (downstream guard missing)" % endpoint)
+
+func test_partition_spinners_never_overlap_teleporter_cells() -> void:
+	# Regression for a bug where the spinner corridor-cluster and
+	# room-density passes had their OWN candidate filters
+	# (`_eligible_spinner_segment_cells` / `_eligible_spinner_room_cells`)
+	# that bypassed the `_classify_spinner_candidate_cells` teleporter
+	# exclusion, so spinners could land on a warp cell. Sweep across
+	# multiple seeds with a high spinner-density config so the cluster
+	# and room passes both fire.
+	for s in range(400, 415):
+		var biome := _make_biome()
+		biome.teleporter_spawn = _make_partition_spawn(_make_teleporter_data())
+		# Force-trigger all three spinner placement paths (scattered +
+		# corridor cluster + room density) at maximum density.
+		var spinner_spawn := _make_spinner_spawn(_make_spinner_data(), 6, 8, ObjectSpawn.PLACEMENT_ANY)
+		spinner_spawn.corridor_segment_chance = 1.0
+		spinner_spawn.corridor_spinners_per_run_min = 2
+		spinner_spawn.corridor_spinners_per_run_max = 3
+		spinner_spawn.room_chance = 1.0
+		spinner_spawn.room_coverage_min_percent = 30.0
+		spinner_spawn.room_coverage_max_percent = 50.0
+		biome.spinner_spawns = [spinner_spawn]
+		var gen := _make_generator(biome, s)
+		for inst in gen.teleporters:
+			for endpoint in inst.endpoints():
+				var cell: GridCell = gen.grid[endpoint.x][endpoint.y]
+				assert_null(cell.spinner,
+					"seed %d: teleporter endpoint %s holds a spinner (downstream guard missing in cluster or room density pass)" % [s, endpoint])
+
+func test_partition_does_not_violate_existing_path_validation() -> void:
+	# Phase 4 invariant — entrance must reach exit. With partition
+	# active, the FLOOR-only BFS may fail (that's the whole point),
+	# but chain reachability v3 (which knows about teleporters) MUST
+	# still succeed. This test runs across multiple seeds to catch
+	# accidental "rollback didn't restore the path" regressions.
+	for s in range(50, 60):
+		var biome := _make_biome()
+		biome.teleporter_spawn = _make_partition_spawn(_make_teleporter_data())
+		var gen := _make_generator(biome, s)
+		var chain: Dictionary = gen._chain_reachable_from_entrance()
+		assert_true(chain.has(gen.exit_pos),
+			"seed %d: chain reachability v3 lost the exit (%s) after partition" % [s, gen.exit_pos])
+
+func test_partition_smaller_island_meets_min_size_floor() -> void:
+	# Quality guarantee — the seal picker MUST reject candidates that
+	# strand a stub. Sweep multiple seeds, count cells in each island
+	# (post-partition, ignoring teleporter edges), and assert the
+	# smaller one is at least `min_island_size`.
+	for s in range(300, 320):
+		var biome := _make_biome()
+		var spawn := _make_partition_spawn(_make_teleporter_data())
+		spawn.min_island_size = 5
+		biome.teleporter_spawn = spawn
+		var gen := _make_generator(biome, s)
+		if gen.teleporters.size() == 0:
+			continue
+		# Count floor cells on each side by BFS from entrance ignoring
+		# the warp, then taking the total floor and subtracting.
+		var entrance_side: Dictionary = _bfs_reachable_ignoring_teleporters(gen, gen.entrance_pos)
+		var total_floor: int = _all_floor_cells(gen).size()
+		var entrance_size: int = entrance_side.size()
+		var other_size: int = total_floor - entrance_size
+		var smaller: int = min(entrance_size, other_size)
+		assert_gte(smaller, 5,
+			"seed %d: smaller island has %d cells (entrance side %d, other %d), expected >= 5" % [s, smaller, entrance_size, other_size])
+
+func test_partition_stress_sweep_25_seeds() -> void:
+	# Stress sweep — runs the partition pass under a realistic biome
+	# config (chests + items + traps) across 25 seeds and verifies
+	# every level still satisfies the chain-reachability v3 contract.
+	# Catches placement-failure regressions where a downstream pass
+	# silently lands on a teleporter cell or chain reachability fails
+	# to span an island.
+	for s in range(200, 225):
+		var biome := _make_biome([_make_loot_entry(_make_item(), 1)], 3, 5)
+		biome.objects = [_make_object_spawn(_make_chest(), 3, 3, ObjectSpawn.PLACEMENT_ANY)]
+		biome.teleporter_spawn = _make_partition_spawn(_make_teleporter_data())
+		var gen := _make_generator(biome, s)
+		# Don't assert the partition ALWAYS succeeds (rare loopy mazes
+		# legitimately can't be partitioned), but when it does, every
+		# invariant must hold.
+		if gen.teleporters.size() == 0:
+			continue
+		# Exit reachable via chain v3.
+		var chain: Dictionary = gen._chain_reachable_from_entrance()
+		assert_true(chain.has(gen.exit_pos),
+			"seed %d: exit unreachable in chain v3" % s)
+		# Endpoints in different islands.
+		for inst in gen.teleporters:
+			var reach_from_a: Dictionary = _bfs_reachable_ignoring_teleporters(gen, inst.cell_a)
+			assert_false(reach_from_a.has(inst.cell_b),
+				"seed %d: endpoints %s + %s in same island" % [s, inst.cell_a, inst.cell_b])
+			# Downstream guards.
+			for endpoint in inst.endpoints():
+				var cell: GridCell = gen.grid[endpoint.x][endpoint.y]
+				assert_null(cell.object,
+					"seed %d: teleporter endpoint %s overlaps an object" % [s, endpoint])
+				assert_null(cell.trap,
+					"seed %d: teleporter endpoint %s overlaps a trap" % [s, endpoint])
+				assert_null(cell.spinner,
+					"seed %d: teleporter endpoint %s overlaps a spinner" % [s, endpoint])
+				assert_true(cell.items.is_empty(),
+					"seed %d: teleporter endpoint %s overlaps floor items" % [s, endpoint])

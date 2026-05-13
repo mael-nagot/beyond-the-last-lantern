@@ -90,16 +90,23 @@ var _trap_visuals: Dictionary = {}
 # SceneTree).
 var _spinners_root: Node3D
 var _spinner_visuals: Dictionary = {}  # SpinnerInstance -> Node3D root
-# Teleporters (Phase 15 Task 6 — Phase A). One Node3D per endpoint
-# cell (so a single pair has TWO entries — one per endpoint). The
-# Node3D parents a flat MeshInstance3D decal and an optional
-# OmniLight3D. Keyed by endpoint cell (Vector2i) because each cell
-# holds at most one teleporter endpoint, and Game.gd will look up
-# visuals by the player's grid cell when triggering the warp. The
-# TeleporterInstance for either endpoint can be recovered through
-# `grid[cell.x][cell.y].teleporter` if ever needed.
+# Teleporters (Phase 15 Task 6). One entry per endpoint (so a single
+# pair has TWO entries — one per endpoint cell). The dict is keyed by
+# endpoint cell (Vector2i) because each cell holds at most one
+# teleporter endpoint, and Game.gd looks up visuals by the player's
+# grid cell. Each entry stores:
+#   - root: Node3D (positioned at the cell + lean offset)
+#   - sprite_node: Sprite3D / AnimatedSprite3D (may be null when the
+#     data has no sprite/frames but does have a light)
+#   - light: OmniLight3D (may be null when light_energy = 0)
+#   - data: TeleporterData (cached for the pulse update)
+#   - pulse_phase: float (radians, per-pair offset)
+#   - base_glow: float (TeleporterData.glow_multiplier — held so the
+#     pulse update can centre the modulation on the configured value)
+#   - base_alpha: float (same idea for alpha)
+#   - base_light_energy: float (same for the light)
 var _teleporters_root: Node3D
-var _teleporter_visuals: Dictionary = {}  # Vector2i (endpoint cell) -> Node3D root
+var _teleporter_visuals: Dictionary = {}
 # Decorations using face_camera mode — DungeonView's `_process` rotates
 # each one each frame to face the camera, with a designer-configured
 # X-axis tilt so the top leans toward the player.
@@ -927,15 +934,15 @@ func _update_spinner_rotations(delta: float) -> void:
 		var step: float = deg_to_rad(rate * dir_sign) * delta
 		root.rotation.y = fmod(root.rotation.y + step, TAU)
 
-# Phase 15 Task 6 — Phase A teleporter rendering. Each TeleporterInstance
-# has TWO endpoints; we render BOTH as identical-looking floor decals
-# (the same TeleporterData drives both). Visuals are keyed by endpoint
+# Phase 15 Task 6 — teleporter rendering. Each TeleporterInstance has
+# TWO endpoints; we render BOTH as identical-looking UPRIGHT Sprite3D
+# billboards (BILLBOARD_FIXED_Y — rotates around Y to face the camera,
+# stays vertical like chests / levers). Visuals are keyed by endpoint
 # cell (Vector2i) in `_teleporter_visuals`, not by instance — Game.gd
 # triggers the warp from the player's current cell, so a cell-keyed
-# lookup is the natural fit. Phase A uses ONLY `data.decal_sprite` for
-# the floor visual (static); `data.frames` is a forward-compat field
-# the renderer doesn't consume yet — Phase B/C will add animated decals
-# via a shader pass when we have art to test against.
+# lookup is the natural fit. Static `data.sprite` is the V1 path;
+# `data.frames` opts into an `AnimatedSprite3D` auto-playing
+# `default_animation` for designers who want animated rune circles.
 func _build_teleporters() -> void:
 	for child in _teleporters_root.get_children():
 		child.queue_free()
@@ -946,56 +953,194 @@ func _build_teleporters() -> void:
 		if inst == null or inst.data == null:
 			continue
 		for endpoint in inst.endpoints():
-			var root := _make_teleporter_visual(inst, endpoint)
-			if root == null:
+			var entry := _make_teleporter_visual(inst, endpoint)
+			if entry.is_empty():
 				continue
-			_teleporters_root.add_child(root)
-			_teleporter_visuals[endpoint] = root
+			_teleporters_root.add_child(entry["root"])
+			_teleporter_visuals[endpoint] = entry
 
 func rebuild_teleporters() -> void:
 	if _teleporters_root == null:
 		return
 	_build_teleporters()
 
-# Returns a Node3D anchored at the endpoint cell with a flat decal
-# child (and an OmniLight3D child when `data.light_energy > 0`).
-# Returns null when the data has no decal_sprite AND no light to spawn
-# — designers can ship a "ghost" teleporter (the warp still fires
+# Returns a dict (or empty dict on "skip render") with:
+#   {root, sprite_node, light, data, pulse_phase, base_glow,
+#    base_alpha, base_light_energy}
+# Returns {} when the data has no sprite/frames AND no light —
+# designers can ship a "ghost" teleporter (the warp still fires
 # because it's keyed off `cell.teleporter`, not the visual), but a
-# fully-empty Node3D would be wasted scene-tree weight, so we drop it.
-func _make_teleporter_visual(inst: TeleporterInstance, endpoint: Vector2i) -> Node3D:
+# fully-empty Node3D would be wasted scene-tree weight.
+#
+# Sprite anchoring matches the chest / lever pattern:
+#   - `BILLBOARD_FIXED_Y` keeps the sprite upright as the camera turns
+#   - `pixel_size = world_height / texture_height` decouples world
+#     size from source-art resolution
+#   - position Y = `world_height * 0.5 + y_offset` so the sprite's
+#     BOTTOM sits at floor level (Y=0); `y_offset` nudges it up for
+#     art with transparent padding at the bottom
+#   - `lean_toward_player` shifts the WHOLE ROOT horizontally toward
+#     the player (refreshed on turn, NOT on movement — same rule the
+#     chest lean uses to avoid mid-step snapping)
+func _make_teleporter_visual(inst: TeleporterInstance, endpoint: Vector2i) -> Dictionary:
 	var data: TeleporterData = inst.data
-	var has_decal: bool = data.decal_sprite != null
+	var has_sprite: bool = data.sprite != null
+	var has_frames: bool = data.frames != null
+	var has_visual: bool = has_sprite or has_frames
 	var has_light: bool = data.light_energy > 0.0
-	if not has_decal and not has_light:
-		return null
+	if not has_visual and not has_light:
+		return {}
 	var root := Node3D.new()
-	var cx: float = endpoint.x * CELL_SIZE + CELL_SIZE * 0.5
-	var cz: float = endpoint.y * CELL_SIZE + CELL_SIZE * 0.5
-	root.position = Vector3(cx, data.y_offset, cz)
-	if has_decal:
-		var mesh := MeshInstance3D.new()
-		var quad := QuadMesh.new()
-		var s: float = max(0.01, data.decal_world_size) * CELL_SIZE
-		quad.size = Vector2(s, s)
-		mesh.mesh = quad
-		mesh.material_override = _build_trap_floor_material(data.decal_sprite)
-		# Decal authored on the XY plane — lay it flat onto XZ. Same
-		# convention as the spinner / spike-trap decals so designers
-		# author every floor decal identically.
-		mesh.rotation = Vector3(-PI * 0.5, 0.0, 0.0)
-		root.add_child(mesh)
+	root.position = _teleporter_position(endpoint, data)
+	var sprite_node: SpriteBase3D = null
+	if has_visual:
+		var tex_h: int = 1
+		if has_frames:
+			# Animated path — AnimatedSprite3D auto-plays
+			# `default_animation` so designers don't need wiring code.
+			var anim := AnimatedSprite3D.new()
+			anim.sprite_frames = data.frames
+			anim.animation = &"default_animation"
+			anim.play()
+			# Derive pixel_size from the FIRST frame's texture height
+			# — assumes frames share dimensions (the convention for
+			# AnimatedSprite3D + SpriteFrames).
+			var first_anim: StringName = &"default_animation"
+			if data.frames.has_animation(first_anim) and data.frames.get_frame_count(first_anim) > 0:
+				var first_tex: Texture2D = data.frames.get_frame_texture(first_anim, 0)
+				if first_tex != null:
+					tex_h = max(1, first_tex.get_height())
+			sprite_node = anim
+		else:
+			var sprite := Sprite3D.new()
+			sprite.texture = data.sprite
+			tex_h = max(1, data.sprite.get_height())
+			sprite_node = sprite
+		sprite_node.pixel_size = data.world_height / float(tex_h)
+		sprite_node.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+		sprite_node.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		# ALPHA_CUT_OPAQUE_PREPASS rather than ALPHA_CUT_DISCARD: the
+		# prepass mode keeps the texture's transparent BACKGROUND
+		# crisply cut while letting the opaque pixels render at any
+		# `modulate.a` (DISCARD would drop sub-threshold pixels and a
+		# user setting alpha = 0.3 would see an invisible sprite).
+		sprite_node.alpha_cut = SpriteBase3D.ALPHA_CUT_OPAQUE_PREPASS
+		# Phase 15 Task 6 — transparency + glow knobs. `modulate`
+		# multiplies the texture per RGBA channel. The PULSE update
+		# (`_update_teleporter_pulse`) rewrites this every frame; we
+		# set the BASE value here so the first frame renders cleanly
+		# even before _process kicks in.
+		var glow: float = max(0.0, data.glow_multiplier)
+		var modulate_alpha: float = clampf(data.alpha, 0.0, 1.0)
+		sprite_node.modulate = Color(glow, glow, glow, modulate_alpha)
+		# Anchor the sprite BOTTOM at floor level so it visually sits
+		# on the ground. y_offset nudges upward for transparent-padding
+		# compensation.
+		sprite_node.position = Vector3(0.0, data.world_height * 0.5 + data.y_offset, 0.0)
+		root.add_child(sprite_node)
+	var light: OmniLight3D = null
 	if has_light:
-		var light := OmniLight3D.new()
+		light = OmniLight3D.new()
 		light.light_color = data.light_color
 		light.light_energy = data.light_energy
 		light.omni_range = max(0.01, data.light_range)
-		# Raise the bulb slightly above the floor so it lights the
-		# surrounding walls (a light AT y=0 only illuminates upward).
-		# Half a unit reads as a glow seeping from the rune circle.
-		light.position = Vector3(0.0, 0.5, 0.0)
+		# Light at the sprite's mid-height so the glow appears to come
+		# from the rune circle itself, not from the floor underneath.
+		var light_y: float = data.world_height * 0.5 if has_visual else 0.5
+		light.position = Vector3(0.0, light_y, 0.0)
 		root.add_child(light)
-	return root
+	# Pulse state — both endpoints of a pair share `pair_index`, so
+	# they pulse in sync; consecutive pairs are offset by
+	# `pulse_phase_per_pair` radians so they feel independent.
+	var pulse_phase: float = float(inst.pair_index) * data.pulse_phase_per_pair
+	return {
+		"root": root,
+		"sprite_node": sprite_node,
+		"light": light,
+		"data": data,
+		"pulse_phase": pulse_phase,
+		"base_glow": data.glow_multiplier,
+		"base_alpha": data.alpha,
+		"base_light_energy": data.light_energy,
+	}
+
+# Returns the world position of a teleporter endpoint, accounting for
+# `lean_toward_player`. Mirrors `_object_position` for chests — the
+# lean axis follows the player's facing (turning is what switches the
+# lean axis; strafing one tile sideways stays on the same axis so the
+# rune doesn't flip mid-strafe).
+func _teleporter_position(endpoint: Vector2i, data: TeleporterData) -> Vector3:
+	var cx: float = endpoint.x * CELL_SIZE + CELL_SIZE * 0.5
+	var cz: float = endpoint.y * CELL_SIZE + CELL_SIZE * 0.5
+	var ox: float = 0.0
+	var oz: float = 0.0
+	if data.lean_toward_player > 0.0:
+		var diff := _current_grid_pos - endpoint
+		var prefer_x: bool = abs(_current_facing.x) > abs(_current_facing.y)
+		if prefer_x and diff.x != 0:
+			ox = float(signi(diff.x)) * data.lean_toward_player
+		elif (not prefer_x) and diff.y != 0:
+			oz = float(signi(diff.y)) * data.lean_toward_player
+		elif diff.x != 0:
+			ox = float(signi(diff.x)) * data.lean_toward_player
+		elif diff.y != 0:
+			oz = float(signi(diff.y)) * data.lean_toward_player
+	return Vector3(cx + ox, 0.0, cz + oz)
+
+# Refresh every teleporter root's position so the lean-toward-player
+# offset tracks the current facing. Called on player turn (NOT on
+# movement — same rule the chest lean uses to avoid mid-step snapping).
+# Cheap O(n) over a typical 1–2 placed teleporter pairs.
+func _refresh_teleporter_positions() -> void:
+	for endpoint in _teleporter_visuals.keys():
+		var entry: Dictionary = _teleporter_visuals[endpoint]
+		var root: Node3D = entry.get("root", null)
+		if not is_instance_valid(root):
+			continue
+		var data: TeleporterData = entry.get("data", null)
+		if data == null:
+			continue
+		root.position = _teleporter_position(endpoint, data)
+
+# Per-frame pulse driver. Modulates each teleporter's sprite color +
+# alpha + light energy along a sine wave so the rune reads as a living
+# energy ball, breathing in and out. The same phase is shared between
+# both endpoints of a pair (so a single warp pair pulses as one
+# creature) but offset between pairs (so two pairs in view don't pulse
+# in lockstep).
+func _update_teleporter_pulse(delta: float) -> void:
+	if _teleporter_visuals.is_empty():
+		return
+	var t: float = Time.get_ticks_msec() / 1000.0
+	for endpoint in _teleporter_visuals.keys():
+		var entry: Dictionary = _teleporter_visuals[endpoint]
+		var data: TeleporterData = entry.get("data", null)
+		if data == null:
+			continue
+		# Static (no pulse) — both knobs collapse to a no-op. The
+		# sprite + light already carry the base values from _build.
+		if data.pulse_amount <= 0.0 or data.pulse_speed <= 0.0:
+			continue
+		var phase: float = entry.get("pulse_phase", 0.0)
+		# sine in [-1, 1], scaled by pulse_amount into [-amount, amount],
+		# centred on 1.0 so the multiplier swings between
+		# (1 - amount) and (1 + amount).
+		var swing: float = sin(t * data.pulse_speed + phase) * data.pulse_amount
+		var multiplier: float = 1.0 + swing
+		var sprite_node: SpriteBase3D = entry.get("sprite_node", null)
+		if is_instance_valid(sprite_node):
+			var base_glow: float = entry.get("base_glow", 1.0)
+			var base_alpha: float = entry.get("base_alpha", 1.0)
+			var g: float = max(0.0, base_glow * multiplier)
+			# Alpha also breathes — slightly transparent at the dim
+			# end of the cycle reads as "the energy is gathering /
+			# dissipating", not just "the brightness is changing".
+			var a: float = clampf(base_alpha * multiplier, 0.0, 1.0)
+			sprite_node.modulate = Color(g, g, g, a)
+		var light: OmniLight3D = entry.get("light", null)
+		if is_instance_valid(light):
+			var base_energy: float = entry.get("base_light_energy", 1.0)
+			light.light_energy = max(0.0, base_energy * multiplier)
 
 func _build_wall_decorations() -> void:
 	_billboard_decorations.clear()
@@ -1015,6 +1160,7 @@ func _process(delta: float) -> void:
 	_update_billboard_decorations()
 	_update_flickering_lights()
 	_update_spinner_rotations(delta)
+	_update_teleporter_pulse(delta)
 
 func _update_billboard_decorations() -> void:
 	# Per-frame Y-billboard with X-tilt for face_camera decorations.
@@ -1631,6 +1777,7 @@ func set_initial_facing(facing: Vector2i) -> void:
 	_refresh_object_positions()
 	_refresh_item_positions()
 	_refresh_trap_spike_positions()
+	_refresh_teleporter_positions()
 	# Snap every plate's Y rotation to the new camera angle so they
 	# render correctly from the very first frame after a level setup
 	# (no tween — this runs before the player has moved at all).
@@ -1683,6 +1830,7 @@ func rotate_camera_to(turn_right: bool, facing: Vector2i = Vector2i.ZERO) -> voi
 	_refresh_object_positions()
 	_refresh_item_positions(true)
 	_refresh_trap_spike_positions()
+	_refresh_teleporter_positions()
 
 const SHAKE_INTENSITY := 0.12
 const SHAKE_DURATION  := 0.18
