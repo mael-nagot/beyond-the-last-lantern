@@ -3044,49 +3044,145 @@ func _place_secret_walls() -> void:
 func _try_place_secret_wall(spawn: SecretWallSpawn) -> void:
 	# Reuse the door candidate-edge helper — eligibility (1-wide
 	# corridor, not entrance/exit, no chest etc.) is identical.
-	# `_candidate_edges_for_door_object(null, ...)` would crash on
-	# the data check, so call the underlying placement helper with
-	# no min-distance prefilter and apply distance below.
+	#
+	# Strategy mirrors `_try_place_object`:
+	#   - When `min_distance_to_other_object > 0`: farthest-point
+	#     insertion. Each new wall goes to the candidate edge that
+	#     MAXIMIZES the Manhattan distance from EITHER endpoint to the
+	#     nearest already-placed cell-object (chest / lever), door
+	#     endpoint, OR previously-placed secret-wall endpoint. This
+	#     keeps secret walls well-spread even when the configured
+	#     floor is geometrically impossible.
+	#
+	#     Bugfix history: the old placer's distance predicate ignored
+	#     other secret walls entirely (only checked `cell.object` and
+	#     `doors`), so a second wall could land 1 tile from the first
+	#     no matter how high `min_distance_to_other_object` was set.
+	#     The new helper `_nearest_existing_edge_neighbor_distance`
+	#     includes secret walls in the set it measures against.
+	#
+	#   - When `min_distance_to_other_object == 0`: legacy random
+	#     shuffle. The designer explicitly opted out of spacing.
 	var candidates: Array = _candidate_edges_for_secret_wall()
-	var distance: int = max(0, spawn.min_distance_to_other_object)
-	while distance >= 0:
-		var pool: Array = candidates.duplicate()
-		if distance > 0:
-			pool = pool.filter(
-				func(edge): return not _secret_wall_too_close_to_object(edge, distance)
-			)
-		pool.shuffle()
-		for edge in pool:
-			var a: Vector2i = edge[0]
-			var b: Vector2i = edge[1]
-			# Edges already hosting a door or another secret wall are
-			# off-limits — two edge-bound elements on the same edge
-			# would fight for rendering and confuse the map.
-			if _doors_by_edge.has(DoorInstance.edge_key(a, b)):
+	if candidates.is_empty():
+		push_warning("LevelGenerator: could not place secret wall — no eligible 1-wide-corridor edge satisfies gating + spacing")
+		return
+
+	var min_required: int = max(0, spawn.min_distance_to_other_object)
+	var ordered: Array
+	if min_required > 0:
+		ordered = _rank_edges_by_farthest_neighbor(candidates)
+	else:
+		ordered = []
+		candidates.shuffle()
+		for edge in candidates:
+			ordered.append([-1, edge])
+
+	for entry in ordered:
+		var score: int = entry[0]
+		var edge: Array = entry[1]
+		var a: Vector2i = edge[0]
+		var b: Vector2i = edge[1]
+		# Edges already hosting a door or another secret wall are
+		# off-limits — two edge-bound elements on the same edge
+		# would fight for rendering and confuse the map.
+		if _doors_by_edge.has(DoorInstance.edge_key(a, b)):
+			continue
+		if _secret_walls_by_edge.has(SecretWallInstance.edge_key(a, b)):
+			continue
+		if spawn.gate_mode != SecretWallSpawn.GateMode.NONE \
+				and not _secret_wall_gates_content(a, b, spawn.gate_mode):
+			continue
+		# Belt-and-suspenders runtime check: any non-NONE placement
+		# must be on a bridge (sealing the edge must disconnect at
+		# least one endpoint from the entrance). The gating check
+		# above already enforces this, but a loud `push_error` here
+		# would catch any future regression in the chain-reachability
+		# helpers that lets a loop edge slip through.
+		if spawn.gate_mode != SecretWallSpawn.GateMode.NONE:
+			var verify_closed: Dictionary = {SecretWallInstance.edge_key(a, b): true}
+			var verify_reach: Dictionary = _chain_reachable_from_entrance({}, verify_closed)
+			if verify_reach.has(a) and verify_reach.has(b):
+				push_error("LevelGenerator: secret wall about to commit on a LOOP edge %s/%s — gating check is broken (gate_mode=%d)" % [a, b, spawn.gate_mode])
 				continue
-			if _secret_walls_by_edge.has(SecretWallInstance.edge_key(a, b)):
-				continue
-			if spawn.gate_mode != SecretWallSpawn.GateMode.NONE \
-					and not _secret_wall_gates_content(a, b, spawn.gate_mode):
-				continue
-			# Belt-and-suspenders runtime check: any non-NONE placement
-			# must be on a bridge (sealing the edge must disconnect at
-			# least one endpoint from the entrance). The gating check
-			# above already enforces this, but a loud `push_error` here
-			# would catch any future regression in the chain-reachability
-			# helpers that lets a loop edge slip through.
-			if spawn.gate_mode != SecretWallSpawn.GateMode.NONE:
-				var verify_closed: Dictionary = {SecretWallInstance.edge_key(a, b): true}
-				var verify_reach: Dictionary = _chain_reachable_from_entrance({}, verify_closed)
-				if verify_reach.has(a) and verify_reach.has(b):
-					push_error("LevelGenerator: secret wall about to commit on a LOOP edge %s/%s — gating check is broken (gate_mode=%d)" % [a, b, spawn.gate_mode])
-					continue
-			var inst := SecretWallInstance.create(a, b)
-			secret_walls.append(inst)
-			_secret_walls_by_edge[SecretWallInstance.edge_key(a, b)] = inst
-			return
-		distance -= 1
+		var inst := SecretWallInstance.create(a, b)
+		secret_walls.append(inst)
+		_secret_walls_by_edge[SecretWallInstance.edge_key(a, b)] = inst
+		if min_required > 0 and score >= 0 and score < min_required:
+			push_warning("LevelGenerator: placed secret wall at distance %d to nearest neighbour (configured floor: %d) — biome geometry doesn't permit further spread" % [score, min_required])
+		return
 	push_warning("LevelGenerator: could not place secret wall — no eligible 1-wide-corridor edge satisfies gating + spacing")
+
+# Ranks edge-bound candidates (each entry is a [cell_a, cell_b] pair)
+# by Manhattan distance to the nearest existing edge-relevant neighbour:
+# cell-objects (chests / levers), door endpoints, and secret-wall
+# endpoints. Edges with no neighbours yet score -1 (treated as "max
+# possible"). Ties shuffled. Mirrors `_rank_by_farthest_object` but
+# operates on edges instead of single cells.
+func _rank_edges_by_farthest_neighbor(edges: Array) -> Array:
+	var has_any: bool = (not doors.is_empty()) or (not secret_walls.is_empty())
+	if not has_any:
+		for x in range(grid_width):
+			if has_any:
+				break
+			for y in range(grid_height):
+				if grid[x][y].object != null:
+					has_any = true
+					break
+	var scored: Array = []
+	for edge in edges:
+		var score: int
+		if has_any:
+			score = _nearest_existing_edge_neighbor_distance(edge)
+		else:
+			score = -1
+		scored.append([score, edge])
+	scored.sort_custom(func(a, b): return a[0] > b[0])
+	var i := 0
+	while i < scored.size():
+		var j := i
+		while j < scored.size() and scored[j][0] == scored[i][0]:
+			j += 1
+		if j - i > 1:
+			var slice: Array = scored.slice(i, j)
+			slice.shuffle()
+			for k in range(slice.size()):
+				scored[i + k] = slice[k]
+		i = j
+	return scored
+
+# Min Manhattan distance from either endpoint of `edge` to:
+#   - any cell with a non-null `object` (chests, levers)
+#   - any door endpoint (doors are edge-bound)
+#   - any already-placed secret-wall endpoint
+# Returns -1 if nothing of the above is on the grid (callers treat -1
+# as "score doesn't matter, every cell is tied").
+func _nearest_existing_edge_neighbor_distance(edge: Array) -> int:
+	var a: Vector2i = edge[0]
+	var b: Vector2i = edge[1]
+	var best: int = -1
+	for x in range(grid_width):
+		for y in range(grid_height):
+			if grid[x][y].object == null:
+				continue
+			var dist: int = min(_manhattan(a, Vector2i(x, y)), _manhattan(b, Vector2i(x, y)))
+			if best == -1 or dist < best:
+				best = dist
+	for door in doors:
+		var dist_d: int = min(
+			min(_manhattan(a, door.cell_a), _manhattan(a, door.cell_b)),
+			min(_manhattan(b, door.cell_a), _manhattan(b, door.cell_b))
+		)
+		if best == -1 or dist_d < best:
+			best = dist_d
+	for sw in secret_walls:
+		var dist_s: int = min(
+			min(_manhattan(a, sw.cell_a), _manhattan(a, sw.cell_b)),
+			min(_manhattan(b, sw.cell_a), _manhattan(b, sw.cell_b))
+		)
+		if best == -1 or dist_s < best:
+			best = dist_s
+	return best
 
 func _candidate_edges_for_secret_wall() -> Array:
 	# Same shape as `_candidate_edges_for_door` (1-wide corridor cells
@@ -3111,32 +3207,6 @@ func _candidate_edges_for_secret_wall() -> Array:
 				seen[key] = true
 				result.append(pair)
 	return result
-
-func _secret_wall_too_close_to_object(edge: Array, min_distance: int) -> bool:
-	# Manhattan distance from either endpoint to any cell holding an
-	# object (chest / door / lever / trap host cell). Mirrors the
-	# `_too_close_to_existing_object` shape but works on the edge's
-	# two endpoint cells instead of a single cell.
-	if min_distance <= 0:
-		return false
-	var a: Vector2i = edge[0]
-	var b: Vector2i = edge[1]
-	for x in range(grid_width):
-		for y in range(grid_height):
-			if grid[x][y].object == null:
-				continue
-			var dist: int = min(_manhattan(a, Vector2i(x, y)), _manhattan(b, Vector2i(x, y)))
-			if dist < min_distance:
-				return true
-	# Also keep distance from doors (which are edge-bound, not cell-bound).
-	for door in doors:
-		var dist_d: int = min(
-			min(_manhattan(a, door.cell_a), _manhattan(a, door.cell_b)),
-			min(_manhattan(b, door.cell_a), _manhattan(b, door.cell_b))
-		)
-		if dist_d < min_distance:
-			return true
-	return false
 
 func _secret_wall_gates_content(a: Vector2i, b: Vector2i, gate_mode: int) -> bool:
 	# Decides whether a secret wall on edge (a, b) is allowed under

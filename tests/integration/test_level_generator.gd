@@ -3777,6 +3777,51 @@ func test_loot_only_secret_walls_gate_at_least_one_loot_cell() -> void:
 		assert_true(hides_loot,
 			"LOOT_ONLY secret wall at %s/%s hides no chest / floor item" % [sw.cell_a, sw.cell_b])
 
+func test_secret_walls_respect_min_distance_across_many_seeds() -> void:
+	# Regression test for the clustering bug: the old placer's distance
+	# predicate ignored other secret walls entirely (only checked
+	# `cell.object` and `doors`), so two walls could land 1 tile apart
+	# no matter how large `min_distance_to_other_object` was. The new
+	# farthest-point placer scores against doors, cell-objects, AND
+	# previously-placed secret walls. Across 30 seeds of a forest-like
+	# biome (2 walls, min_distance = 4), no pair should land within 2
+	# tiles of each other.
+	var bad: Array = []
+	for seed_val in range(2000, 2030):
+		var biome := _make_biome()
+		biome.room_count = 6
+		biome.room_min_size = 3
+		biome.room_max_size = 5
+		var spawn := _make_secret_wall_spawn(2, 2, SecretWallSpawn.GateMode.NONE)
+		spawn.min_distance_to_other_object = 4
+		biome.secret_wall_spawns = [spawn]
+		var gen := _make_generator(biome, seed_val)
+		if gen.secret_walls.size() < 2:
+			continue
+		var min_dist: int = -1
+		for i in range(gen.secret_walls.size()):
+			for j in range(i + 1, gen.secret_walls.size()):
+				var sw_a: SecretWallInstance = gen.secret_walls[i]
+				var sw_b: SecretWallInstance = gen.secret_walls[j]
+				var d: int = min(
+					min(
+						abs(sw_a.cell_a.x - sw_b.cell_a.x) + abs(sw_a.cell_a.y - sw_b.cell_a.y),
+						abs(sw_a.cell_a.x - sw_b.cell_b.x) + abs(sw_a.cell_a.y - sw_b.cell_b.y)
+					),
+					min(
+						abs(sw_a.cell_b.x - sw_b.cell_a.x) + abs(sw_a.cell_b.y - sw_b.cell_a.y),
+						abs(sw_a.cell_b.x - sw_b.cell_b.x) + abs(sw_a.cell_b.y - sw_b.cell_b.y)
+					)
+				)
+				if min_dist == -1 or d < min_dist:
+					min_dist = d
+		# Geometry may not always allow distance 4 in a 21x21 grid, but
+		# distance <= 1 means the walls are touching — that's the bug.
+		if min_dist <= 1:
+			bad.append(seed_val)
+	assert_eq(bad.size(), 0,
+		"secret walls clustered (min pairwise endpoint distance <= 1) on seeds %s" % [bad])
+
 func test_placed_secret_walls_are_always_on_bridges_stress() -> void:
 	# Sweep 25 seeds at the user's reported map size (21x21) with a
 	# realistic biome (chests + floor items, both LOOT_ONLY and
