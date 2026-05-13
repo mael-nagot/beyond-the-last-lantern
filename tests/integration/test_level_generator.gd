@@ -306,6 +306,38 @@ func test_min_distance_keeps_objects_apart() -> void:
 			assert_gte(dist, 5,
 				"objects at %s and %s are %d apart (need >= 5)" % [positions[i], positions[j], dist])
 
+func test_chests_dont_cluster_across_many_seeds() -> void:
+	# Stress test for the farthest-point insertion algorithm. With the
+	# old "degrade min_distance to 0 then shuffle" placer, unlucky seeds
+	# would cluster all chests in one big room (because rooms have far
+	# more candidate cells than dead-ends, so distance-0 random picks
+	# bias toward rooms). Farthest-point should keep chests well-spread
+	# regardless. We assert that across many seeds, no run produces
+	# chests sitting adjacent to each other (min pairwise distance > 1).
+	var bad_seeds: Array = []
+	for seed_val in range(1000, 1030):
+		var biome := _make_biome()
+		biome.room_count = 6
+		biome.room_min_size = 3
+		biome.room_max_size = 5
+		var spawn := _make_object_spawn(_make_chest(), 8, 8, ObjectSpawn.PLACEMENT_DEFAULT)
+		spawn.min_distance_to_other_object = 6
+		biome.objects = [spawn]
+		var gen := _make_generator(biome, seed_val)
+		var positions := _all_object_cells(gen)
+		if positions.size() < 2:
+			continue
+		var min_dist: int = -1
+		for i in range(positions.size()):
+			for j in range(i + 1, positions.size()):
+				var d: int = abs(positions[i].x - positions[j].x) + abs(positions[i].y - positions[j].y)
+				if min_dist == -1 or d < min_dist:
+					min_dist = d
+		if min_dist <= 1:
+			bad_seeds.append(seed_val)
+	assert_eq(bad_seeds.size(), 0,
+		"chests clustered (min pairwise distance <= 1) on seeds %s" % [bad_seeds])
+
 func test_items_respect_min_distance_when_possible() -> void:
 	# When min_distance_to_other_item is set, placed items shouldn't
 	# cluster on adjacent tiles. Graceful degrade: if not all rolls can
