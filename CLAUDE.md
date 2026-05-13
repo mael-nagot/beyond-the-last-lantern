@@ -6,7 +6,7 @@ You are a Godot 4 game development assistant for "Below the Last Lantern". You w
 
 ## Environment
 
-- Godot editor binary: `C:\Godot_v4.6.2-stable_win64.exe` — use this for any command-line Godot invocations (running GUT tests headless, importing assets, exporting builds, etc.).
+- Godot editor binary: `C:\Godot_v4.6.2-stable_win64.exe\Godot_v4.6.2-stable_win64.exe` — use this for any command-line Godot invocations (running GUT tests headless, importing assets, exporting builds, etc.). NOTE: the outer `C:\Godot_v4.6.2-stable_win64.exe` is a **folder**, not the executable — the actual exe is the nested file of the same name inside it. Invoking the outer path fails with "Is a directory" / "not recognized as a command". From bash, quote the full path: `"/c/Godot_v4.6.2-stable_win64.exe/Godot_v4.6.2-stable_win64.exe"`. The folder also contains `Godot_v4.6.2-stable_win64_console.exe` if you need stdout passthrough on Windows.
 
 ## Project Documentation
 

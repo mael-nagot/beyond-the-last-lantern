@@ -460,42 +460,106 @@ func _try_place_object(spawn: ObjectSpawn, cells_by_type: Dictionary) -> void:
 	# This tolerates pre-existing isolated regions of the dungeon
 	# (a connectorless room) — those cells were never reachable, so a
 	# chest placement isn't blamed for them.
+	#
+	# Strategy:
+	#   - When `min_distance_to_other_object > 0`: farthest-point
+	#     insertion. Each new chest goes to the candidate cell that
+	#     MAXIMIZES the Manhattan distance to the nearest already-placed
+	#     object. This keeps chests well-spread even on layouts where the
+	#     configured floor is geometrically impossible — the old
+	#     "degrade min_distance to 0, then shuffle" approach silently
+	#     collapsed to random placement, which biases toward big rooms
+	#     (a 5×5 room contributes 25 candidate cells vs. one per
+	#     dead-end) and clusters chests together.
+	#   - When `min_distance_to_other_object == 0`: legacy shuffle.
+	#     The designer explicitly opted out of spacing, so don't force
+	#     spread.
 	var before_reachable := _bfs_walkable_from(entrance_pos)
 	var candidates := _candidate_cells_for_spawn(spawn, cells_by_type)
-	var distance: int = max(0, spawn.min_distance_to_other_object)
-	while distance >= 0:
-		if _attempt_place(spawn, candidates, cells_by_type, distance, before_reachable):
-			return
-		distance -= 1
-	push_warning("LevelGenerator: could not place '%s' anywhere — no eligible cell preserves level reachability" % _spawn_label(spawn))
+	var viable: Array = []
+	for pos in candidates:
+		if grid[pos.x][pos.y].object != null:
+			continue
+		if not before_reachable.has(pos):
+			continue
+		viable.append(pos)
+	if viable.is_empty():
+		push_warning("LevelGenerator: could not place '%s' anywhere — no eligible cell preserves level reachability" % _spawn_label(spawn))
+		return
 
-func _attempt_place(spawn: ObjectSpawn, candidates: Array, cells_by_type: Dictionary, min_distance: int, before_reachable: Dictionary) -> bool:
-	var pool := candidates.duplicate()
-	if min_distance > 0:
-		var filtered: Array = []
-		for pos in pool:
-			if not _too_close_to_existing_object(pos, min_distance):
-				filtered.append(pos)
-		pool = filtered
-	if pool.is_empty():
-		return false
-	pool.shuffle()
-	for pos in pool:
+	var min_required: int = max(0, spawn.min_distance_to_other_object)
+	var ordered: Array
+	if min_required > 0:
+		ordered = _rank_by_farthest_object(viable)
+	else:
+		ordered = []
+		viable.shuffle()
+		for pos in viable:
+			ordered.append([-1, pos])
+
+	for entry in ordered:
+		var score: int = entry[0]
+		var pos: Vector2i = entry[1]
 		var cell: GridCell = grid[pos.x][pos.y]
 		if cell.object != null:
-			continue
-		# Pre-check: candidate must itself be reachable from entrance
-		# right now. Skips chests inside connectorless room islands.
-		if not before_reachable.has(pos):
 			continue
 		var instance := ObjectInstance.create(spawn.object)
 		instance.loot_table = spawn.loot_table
 		cell.object = instance
 		if _placement_preserves_reachability(pos, before_reachable):
 			cells_by_type[classify_cell(pos)].erase(pos)
-			return true
+			if min_required > 0 and score >= 0 and score < min_required:
+				push_warning("LevelGenerator: placed '%s' at distance %d to nearest object (configured floor: %d) — biome geometry doesn't permit further spread" % [_spawn_label(spawn), score, min_required])
+			return
 		cell.object = null
-	return false
+	push_warning("LevelGenerator: could not place '%s' anywhere — no eligible cell preserves level reachability" % _spawn_label(spawn))
+
+# Rank candidate cells by Manhattan distance to the NEAREST already-placed
+# object (descending). Cells with no other object on the grid get a sentinel
+# score of -1 (treated as "max possible"). Ties are shuffled within their
+# score group so the choice is non-deterministic when geometry doesn't
+# break ties for us.
+func _rank_by_farthest_object(positions: Array) -> Array:
+	var has_any_object := false
+	for x in range(grid_width):
+		if has_any_object:
+			break
+		for y in range(grid_height):
+			if grid[x][y].object != null:
+				has_any_object = true
+				break
+	var scored: Array = []
+	for pos in positions:
+		var score: int
+		if has_any_object:
+			score = _nearest_object_distance(pos)
+		else:
+			score = -1
+		scored.append([score, pos])
+	scored.sort_custom(func(a, b): return a[0] > b[0])
+	var i := 0
+	while i < scored.size():
+		var j := i
+		while j < scored.size() and scored[j][0] == scored[i][0]:
+			j += 1
+		if j - i > 1:
+			var slice: Array = scored.slice(i, j)
+			slice.shuffle()
+			for k in range(slice.size()):
+				scored[i + k] = slice[k]
+		i = j
+	return scored
+
+func _nearest_object_distance(pos: Vector2i) -> int:
+	var best: int = -1
+	for x in range(grid_width):
+		for y in range(grid_height):
+			if grid[x][y].object == null:
+				continue
+			var dist: int = abs(pos.x - x) + abs(pos.y - y)
+			if best == -1 or dist < best:
+				best = dist
+	return best
 
 func _placement_preserves_reachability(placed_pos: Vector2i, before: Dictionary) -> bool:
 	var after := _bfs_walkable_from(entrance_pos)
