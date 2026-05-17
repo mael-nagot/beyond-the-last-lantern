@@ -30,8 +30,8 @@ metadata/_custom_type_script = "uid://ctj7e78jjvst0"
 [sub_resource type="Resource" id="Resource_filler_trees"]
 script = ExtResource("3")
 fillers = Array[ExtResource("4")]([ExtResource("5"), SubResource("Resource_g3c32")])
-density_min = 3
-density_max = 5
+density_min = 12
+density_max = 15
 scale_min = 1.2
 scale_max = 1.5
 

@@ -4367,16 +4367,32 @@ func _place_one_filler_spawn(spawn: FillerSpawn) -> void:
 				var jx: float = randf_range(-spawn.jitter_radius, spawn.jitter_radius)
 				var jy: float = randf_range(-spawn.jitter_radius, spawn.jitter_radius)
 				var offset := Vector2(jx, jy)
-				# Lerp the random offset toward the FLOOR-adjacent
-				# cell edge — front-row sprites cluster at the wall
-				# line so the player can read the boundary clearly.
+				# Front-row bias: decompose the random offset into
+				# a TOWARDS-FLOOR component (along `floor_dir`) and a
+				# PERPENDICULAR component (along the wall tangent),
+				# bias only the towards-floor component toward the
+				# cell edge, and leave the perpendicular component
+				# untouched. Without this decomposition a dense
+				# spawn (density 12+) piles every sprite into a
+				# tiny region near the floor-adjacent corner because
+				# the lerp compresses BOTH axes — designers want a
+				# wall line that scatters laterally, not a clump.
+				#
 				# Skipped when the cell has no FLOOR neighbours
 				# (interior wall / deep border ring / isolated pillar
 				# with FLOOR on all 4 sides — direction sums to zero)
 				# or when the spawn opted out (front_row_bias = 0).
 				if spawn.front_row_bias > 0.0 and floor_dir != Vector2.ZERO:
-					var biased := floor_dir * _FILLER_FRONT_ROW_EDGE
-					offset = offset.lerp(biased, spawn.front_row_bias)
+					var along: float = offset.dot(floor_dir)
+					var perp: Vector2 = offset - floor_dir * along
+					var biased_along: float = lerp(along, _FILLER_FRONT_ROW_EDGE, spawn.front_row_bias)
+					offset = floor_dir * biased_along + perp
+					# Diagonal floor_dir (corner cells with FLOOR
+					# on two perpendicular sides) can push the
+					# combined offset past the cell boundary;
+					# clamp so the sprite stays inside its cell.
+					offset.x = clamp(offset.x, -0.5, 0.5)
+					offset.y = clamp(offset.y, -0.5, 0.5)
 				var scale: float = spawn.sample_scale(randf())
 				fillers.append(FillerInstance.create(fd, pos, offset, scale))
 

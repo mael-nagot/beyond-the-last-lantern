@@ -4419,3 +4419,65 @@ func test_fillers_front_row_bias_zero_keeps_offset_at_zero() -> void:
 	for inst in gen.fillers:
 		assert_eq(inst.cell_offset, Vector2.ZERO,
 			"filler at %s should have zero offset (bias=0, jitter=0) but got %s" % [inst.cell, inst.cell_offset])
+
+func test_fillers_front_row_bias_preserves_lateral_spread() -> void:
+	# bias > 0 must NOT compress the along-wall (perpendicular to
+	# floor_dir) axis. With dense placement (12 sprites per cell),
+	# fillers in WALL cells facing a single FLOOR neighbour should
+	# spread laterally — otherwise dense spawns clump into a tiny
+	# region at the floor-adjacent corner.
+	var biome := _make_biome()
+	biome.outdoor_mode = true
+	var spawn := _make_filler_spawn(12, 0)
+	spawn.jitter_radius = 0.4
+	spawn.front_row_bias = 1.0
+	biome.filler_spawns = [spawn]
+	var gen := _make_generator(biome, 42)
+	# Group fillers by cell and look for a cell with a SINGLE in-grid
+	# FLOOR neighbour (cardinal floor_dir, so perp axis is one of x/y).
+	var cells: Dictionary = {}
+	for inst in gen.fillers:
+		if inst.cell.x < 0 or inst.cell.x >= gen.grid_width:
+			continue
+		if inst.cell.y < 0 or inst.cell.y >= gen.grid_height:
+			continue
+		if not cells.has(inst.cell):
+			cells[inst.cell] = []
+		(cells[inst.cell] as Array).append(inst)
+	var checked: bool = false
+	for cell: Vector2i in cells.keys():
+		var dir := Vector2.ZERO
+		var floor_count: int = 0
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			var npos: Vector2i = cell + d
+			if npos.x < 0 or npos.x >= gen.grid_width:
+				continue
+			if npos.y < 0 or npos.y >= gen.grid_height:
+				continue
+			if gen.grid[npos.x][npos.y].cell_type != GridCell.CellType.WALL:
+				dir += Vector2(d.x, d.y)
+				floor_count += 1
+		# Only look at cells with exactly ONE floor neighbour — the
+		# perp axis is then a single coordinate axis (clean to assert).
+		if floor_count != 1:
+			continue
+		dir = dir.normalized()
+		var lateral_min: float = INF
+		var lateral_max: float = -INF
+		for inst: FillerInstance in cells[cell]:
+			# Perpendicular component is the offset projected onto
+			# the axis perpendicular to floor_dir.
+			var perp: Vector2 = inst.cell_offset - dir * inst.cell_offset.dot(dir)
+			var lateral: float = perp.length() * sign(perp.x + perp.y)
+			lateral_min = min(lateral_min, lateral)
+			lateral_max = max(lateral_max, lateral)
+		var lateral_span: float = lateral_max - lateral_min
+		# With jitter_radius = 0.4 and density 12, the lateral
+		# spread should easily exceed 0.4 (most of the cell width).
+		# A pre-fix run compressed lateral spread to ~0 because
+		# bias squashed BOTH axes; this assertion catches that.
+		assert_true(lateral_span > 0.4,
+			"cell %s with %d fillers: lateral span %f too narrow (expected > 0.4)" % [cell, (cells[cell] as Array).size(), lateral_span])
+		checked = true
+		break
+	assert_true(checked, "no eligible single-floor-neighbour cell found in test seed")
