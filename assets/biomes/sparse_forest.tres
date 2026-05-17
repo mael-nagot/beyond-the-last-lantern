@@ -32,6 +32,7 @@ script = ExtResource("3")
 fillers = Array[ExtResource("4")]([ExtResource("5"), SubResource("Resource_g3c32")])
 density_min = 12
 density_max = 15
+front_row_bias = 0.805
 scale_min = 1.2
 scale_max = 1.5
 

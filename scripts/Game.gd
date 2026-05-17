@@ -65,7 +65,8 @@ func _ready() -> void:
 		push_error("Required node missing")
 		return
 
-	var biome = load("res://assets/biomes/forest.tres")
+	# var biome = load("res://assets/biomes/forest.tres")
+	var biome = load("res://assets/biomes/sparse_forest.tres")
 	if biome == null:
 		push_error("Game: failed to load biome resource")
 		return

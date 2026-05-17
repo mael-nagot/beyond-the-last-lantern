@@ -30,6 +30,7 @@ You are a Godot 4 game development assistant for "Below the Last Lantern". You w
 - After creating or modifying any script, update `res://scripts/README.md` to reflect changes
 - You edit scripts directly using tools — do not ask the developer to copy-paste code
 - Use `@export` for all configurable parameters
+- Every `@export` parameter MUST have a `##` doc-comment immediately above it (Godot 4's docstring syntax) — the text shows as the field's tooltip in the Inspector. Without it the designer hovering the field has no idea what it does. Plain `#` comments do NOT appear in the Inspector. For grouped `@export` blocks, the `##` goes above each individual `@export`, not above the `@export_group(...)` line. Keep tooltips practical: lead with WHAT the parameter does, then HOW the value affects behaviour (e.g. "0.0 = …, 1.0 = …, typical values …"), and call out edge cases the designer would otherwise discover by trial. Class-level `##` comments above `extends` are also encouraged for resources opened in the Inspector
 - Use `class_name` at the top of every script
 - Follow existing code style and naming conventions found in the project
 - Always include null checks and `push_error` messages for node references and resource loading
