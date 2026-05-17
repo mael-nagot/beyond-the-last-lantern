@@ -2190,6 +2190,7 @@ func _validate_step_trap_reachability() -> void:
 				var lo := 0
 				var hi := open.size()
 				while lo < hi:
+					@warning_ignore("integer_division")
 					var mid := (lo + hi) / 2
 					if open[mid][0] < new_dist:
 						lo = mid + 1
@@ -3466,6 +3467,7 @@ func _pick_seal_cells(count: int, spawn: TeleporterSpawn) -> Array[Vector2i]:
 		# Pick from the top quartile to add seed-to-seed variety while
 		# still biasing toward balanced splits. With 20 candidates the
 		# top 5 typically share similar "smaller component" sizes.
+		@warning_ignore("integer_division")
 		var top_n: int = max(1, scored.size() / 4)
 		var pick_entry: Dictionary = scored[randi() % top_n]
 		var cand: Vector2i = pick_entry["cell"]

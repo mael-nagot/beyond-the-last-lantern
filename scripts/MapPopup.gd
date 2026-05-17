@@ -531,9 +531,9 @@ func _draw_projectile_plate_marker(rect_pos: Vector2, cell_size: float) -> void:
 	# cell, same launcher-cyan tint as the launcher arrow so the
 	# developer reads them as a pair. Centred and sized to ~40% of the
 	# cell so it doesn't overpower other markers (chests, levers).
-	var size: float = cell_size * 0.4
+	var marker_size: float = cell_size * 0.4
 	var center: Vector2 = rect_pos + Vector2(cell_size * 0.5, cell_size * 0.5)
-	var marker_rect := Rect2(center - Vector2(size, size) * 0.5, Vector2(size, size))
+	var marker_rect := Rect2(center - Vector2(marker_size, marker_size) * 0.5, Vector2(marker_size, marker_size))
 	var color := Color(0.20, 0.65, 0.85)  # same launcher cyan
 	map_draw.draw_rect(marker_rect, color)
 	var border := Color(color.r * 0.5, color.g * 0.5, color.b * 0.5)

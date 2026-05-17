@@ -859,7 +859,7 @@ func _trap_grid_positions_local(data: TrapData) -> Array:
 			result.append(Vector3(cxr, 0.0, rz))
 	return result
 
-func _natural_hole_world_size(tex: Texture2D, data: TrapData, slot_count: int) -> float:
+func _natural_hole_world_size(_tex: Texture2D, data: TrapData, slot_count: int) -> float:
 	# Fallback when the designer leaves hole_world_size at 0. Sizes
 	# the hole so a 2×2 grid roughly fills the cell — good default.
 	# Larger grids shrink each tile; smaller grids leave breathing
@@ -1142,7 +1142,7 @@ func _refresh_teleporter_positions() -> void:
 # both endpoints of a pair (so a single warp pair pulses as one
 # creature) but offset between pairs (so two pairs in view don't pulse
 # in lockstep).
-func _update_teleporter_pulse(delta: float) -> void:
+func _update_teleporter_pulse(_delta: float) -> void:
 	if _teleporter_visuals.is_empty():
 		return
 	var t: float = Time.get_ticks_msec() / 1000.0
@@ -1788,9 +1788,11 @@ func _refresh_item_positions(animated: bool = false) -> void:
 	if _item_tween != null and _item_tween.is_valid():
 		_item_tween.kill()
 		_item_tween = null
-	if animated:
-		_item_tween = create_tween()
-		_item_tween.set_parallel(true)
+	# Tween is created lazily on the first sprite that actually needs to
+	# move. Creating it up-front would emit a "started with no Tweeners"
+	# error whenever the player moves through a room with no items (or
+	# where no item changed cell-residency) — that path was firing on
+	# every step and turn.
 	for grid_pos in _item_sprites.keys():
 		var cell: GridCell = generator.get_cell(grid_pos.x, grid_pos.y)
 		if cell == null:
@@ -1807,6 +1809,9 @@ func _refresh_item_positions(animated: bool = false) -> void:
 				continue
 			var target_pos: Vector3 = _item_world_position(grid_pos, i, inst)
 			if animated and sprite.position != target_pos:
+				if _item_tween == null:
+					_item_tween = create_tween()
+					_item_tween.set_parallel(true)
 				_item_tween.tween_property(sprite, "position", target_pos, 0.12)
 			else:
 				sprite.position = target_pos
@@ -1904,7 +1909,7 @@ func _apply_biome_sky(env: Environment) -> void:
 		env.sky = null
 		return
 
-	env.background_mode = _saved_env_background_mode
+	env.background_mode = _saved_env_background_mode as Environment.BGMode
 	env.background_color = _saved_env_background_color
 	env.sky = _saved_env_sky
 
