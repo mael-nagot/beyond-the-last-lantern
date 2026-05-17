@@ -5,20 +5,20 @@
 ```
 res://assets/
 ├── biomes/                    ← BiomeData resource files (.tres)
-│   └── forest.tres            ← Forest biome configuration
+│   ├── forest.tres            ← Forest biome (indoor — wall geometry)
+│   └── sparse_forest.tres     ← Sparse Forest biome (outdoor — fillers + sky)
+├── filler/                    ← FillerData resource files — see filler/README.md
+│   └── sparse_forest_tree.tres
 ├── items/                     ← ItemData resource files (.tres) — see items/README.md
 ├── textures/                  ← All texture image files
 │   ├── biomes/
-│   │   └── forest/
-│   │       ├── walls/         ← Wall textures for the forest biome
-│   │       │   ├── wall_bark_01_albedo.png
-│   │       │   └── wall_bark_01_normal.png
-│   │       ├── floors/        ← Floor textures for the forest biome
-│   │       │   ├── floor_dirt_01_albedo.png
-│   │       │   └── floor_dirt_01_normal.png
-│   │       └── ceilings/      ← Ceiling textures for the forest biome
-│   │           ├── ceiling_canopy_01_albedo.png
-│   │           └── ceiling_canopy_01_normal.png
+│   │   ├── forest/
+│   │   │   ├── walls/         ← Wall textures for the forest biome
+│   │   │   ├── floors/        ← Floor textures for the forest biome
+│   │   │   └── ceilings/      ← Ceiling textures for the forest biome
+│   │   └── sparse_forest/
+│   │       ├── fillers/       ← Tree / rock / bush PNGs (outdoor filler sprites)
+│   │       └── floors/        ← Floor textures (optional — reuses forest's by default)
 │   └── items/                 ← Item textures — see textures/items/README.md
 │       ├── icons/             ← Small square icons for the item bar
 │       └── sprites/           ← Larger sprites for floor Sprite3D billboards

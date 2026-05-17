@@ -4269,3 +4269,283 @@ func test_partition_stress_sweep_25_seeds() -> void:
 					"seed %d: teleporter endpoint %s overlaps a spinner" % [s, endpoint])
 				assert_true(cell.items.is_empty(),
 					"seed %d: teleporter endpoint %s overlaps floor items" % [s, endpoint])
+
+# -------------------------------------------------------
+# Outdoor-mode fillers
+# -------------------------------------------------------
+# Helper: build a FillerSpawn referencing a single FillerData with
+# fixed density and a zero-radius jitter (so per-sprite world position
+# is deterministic from the cell alone). Border ring is configurable
+# per test. `front_row_bias` defaults to 0 here so legacy tests get
+# clean Vector2.ZERO offsets — the bias-specific test opts in.
+func _make_filler_spawn(density: int = 2, border_ring: int = 0, scale: float = 1.0) -> FillerSpawn:
+	var data := FillerData.new()
+	data.world_height = 4.0
+	var spawn := FillerSpawn.new()
+	spawn.fillers = [data]
+	spawn.density_min = density
+	spawn.density_max = density
+	spawn.jitter_radius = 0.0
+	spawn.front_row_bias = 0.0
+	spawn.border_ring_depth = border_ring
+	spawn.scale_min = scale
+	spawn.scale_max = scale
+	return spawn
+
+func test_fillers_empty_when_outdoor_mode_off() -> void:
+	var biome := _make_biome()
+	biome.outdoor_mode = false
+	biome.filler_spawns = [_make_filler_spawn(3, 4)]
+	var gen := _make_generator(biome)
+	assert_eq(gen.fillers.size(), 0,
+		"indoor biome must not place fillers even if filler_spawns is populated")
+
+func test_fillers_empty_when_pool_empty() -> void:
+	var biome := _make_biome()
+	biome.outdoor_mode = true
+	biome.filler_spawns = []
+	var gen := _make_generator(biome)
+	assert_eq(gen.fillers.size(), 0)
+
+func test_fillers_placed_on_every_wall_cell_inside_grid() -> void:
+	var biome := _make_biome()
+	biome.outdoor_mode = true
+	biome.filler_spawns = [_make_filler_spawn(2, 0)]
+	var gen := _make_generator(biome)
+	# Count WALL cells inside the grid. With density=2 and no border
+	# ring, expect exactly 2 × wall_count fillers.
+	var wall_count: int = 0
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			if gen.grid[x][y].cell_type == GridCell.CellType.WALL:
+				wall_count += 1
+	assert_eq(gen.fillers.size(), wall_count * 2,
+		"every WALL cell should hold 2 fillers (density=2, no border ring)")
+
+func test_fillers_never_placed_on_floor_cells() -> void:
+	var biome := _make_biome()
+	biome.outdoor_mode = true
+	biome.filler_spawns = [_make_filler_spawn(3, 2)]
+	var gen := _make_generator(biome)
+	for inst in gen.fillers:
+		# In-grid placements must be WALL cells; out-of-grid placements
+		# are fine (they have no GridCell at all).
+		if inst.cell.x < 0 or inst.cell.x >= gen.grid_width:
+			continue
+		if inst.cell.y < 0 or inst.cell.y >= gen.grid_height:
+			continue
+		var cell: GridCell = gen.grid[inst.cell.x][inst.cell.y]
+		assert_eq(cell.cell_type, GridCell.CellType.WALL,
+			"filler at in-grid cell %s sits on a non-WALL cell" % inst.cell)
+
+func test_fillers_border_ring_extends_outside_grid() -> void:
+	var biome := _make_biome()
+	biome.outdoor_mode = true
+	biome.filler_spawns = [_make_filler_spawn(1, 3)]
+	var gen := _make_generator(biome)
+	# At least one filler must land at a cell strictly outside the grid
+	# bounds — proves border_ring_depth is wired through.
+	var any_outside: bool = false
+	for inst in gen.fillers:
+		if inst.cell.x < 0 or inst.cell.x >= gen.grid_width \
+				or inst.cell.y < 0 or inst.cell.y >= gen.grid_height:
+			any_outside = true
+			break
+	assert_true(any_outside,
+		"border_ring_depth = 3 should place at least one filler outside the grid")
+
+func test_fillers_deterministic_under_same_seed() -> void:
+	var biome_a := _make_biome()
+	biome_a.outdoor_mode = true
+	biome_a.filler_spawns = [_make_filler_spawn(2, 1)]
+	var gen_a := _make_generator(biome_a, 42)
+
+	var biome_b := _make_biome()
+	biome_b.outdoor_mode = true
+	biome_b.filler_spawns = [_make_filler_spawn(2, 1)]
+	var gen_b := _make_generator(biome_b, 42)
+
+	assert_eq(gen_a.fillers.size(), gen_b.fillers.size())
+	for i in range(gen_a.fillers.size()):
+		assert_eq(gen_a.fillers[i].cell, gen_b.fillers[i].cell,
+			"filler %d cell differs under same seed" % i)
+		assert_almost_eq(gen_a.fillers[i].scale, gen_b.fillers[i].scale, 0.0001,
+			"filler %d scale differs under same seed" % i)
+
+func test_fillers_front_row_bias_pulls_toward_floor_edge() -> void:
+	# With bias = 1.0 and no random jitter, every filler in a WALL
+	# cell that borders a FLOOR cell should land at the cell edge
+	# facing ONE of its FLOOR neighbours. The placer picks per-filler
+	# (not the averaged direction), so a T-junction with FLOOR on
+	# three sides splits its fillers between those three edges — the
+	# test must accept any one of them as a valid bias.
+	var biome := _make_biome()
+	biome.outdoor_mode = true
+	var spawn := _make_filler_spawn(1, 0)
+	spawn.front_row_bias = 1.0
+	biome.filler_spawns = [spawn]
+	var gen := _make_generator(biome, 42)
+	var any_biased: bool = false
+	for inst in gen.fillers:
+		if inst.cell.x < 0 or inst.cell.x >= gen.grid_width:
+			continue
+		if inst.cell.y < 0 or inst.cell.y >= gen.grid_height:
+			continue
+		var floor_dirs: Array[Vector2i] = []
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			var npos: Vector2i = inst.cell + d
+			if npos.x < 0 or npos.x >= gen.grid_width:
+				continue
+			if npos.y < 0 or npos.y >= gen.grid_height:
+				continue
+			if gen.grid[npos.x][npos.y].cell_type != GridCell.CellType.WALL:
+				floor_dirs.append(d)
+		if floor_dirs.is_empty():
+			continue  # interior wall
+		var matched: bool = false
+		for d: Vector2i in floor_dirs:
+			var dv := Vector2(d.x, d.y)
+			if inst.cell_offset.dot(dv) > 0.1:
+				matched = true
+				break
+		assert_true(matched,
+			"filler at cell %s should be biased toward one of %s but offset is %s" % [inst.cell, floor_dirs, inst.cell_offset])
+		any_biased = true
+	assert_true(any_biased,
+		"expected at least one filler in a WALL cell that borders a FLOOR cell")
+
+func test_fillers_front_row_bias_zero_keeps_offset_at_zero() -> void:
+	# bias = 0 + jitter_radius = 0 → every offset is exactly Vector2.ZERO.
+	# Pins the regression where the bias code accidentally moved sprites
+	# even when the spawn opted out.
+	var biome := _make_biome()
+	biome.outdoor_mode = true
+	var spawn := _make_filler_spawn(2, 1)  # already sets front_row_bias = 0
+	biome.filler_spawns = [spawn]
+	var gen := _make_generator(biome, 42)
+	assert_true(gen.fillers.size() > 0, "expected at least one filler placed")
+	for inst in gen.fillers:
+		assert_eq(inst.cell_offset, Vector2.ZERO,
+			"filler at %s should have zero offset (bias=0, jitter=0) but got %s" % [inst.cell, inst.cell_offset])
+
+func test_fillers_front_row_bias_preserves_lateral_spread() -> void:
+	# bias > 0 must NOT compress the along-wall (perpendicular to
+	# floor_dir) axis. With dense placement (12 sprites per cell),
+	# fillers in WALL cells facing a single FLOOR neighbour should
+	# spread laterally — otherwise dense spawns clump into a tiny
+	# region at the floor-adjacent corner.
+	var biome := _make_biome()
+	biome.outdoor_mode = true
+	var spawn := _make_filler_spawn(12, 0)
+	spawn.jitter_radius = 0.4
+	spawn.front_row_bias = 1.0
+	biome.filler_spawns = [spawn]
+	var gen := _make_generator(biome, 42)
+	# Group fillers by cell and look for a cell with a SINGLE in-grid
+	# FLOOR neighbour (cardinal floor_dir, so perp axis is one of x/y).
+	var cells: Dictionary = {}
+	for inst in gen.fillers:
+		if inst.cell.x < 0 or inst.cell.x >= gen.grid_width:
+			continue
+		if inst.cell.y < 0 or inst.cell.y >= gen.grid_height:
+			continue
+		if not cells.has(inst.cell):
+			cells[inst.cell] = []
+		(cells[inst.cell] as Array).append(inst)
+	var checked: bool = false
+	for cell: Vector2i in cells.keys():
+		var dir := Vector2.ZERO
+		var floor_count: int = 0
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			var npos: Vector2i = cell + d
+			if npos.x < 0 or npos.x >= gen.grid_width:
+				continue
+			if npos.y < 0 or npos.y >= gen.grid_height:
+				continue
+			if gen.grid[npos.x][npos.y].cell_type != GridCell.CellType.WALL:
+				dir += Vector2(d.x, d.y)
+				floor_count += 1
+		# Only look at cells with exactly ONE floor neighbour — the
+		# perp axis is then a single coordinate axis (clean to assert).
+		if floor_count != 1:
+			continue
+		dir = dir.normalized()
+		var lateral_min: float = INF
+		var lateral_max: float = -INF
+		for inst: FillerInstance in cells[cell]:
+			# Perpendicular component is the offset projected onto
+			# the axis perpendicular to floor_dir.
+			var perp: Vector2 = inst.cell_offset - dir * inst.cell_offset.dot(dir)
+			var lateral: float = perp.length() * sign(perp.x + perp.y)
+			lateral_min = min(lateral_min, lateral)
+			lateral_max = max(lateral_max, lateral)
+		var lateral_span: float = lateral_max - lateral_min
+		# With jitter_radius = 0.4 and density 12, the lateral
+		# spread should easily exceed 0.4 (most of the cell width).
+		# A pre-fix run compressed lateral spread to ~0 because
+		# bias squashed BOTH axes; this assertion catches that.
+		assert_true(lateral_span > 0.4,
+			"cell %s with %d fillers: lateral span %f too narrow (expected > 0.4)" % [cell, (cells[cell] as Array).size(), lateral_span])
+		checked = true
+		break
+	assert_true(checked, "no eligible single-floor-neighbour cell found in test seed")
+
+func test_fillers_front_row_bias_splits_between_opposite_floor_neighbours() -> void:
+	# A WALL cell with FLOOR on TWO opposite sides (e.g. N and S, a
+	# wall sandwiched between two parallel corridors) must mark
+	# BOTH edges — not get zero bias because the directions cancel.
+	# Pins the regression where averaging cancelled to (0, 0) and
+	# left the cell with pure random scatter.
+	var biome := _make_biome()
+	biome.outdoor_mode = true
+	var spawn := _make_filler_spawn(20, 0)
+	spawn.jitter_radius = 0.4
+	spawn.front_row_bias = 1.0
+	biome.filler_spawns = [spawn]
+	var gen := _make_generator(biome, 42)
+	# Find a WALL cell with FLOOR on opposite sides (N+S or W+E).
+	var checked: bool = false
+	for cell_x in range(gen.grid_width):
+		if checked:
+			break
+		for cell_y in range(gen.grid_height):
+			if checked:
+				break
+			var cell := Vector2i(cell_x, cell_y)
+			if gen.grid[cell_x][cell_y].cell_type != GridCell.CellType.WALL:
+				continue
+			var opposite_pair: Vector2i = Vector2i.ZERO
+			var has_n: bool = cell_y - 1 >= 0 and gen.grid[cell_x][cell_y - 1].cell_type != GridCell.CellType.WALL
+			var has_s: bool = cell_y + 1 < gen.grid_height and gen.grid[cell_x][cell_y + 1].cell_type != GridCell.CellType.WALL
+			var has_w: bool = cell_x - 1 >= 0 and gen.grid[cell_x - 1][cell_y].cell_type != GridCell.CellType.WALL
+			var has_e: bool = cell_x + 1 < gen.grid_width and gen.grid[cell_x + 1][cell_y].cell_type != GridCell.CellType.WALL
+			if has_n and has_s and not has_w and not has_e:
+				opposite_pair = Vector2i(0, 1)
+			elif has_w and has_e and not has_n and not has_s:
+				opposite_pair = Vector2i(1, 0)
+			else:
+				continue
+			# Gather fillers in this cell.
+			var cell_fillers: Array = []
+			for inst: FillerInstance in gen.fillers:
+				if inst.cell == cell:
+					cell_fillers.append(inst)
+			if cell_fillers.size() < 5:
+				continue  # need enough samples for the split to be meaningful
+			# Count fillers biased toward each side of the opposite pair.
+			var positive_side: int = 0
+			var negative_side: int = 0
+			for inst: FillerInstance in cell_fillers:
+				var along: float = inst.cell_offset.x * opposite_pair.x + inst.cell_offset.y * opposite_pair.y
+				if along > 0.1:
+					positive_side += 1
+				elif along < -0.1:
+					negative_side += 1
+			# Both sides should receive at least one filler — without
+			# per-filler picking, every filler would land near
+			# offset = 0 (no bias) and neither side would count.
+			assert_true(positive_side > 0 and negative_side > 0,
+				"cell %s with FLOOR on opposite sides should split fillers between edges; got positive=%d negative=%d (of %d)" % [cell, positive_side, negative_side, cell_fillers.size()])
+			checked = true
+	assert_true(checked,
+		"no eligible parallel-walls cell found in test seed (try a different seed if the layout has none)")

@@ -1,0 +1,62 @@
+[gd_resource type="Resource" script_class="BiomeData" format=3 uid="uid://dbo5mufrx8l8y"]
+
+[ext_resource type="Script" uid="uid://bentd6twklhjr" path="res://scripts/BiomeData.gd" id="1"]
+[ext_resource type="Script" uid="uid://bjkjhbhykhrmp" path="res://scripts/BiomeTextureEntry.gd" id="2"]
+[ext_resource type="Script" uid="uid://df1t5mocjm74t" path="res://scripts/FillerSpawn.gd" id="3"]
+[ext_resource type="Script" uid="uid://ctj7e78jjvst0" path="res://scripts/FillerData.gd" id="4"]
+[ext_resource type="Resource" uid="uid://csvf3pjsxb1yl" path="res://assets/filler/sparse_forest_tree.tres" id="5"]
+[ext_resource type="Texture2D" uid="uid://n4ttdn5ib408" path="res://assets/textures/biomes/sparse_forest/fillers/tree02.png" id="5_8d7e7"]
+[ext_resource type="Texture2D" uid="uid://byxe65cung0w8" path="res://assets/textures/biomes/forest/floors/forest floor_01.png" id="6"]
+[ext_resource type="Script" uid="uid://dwvpkpfjm8dyn" path="res://scripts/LootEntry.gd" id="6_8lxxw"]
+[ext_resource type="AudioStream" uid="uid://demirrr5g78xj" path="res://assets/sounds/biomes/forest/move/step_01.ogg" id="7"]
+[ext_resource type="AudioStream" uid="uid://ci0f4ivs6tis6" path="res://assets/sounds/biomes/forest/move/step_02.ogg" id="8"]
+[ext_resource type="Script" uid="uid://duxnh0exbhpst" path="res://scripts/KeyDoorSpawn.gd" id="8_cdfrs"]
+[ext_resource type="AudioStream" uid="uid://bavnebmwmtudp" path="res://assets/sounds/biomes/forest/move/step_03.ogg" id="9"]
+[ext_resource type="Script" uid="uid://c716yxx8rccyt" path="res://scripts/LinkedObjectSpawn.gd" id="9_lt4x6"]
+[ext_resource type="Script" uid="uid://q2yc7peloed8" path="res://scripts/ObjectSpawn.gd" id="13_3acbh"]
+[ext_resource type="Script" uid="uid://bqw57pqm6wjbx" path="res://scripts/ProjectileTrapSpawn.gd" id="14_i20jg"]
+[ext_resource type="Script" uid="uid://dgfmk8c0mn1uj" path="res://scripts/SecretWallSpawn.gd" id="16_0csr0"]
+[ext_resource type="Script" uid="uid://cnxm6kno1kh3w" path="res://scripts/SpinnerSpawn.gd" id="17_t0w1x"]
+[ext_resource type="Script" uid="uid://bpkkmcjv0jnht" path="res://scripts/TrapSpawn.gd" id="18_k420j"]
+[ext_resource type="Script" uid="uid://c4fbuyttq7iik" path="res://scripts/WallDecorationSpawn.gd" id="19_ol8i7"]
+
+[sub_resource type="Resource" id="Resource_g3c32"]
+script = ExtResource("4")
+name_key = "filler.sparse_forest.tree.name"
+description_key = "filler.sparse_forest.tree.description"
+texture = ExtResource("5_8d7e7")
+metadata/_custom_type_script = "uid://ctj7e78jjvst0"
+
+[sub_resource type="Resource" id="Resource_filler_trees"]
+script = ExtResource("3")
+fillers = Array[ExtResource("4")]([ExtResource("5"), SubResource("Resource_g3c32")])
+density_min = 12
+density_max = 15
+front_row_bias = 0.805
+scale_min = 1.2
+scale_max = 1.5
+
+[sub_resource type="Resource" id="Resource_floor_default"]
+script = ExtResource("2")
+albedo = ExtResource("6")
+
+[resource]
+script = ExtResource("1")
+biome_name = "Sparse Forest"
+floor_textures = Array[ExtResource("2")]([SubResource("Resource_floor_default")])
+show_ceiling = false
+fog_color = Color(0.65, 0.78, 0.88, 1)
+fog_density = 0.08
+fog_aerial = 0.2
+ambient_color = Color(0.95, 0.92, 0.82, 1)
+ambient_energy = 1.4
+outdoor_mode = true
+filler_spawns = Array[ExtResource("3")]([SubResource("Resource_filler_trees")])
+sky_color = Color(0.55, 0.72, 0.88, 1)
+grid_width = 21
+grid_height = 21
+min_exit_distance = 8
+maze_bias = 0.3
+wiggle = 0.8
+room_count = 3
+move_sounds = Array[AudioStream]([ExtResource("7"), ExtResource("8"), ExtResource("9")])

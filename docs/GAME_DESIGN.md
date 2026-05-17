@@ -289,6 +289,31 @@ Each biome defines:
 
 Biomes are stored as `BiomeData` resources (`.tres` files) in `res://assets/biomes/`.
 
+### Outdoor Biomes (no walls)
+
+Some biomes are open-air — a sparse forest, a beach, a clifftop path — and have no solid walls. The player still moves on the same grid, but the impassable space outside the walkable area is filled with **billboarded filler sprites** (trees, rocks, bushes) instead of wall geometry. The sky is visible past the silhouettes.
+
+A biome opts in by setting `outdoor_mode = true`. Four things change automatically:
+
+1. **No wall geometry.** The renderer skips wall quads on every floor cell.
+2. **No ceiling.** Outdoor biomes never render a ceiling regardless of `show_ceiling`.
+3. **Fillers spawn instead.** Each `FillerSpawn` entry on the biome seeds N sprites per blocked cell, plus a configurable ring of cells outside the grid (so the horizon fades into trees instead of stopping at the grid edge).
+4. **Floor extends past the walkable area.** A second floor-quad pass draws ground under every WALL cell inside the grid and across `outdoor_floor_extent` cells outside it, sampled from `filler_floor_textures` (or `floor_textures` as a fallback). Without this the trees float on the sky background and the player loses their depth cue.
+
+The sky background is overridden per biome:
+- `sky_material` (e.g. a `PanoramaSkyMaterial` with a panoramic texture) takes precedence when set.
+- Otherwise `sky_color` (any opaque colour) fills the background as a flat hue.
+- Otherwise the scene's default WorldEnvironment background stays as-is.
+
+**Banned in outdoor biomes** (they need real wall geometry to attach to):
+- Wall decorations (paintings, torches, lanterns)
+- Projectile traps (wall-mounted launchers)
+- Secret walls (the disguise relies on a normal-looking wall)
+
+Leave those biome arrays empty for outdoor biomes.
+
+**Wayfinding caveat.** Trees don't read as "you can't walk here" as instantly as solid walls. Density carries some of the illusion, but the heavy lifting is `FillerSpawn.front_row_bias` — sprites in WALL cells that border a FLOOR cell are pulled toward the floor-adjacent edge of their cell so the wall line clusters right at the boundary the player is approaching. Without this bias, random jitter can leave a tree at the far side of its cell and create the visual impression of a walkable gap that the player tries to step into and bumps an invisible wall. Default bias is 0.7 (strong wall-line read with lateral scatter for organic feel); tune up to 1.0 for a clearer boundary or down to 0 for pure random scatter. Typical setup also uses 3–5 sprites per blocked cell and a 4-cell border ring; fog hides the seam where the filler ring ends.
+
 ---
 
 ## Meta Progression — Grimoire System

@@ -45,6 +45,20 @@ var _items_root: Node3D
 var _objects_root: Node3D
 var _doors_root: Node3D
 var _decorations_root: Node3D
+# Outdoor-mode fillers (trees / rocks / bushes). Parented under its
+# own root so a level rebuild can free the whole subtree in one go
+# without touching the other rendered classes. Empty for indoor
+# biomes — the build step short-circuits when biome.outdoor_mode is
+# false or generator.fillers is empty.
+var _fillers_root: Node3D
+# Original WorldEnvironment background settings, captured the first
+# time `_apply_biome_environment` runs. Used to RESTORE the indoor
+# defaults when switching from an outdoor biome back to an indoor one
+# (so the scene-authored environment is the source of truth, not
+# whatever the last outdoor biome left behind).
+var _saved_env_background_mode: int = -1
+var _saved_env_background_color: Color = Color(0.0, 0.0, 0.0, 1.0)
+var _saved_env_sky: Sky = null
 var _traps_root: Node3D
 # Wall-mounted projectile-trap launchers (Phase 8 Task 3 — Subtask C).
 # Subtask C1 renders the launcher sprite statically. Subtask C2 adds
@@ -160,6 +174,9 @@ func setup(gen: LevelGenerator) -> void:
 	_build_spinners()
 	_build_teleporters()
 	_build_wall_decorations()
+	_ensure_fillers_root()
+	_build_outdoor_floors()
+	_build_fillers()
 	_place_camera_at_entrance()
 	_apply_biome_environment()
 	_update_viewport_size()
@@ -192,6 +209,13 @@ func _ensure_decorations_root() -> void:
 	_decorations_root = Node3D.new()
 	_decorations_root.name = "WallDecorationsRoot"
 	sub_viewport.add_child(_decorations_root)
+
+func _ensure_fillers_root() -> void:
+	if _fillers_root != null and is_instance_valid(_fillers_root):
+		return
+	_fillers_root = Node3D.new()
+	_fillers_root.name = "FillersRoot"
+	sub_viewport.add_child(_fillers_root)
 
 func _ensure_traps_root() -> void:
 	if _traps_root != null and is_instance_valid(_traps_root):
@@ -304,6 +328,12 @@ func _build_mesh() -> void:
 	var wall_history: Dictionary = {}
 	var floor_history: Dictionary = {}
 	var ceiling_history: Dictionary = {}
+	# Outdoor biomes have no wall geometry and no ceiling — the player
+	# sees floors, fillers (trees / rocks), and the sky background.
+	# Coupling the two is intentional: an outdoor biome with a ceiling
+	# would feel like a closed room with invisible walls.
+	var outdoor: bool = biome != null and biome.outdoor_mode
+	var ceiling_enabled: bool = show_ceiling and not outdoor
 
 	for x in range(generator.grid_width):
 		for y in range(generator.grid_height):
@@ -327,12 +357,16 @@ func _build_mesh() -> void:
 				_record_history(floor_history, floor_entry, grid_pos)
 				_add_horizontal_quad(Vector3(cx, 0.0, cy), _material_for_entry(floor_entry))
 
-			if show_ceiling:
+			if ceiling_enabled:
 				var ceil_entry: BiomeTextureEntry = BiomeTextureEntry.pick_for(
 					biome.ceiling_textures, classification, grid_pos, ceiling_history)
 				if ceil_entry != null:
 					_record_history(ceiling_history, ceil_entry, grid_pos)
 					_add_horizontal_quad(Vector3(cx, wall_height, cy), _material_for_entry(ceil_entry), true)
+
+			if outdoor:
+				# Wall geometry is replaced by fillers (see _build_fillers).
+				continue
 
 			var neighbours = [
 				[Vector2i( 0, -1), Vector3(cx, wall_height * 0.5, cy - CELL_SIZE * 0.5),   0.0],
@@ -1156,6 +1190,104 @@ func _build_wall_decorations() -> void:
 		if node != null:
 			_decorations_root.add_child(node)
 
+# Extends floor geometry under filler sprites and out across the
+# `outdoor_floor_extent` border ring. Without this pass, outdoor
+# biomes only have floor under FLOOR cells (the walkable area),
+# so trees appear to float on the sky background — broken depth
+# cue. With it, the player sees ground stretching out beneath the
+# trees and fog smoothly hides the edge.
+#
+# Texture pool: `biome.filler_floor_textures` if non-empty, else
+# `biome.floor_textures`. Same `BiomeTextureEntry` picker the main
+# mesh uses (deterministic position-hash, supports weights and
+# min_distance_to_same), with a fresh placement history so under-
+# filler choices don't fight the walkable-floor history for
+# variety distribution.
+#
+# Indoor biomes early-out — the function is a no-op when
+# `outdoor_mode = false`.
+func _build_outdoor_floors() -> void:
+	if biome == null or not biome.outdoor_mode:
+		return
+	var pool: Array[BiomeTextureEntry] = biome.filler_floor_textures
+	if pool.is_empty():
+		pool = biome.floor_textures
+	if pool.is_empty():
+		return
+	var extent: int = max(0, biome.outdoor_floor_extent)
+	# Local history so this pass picks variety independently from
+	# the walkable-floor pass — they conceptually represent two
+	# different surfaces (path vs. undergrowth) even when they
+	# share a texture pool by default.
+	var history: Dictionary = {}
+	for x in range(-extent, generator.grid_width + extent):
+		for y in range(-extent, generator.grid_height + extent):
+			var pos := Vector2i(x, y)
+			# Skip cells that already have a floor quad from the
+			# main `_build_mesh` pass (FLOOR / ENTRANCE / EXIT).
+			# Out-of-grid cells fall through.
+			if pos.x >= 0 and pos.x < generator.grid_width \
+					and pos.y >= 0 and pos.y < generator.grid_height:
+				var cell = generator.get_cell(pos.x, pos.y)
+				if cell != null and cell.cell_type != GridCell.CellType.WALL:
+					continue
+			var entry: BiomeTextureEntry = BiomeTextureEntry.pick_for(
+				pool, ObjectSpawn.PLACEMENT_CORRIDOR, pos, history)
+			if entry == null:
+				continue
+			_record_history(history, entry, pos)
+			var cx = x * CELL_SIZE + CELL_SIZE * 0.5
+			var cy = y * CELL_SIZE + CELL_SIZE * 0.5
+			_add_horizontal_quad(Vector3(cx, 0.0, cy), _material_for_entry(entry))
+
+# Outdoor-mode filler sprites (trees / rocks / bushes). Iterates
+# `generator.fillers` and creates one Sprite3D per entry, parented
+# under `_fillers_root`. No-op when the list is empty (every indoor
+# biome) — no need to early-out on `outdoor_mode` here, the placer
+# already short-circuited.
+#
+# Sprites use BILLBOARD_FIXED_Y so trees stay vertical but always face
+# the camera horizontally — that's what makes a flat tree silhouette
+# read as a cylinder rather than a card. No lean (decorations stay
+# centred per CLAUDE.md's billboard rules) and no per-frame update
+# (the billboard mode does the work in the shader).
+func _build_fillers() -> void:
+	for child in _fillers_root.get_children():
+		child.queue_free()
+	if generator == null:
+		return
+	for inst in generator.fillers:
+		if inst == null or inst.data == null or inst.data.texture == null:
+			continue
+		var sprite := _make_filler_sprite(inst)
+		if sprite != null:
+			_fillers_root.add_child(sprite)
+
+func _make_filler_sprite(inst: FillerInstance) -> Sprite3D:
+	var data: FillerData = inst.data
+	var tex_h: int = data.texture.get_height()
+	if tex_h <= 0:
+		tex_h = 1
+	# Effective real-world height after the per-instance scale; the
+	# sprite's bottom sits at y=0 so we raise the centre by half of
+	# that, then nudge by the data's y_offset (lets designers push the
+	# sprite into the ground if the PNG has trunk padding below).
+	var effective_height: float = data.world_height * inst.scale
+	var sprite := Sprite3D.new()
+	sprite.texture = data.texture
+	sprite.pixel_size = effective_height / float(tex_h)
+	sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+	# Convert grid cell + sub-cell offset to world coords here (the
+	# generator stays grid-space). cell_offset is in fractions of
+	# CELL_SIZE so each component multiplies up to ±half a cell.
+	var wx: float = (float(inst.cell.x) + 0.5 + inst.cell_offset.x) * CELL_SIZE
+	var wz: float = (float(inst.cell.y) + 0.5 + inst.cell_offset.y) * CELL_SIZE
+	var wy: float = effective_height * 0.5 + data.y_offset
+	sprite.position = Vector3(wx, wy, wz)
+	return sprite
+
 func _process(delta: float) -> void:
 	_update_billboard_decorations()
 	_update_flickering_lights()
@@ -1729,7 +1861,7 @@ func _build_material(albedo: Texture2D) -> StandardMaterial3D:
 
 func _apply_biome_environment() -> void:
 	var env = world_env.environment
-	
+
 	if env == null:
 		push_error("No Environment resource on WorldEnvironment node")
 		return
@@ -1742,7 +1874,39 @@ func _apply_biome_environment() -> void:
 
 	env.ambient_light_source     = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color      = biome.ambient_color
-	env.ambient_light_energy     = biome.ambient_energy	
+	env.ambient_light_energy     = biome.ambient_energy
+
+	_apply_biome_sky(env)
+
+# Sky override for outdoor biomes. Three modes:
+#   - biome.sky_material non-null → wrap it in a Sky resource and use
+#     BG_SKY. Path to swap in a panorama PNG later without code edits.
+#   - biome.sky_color.a > 0       → use BG_COLOR with that flat colour.
+#   - neither set                 → RESTORE the WorldEnvironment's
+#     scene-authored defaults (captured on first run). Stops a
+#     SparseForest blue sky from leaking into the next indoor biome.
+func _apply_biome_sky(env: Environment) -> void:
+	if _saved_env_background_mode == -1:
+		_saved_env_background_mode = env.background_mode
+		_saved_env_background_color = env.background_color
+		_saved_env_sky = env.sky
+
+	if biome.sky_material != null:
+		var sky := Sky.new()
+		sky.sky_material = biome.sky_material
+		env.background_mode = Environment.BG_SKY
+		env.sky = sky
+		return
+
+	if biome.sky_color.a > 0.0:
+		env.background_mode = Environment.BG_COLOR
+		env.background_color = biome.sky_color
+		env.sky = null
+		return
+
+	env.background_mode = _saved_env_background_mode
+	env.background_color = _saved_env_background_color
+	env.sky = _saved_env_sky
 
 func _add_horizontal_quad(pos: Vector3, mat: StandardMaterial3D, flip: bool = false) -> void:
 	var mesh_instance              = MeshInstance3D.new()

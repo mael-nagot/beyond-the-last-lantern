@@ -28,6 +28,59 @@ extends Resource
 @export var ambient_color:  Color = Color(0.6, 0.55, 0.4)
 @export var ambient_energy: float = 1.2
 
+@export_group("Outdoor Mode")
+## When true, the renderer skips wall geometry entirely and the biome
+## fills its impassable cells (and a configurable border ring beyond
+## the grid edge) with billboarded sprites from `filler_spawns`
+## instead. Used for open-air biomes like sparse forests or beaches
+## where the "wall" is conceptually a tree-line or rock-line.
+## `wall_decorations`, `projectile_trap_spawns`, and `secret_wall_spawns`
+## all require real wall geometry — leave those arrays empty when
+## `outdoor_mode = true`.
+@export var outdoor_mode: bool = false
+
+## Sprite pools spawned on WALL cells + border ring when
+## `outdoor_mode = true`. Multiple entries allowed — e.g. one for big
+## trees, one for ferns, one for rocks — and every entry is iterated
+## by the placer so they layer. Ignored when outdoor_mode is false.
+@export var filler_spawns: Array[FillerSpawn] = []
+
+## Textures for the floor under fillers (and the floor extending past
+## the grid edge). Same `BiomeTextureEntry` resource as the walkable
+## floor pool — supports weights, placement flags, and
+## min_distance_to_same so designers can mix forest litter, dirt
+## patches, and exposed roots under the trees.
+## Empty falls back to `floor_textures` (so a biome with one floor
+## look everywhere doesn't need to duplicate the array). Only used
+## when `outdoor_mode = true`.
+@export var filler_floor_textures: Array[BiomeTextureEntry] = []
+
+## How many cells beyond the grid edge to extend the outdoor floor
+## in every direction. The floor is drawn under WALL cells inside
+## the grid AND across this border ring outside it, so the player
+## sees ground stretching out beneath the trees rather than a sharp
+## edge of world.
+## Defaults to 8 (the typical filler border is 4, plus extra slack
+## so the floor visibly extends past the last tree before fog
+## swallows it). Only used when `outdoor_mode = true`.
+@export var outdoor_floor_extent: int = 8
+
+## Flat background colour to override on the WorldEnvironment when
+## entering this biome. Alpha = 0 means "don't override" (the
+## WorldEnvironment keeps whatever background is currently set).
+## Alpha > 0 swaps env.background_mode to BG_COLOR and applies the
+## colour. Only takes effect for outdoor biomes (with walls in place
+## the background colour is never visible anyway).
+@export var sky_color: Color = Color(0.0, 0.0, 0.0, 0.0)
+
+## Optional sky material override (PanoramaSkyMaterial,
+## ProceduralSkyMaterial, PhysicalSkyMaterial). When non-null, takes
+## precedence over `sky_color`: the renderer wraps it in a Sky
+## resource and sets the env to BG_SKY.
+## Path to upgrade from a flat colour to a textured sky later — drop
+## a panorama PNG into a PanoramaSkyMaterial, assign it here, done.
+@export var sky_material: Material = null
+
 @export_group("Texture Mapping")
 @export var use_triplanar: bool = false
 @export var triplanar_sharpness: float = 0.5
