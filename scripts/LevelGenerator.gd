@@ -25,6 +25,17 @@ var projectile_trap_spawns_pool: Array[ProjectileTrapSpawn] = []
 var spinner_spawns_pool: Array[SpinnerSpawn] = []
 var wall_decorations_pool: Array[WallDecorationSpawn] = []
 var secret_wall_spawns_pool: Array[SecretWallSpawn] = []
+# Outdoor-mode filler sprites — trees, rocks, bushes spawned on
+# WALL cells + border ring in `outdoor_mode` biomes (BiomeData). The
+# placement pass `_place_fillers()` is a no-op for non-outdoor biomes
+# (empty pool, nothing to do).
+var filler_spawns_pool: Array[FillerSpawn] = []
+# When true, _place_fillers() also seeds the border ring outside the
+# grid (configured per-FillerSpawn). When false, fillers stay inside
+# the grid even if the biome opts in. Mirrors BiomeData.outdoor_mode
+# — the renderer uses the same flag to decide whether to skip wall
+# quads.
+var outdoor_mode: bool = false
 # Phase 15 Task 6 — Phase A. Singular (NOT array) — one teleporter
 # config per biome. Null = no teleporters this biome.
 var teleporter_spawn_config: TeleporterSpawn = null
@@ -56,6 +67,13 @@ var _secret_walls_by_edge: Dictionary = {}  # edge_key (String) -> SecretWallIns
 # the same face via _wall_faces_used.
 var wall_decorations: Array[WallDecorationInstance] = []
 var _wall_faces_used: Dictionary = {}  # face_key (String) -> true
+
+# Outdoor-mode filler sprites — runtime placements. Each instance is
+# a single billboarded sprite (tree, rock, bush) sitting on a WALL
+# cell (or a cell in the border ring outside the grid). The renderer
+# (DungeonView._build_fillers) iterates this list and emits one
+# Sprite3D per entry. Empty for non-outdoor biomes.
+var fillers: Array[FillerInstance] = []
 
 # Traps live on cells (`GridCell.trap`) but we also keep a flat list
 # so the renderer + Game tick can iterate without re-scanning the
@@ -139,6 +157,8 @@ func configure(biome: BiomeData) -> void:
 	wall_decorations_pool = biome.wall_decorations
 	secret_wall_spawns_pool = biome.secret_wall_spawns
 	teleporter_spawn_config = biome.teleporter_spawn
+	filler_spawns_pool = biome.filler_spawns
+	outdoor_mode = biome.outdoor_mode
 
 func generate() -> void:
 	_fill_with_walls()
@@ -146,6 +166,7 @@ func generate() -> void:
 	_doors_by_edge.clear()
 	wall_decorations.clear()
 	_wall_faces_used.clear()
+	fillers.clear()
 	traps.clear()
 	_cluster_cells.clear()
 	projectile_traps.clear()
@@ -186,6 +207,7 @@ func generate() -> void:
 	_place_secret_walls()
 	_place_teleporters()
 	_place_wall_decorations()
+	_place_fillers()
 
 # -------------------------------------------------------
 # Fill
@@ -4281,3 +4303,68 @@ func _cell_holds_plate(pos: Vector2i) -> bool:
 		if ptrap.plate_cell == pos:
 			return true
 	return false
+
+# -------------------------------------------------------
+# Outdoor-mode fillers (trees / rocks / bushes)
+# -------------------------------------------------------
+# Iterates every WALL cell inside the grid and — for each FillerSpawn
+# in the biome's pool — samples a density, picks sprites uniformly
+# from the spawn's pool, and pushes one `FillerInstance` per sprite
+# with a sub-cell jitter offset.
+#
+# When `border_ring_depth > 0`, ALSO seeds a ring of cells outside
+# the grid (negative coords and coords >= grid_width/height). These
+# out-of-grid cells aren't real GridCells — they're virtual positions
+# the renderer converts to world space the same way as in-grid cells.
+# The ring exists so the playable area sits inside a thicker frame of
+# trees that fades into fog instead of an abrupt edge of world.
+#
+# No-op for non-outdoor biomes (the `outdoor_mode` flag is checked
+# up-front and short-circuits before any iteration). The pool stays
+# unused on indoor biomes — designers don't need to clear it when
+# toggling outdoor_mode off.
+func _place_fillers() -> void:
+	if not outdoor_mode:
+		return
+	if filler_spawns_pool.is_empty():
+		return
+	for spawn in filler_spawns_pool:
+		if spawn == null or spawn.fillers.is_empty():
+			continue
+		_place_one_filler_spawn(spawn)
+
+func _place_one_filler_spawn(spawn: FillerSpawn) -> void:
+	var depth: int = max(0, spawn.border_ring_depth)
+	var x_min: int = -depth
+	var x_max: int = grid_width + depth
+	var y_min: int = -depth
+	var y_max: int = grid_height + depth
+	for x in range(x_min, x_max):
+		for y in range(y_min, y_max):
+			var pos := Vector2i(x, y)
+			if not _is_filler_cell(pos):
+				continue
+			# `randi()` runs through the global RNG — same source the
+			# other placers use, so a `seed(N)` ahead of `generate()`
+			# makes filler placement deterministic for tests.
+			var density: int = spawn.sample_density(randi())
+			for _i in range(density):
+				var fd: FillerData = spawn.pick_filler(randi())
+				if fd == null:
+					continue
+				var jx: float = randf_range(-spawn.jitter_radius, spawn.jitter_radius)
+				var jy: float = randf_range(-spawn.jitter_radius, spawn.jitter_radius)
+				var scale: float = spawn.sample_scale(randf())
+				fillers.append(FillerInstance.create(fd, pos, Vector2(jx, jy), scale))
+
+# A cell is "fillable" if it's outside the grid (always blocked — no
+# GridCell at all) OR it's a WALL cell inside the grid. Floor cells
+# (FLOOR / ENTRANCE / EXIT) are skipped — fillers must never block
+# the player's walkable area.
+func _is_filler_cell(pos: Vector2i) -> bool:
+	if pos.x < 0 or pos.x >= grid_width or pos.y < 0 or pos.y >= grid_height:
+		return true
+	var cell: GridCell = grid[pos.x][pos.y]
+	if cell == null:
+		return true
+	return cell.cell_type == GridCell.CellType.WALL

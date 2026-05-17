@@ -289,6 +289,30 @@ Each biome defines:
 
 Biomes are stored as `BiomeData` resources (`.tres` files) in `res://assets/biomes/`.
 
+### Outdoor Biomes (no walls)
+
+Some biomes are open-air — a sparse forest, a beach, a clifftop path — and have no solid walls. The player still moves on the same grid, but the impassable space outside the walkable area is filled with **billboarded filler sprites** (trees, rocks, bushes) instead of wall geometry. The sky is visible past the silhouettes.
+
+A biome opts in by setting `outdoor_mode = true`. Three things change automatically:
+
+1. **No wall geometry.** The renderer skips wall quads on every floor cell.
+2. **No ceiling.** Outdoor biomes never render a ceiling regardless of `show_ceiling`.
+3. **Fillers spawn instead.** Each `FillerSpawn` entry on the biome seeds N sprites per blocked cell, plus a configurable ring of cells outside the grid (so the horizon fades into trees instead of stopping at the grid edge).
+
+The sky background is overridden per biome:
+- `sky_material` (e.g. a `PanoramaSkyMaterial` with a panoramic texture) takes precedence when set.
+- Otherwise `sky_color` (any opaque colour) fills the background as a flat hue.
+- Otherwise the scene's default WorldEnvironment background stays as-is.
+
+**Banned in outdoor biomes** (they need real wall geometry to attach to):
+- Wall decorations (paintings, torches, lanterns)
+- Projectile traps (wall-mounted launchers)
+- Secret walls (the disguise relies on a normal-looking wall)
+
+Leave those biome arrays empty for outdoor biomes.
+
+**Wayfinding caveat.** Trees don't read as "you can't walk here" as instantly as solid walls. Density carries the illusion — typical setup is 3–5 sprites per blocked cell with sub-cell jitter and a 4-cell border ring, so the player never sees a gap that invites a step-test. Fog hides the seam where the filler ring ends and the void begins.
+
 ---
 
 ## Meta Progression — Grimoire System

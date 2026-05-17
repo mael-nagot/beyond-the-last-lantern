@@ -1,0 +1,52 @@
+[gd_resource type="Resource" script_class="BiomeData" format=3]
+
+[ext_resource type="Script" path="res://scripts/BiomeData.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/BiomeTextureEntry.gd" id="2"]
+[ext_resource type="Script" path="res://scripts/FillerSpawn.gd" id="3"]
+[ext_resource type="Script" path="res://scripts/FillerData.gd" id="4"]
+[ext_resource type="Resource" path="res://assets/filler/sparse_forest_tree.tres" id="5"]
+[ext_resource type="Texture2D" path="res://assets/textures/biomes/forest/floors/forest floor_01.png" id="6"]
+[ext_resource type="AudioStream" path="res://assets/sounds/biomes/forest/move/step_01.ogg" id="7"]
+[ext_resource type="AudioStream" path="res://assets/sounds/biomes/forest/move/step_02.ogg" id="8"]
+[ext_resource type="AudioStream" path="res://assets/sounds/biomes/forest/move/step_03.ogg" id="9"]
+
+[sub_resource type="Resource" id="Resource_floor_default"]
+script = ExtResource("2")
+albedo = ExtResource("6")
+
+[sub_resource type="Resource" id="Resource_filler_trees"]
+script = ExtResource("3")
+fillers = Array[ExtResource("4")]([ExtResource("5")])
+density_min = 3
+density_max = 5
+jitter_radius = 0.4
+border_ring_depth = 4
+scale_min = 0.85
+scale_max = 1.2
+
+[resource]
+script = ExtResource("1")
+biome_name = "Sparse Forest"
+wall_textures = Array[ExtResource("2")]([])
+floor_textures = Array[ExtResource("2")]([SubResource("Resource_floor_default")])
+ceiling_textures = Array[ExtResource("2")]([])
+wall_height = 6.3
+show_ceiling = false
+fog_enabled = true
+fog_color = Color(0.65, 0.78, 0.88, 1)
+fog_density = 0.08
+fog_aerial = 0.2
+ambient_color = Color(0.95, 0.92, 0.82, 1)
+ambient_energy = 1.4
+grid_width = 21
+grid_height = 21
+min_exit_distance = 8
+maze_bias = 0.3
+wiggle = 0.8
+room_count = 3
+room_min_size = 3
+room_max_size = 5
+outdoor_mode = true
+filler_spawns = Array[ExtResource("3")]([SubResource("Resource_filler_trees")])
+sky_color = Color(0.55, 0.72, 0.88, 1)
+move_sounds = Array[AudioStream]([ExtResource("7"), ExtResource("8"), ExtResource("9")])

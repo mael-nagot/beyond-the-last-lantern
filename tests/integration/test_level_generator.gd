@@ -4269,3 +4269,103 @@ func test_partition_stress_sweep_25_seeds() -> void:
 					"seed %d: teleporter endpoint %s overlaps a spinner" % [s, endpoint])
 				assert_true(cell.items.is_empty(),
 					"seed %d: teleporter endpoint %s overlaps floor items" % [s, endpoint])
+
+# -------------------------------------------------------
+# Outdoor-mode fillers
+# -------------------------------------------------------
+# Helper: build a FillerSpawn referencing a single FillerData with
+# fixed density and a zero-radius jitter (so per-sprite world position
+# is deterministic from the cell alone). Border ring is configurable
+# per test.
+func _make_filler_spawn(density: int = 2, border_ring: int = 0, scale: float = 1.0) -> FillerSpawn:
+	var data := FillerData.new()
+	data.world_height = 4.0
+	var spawn := FillerSpawn.new()
+	spawn.fillers = [data]
+	spawn.density_min = density
+	spawn.density_max = density
+	spawn.jitter_radius = 0.0
+	spawn.border_ring_depth = border_ring
+	spawn.scale_min = scale
+	spawn.scale_max = scale
+	return spawn
+
+func test_fillers_empty_when_outdoor_mode_off() -> void:
+	var biome := _make_biome()
+	biome.outdoor_mode = false
+	biome.filler_spawns = [_make_filler_spawn(3, 4)]
+	var gen := _make_generator(biome)
+	assert_eq(gen.fillers.size(), 0,
+		"indoor biome must not place fillers even if filler_spawns is populated")
+
+func test_fillers_empty_when_pool_empty() -> void:
+	var biome := _make_biome()
+	biome.outdoor_mode = true
+	biome.filler_spawns = []
+	var gen := _make_generator(biome)
+	assert_eq(gen.fillers.size(), 0)
+
+func test_fillers_placed_on_every_wall_cell_inside_grid() -> void:
+	var biome := _make_biome()
+	biome.outdoor_mode = true
+	biome.filler_spawns = [_make_filler_spawn(2, 0)]
+	var gen := _make_generator(biome)
+	# Count WALL cells inside the grid. With density=2 and no border
+	# ring, expect exactly 2 × wall_count fillers.
+	var wall_count: int = 0
+	for x in range(gen.grid_width):
+		for y in range(gen.grid_height):
+			if gen.grid[x][y].cell_type == GridCell.CellType.WALL:
+				wall_count += 1
+	assert_eq(gen.fillers.size(), wall_count * 2,
+		"every WALL cell should hold 2 fillers (density=2, no border ring)")
+
+func test_fillers_never_placed_on_floor_cells() -> void:
+	var biome := _make_biome()
+	biome.outdoor_mode = true
+	biome.filler_spawns = [_make_filler_spawn(3, 2)]
+	var gen := _make_generator(biome)
+	for inst in gen.fillers:
+		# In-grid placements must be WALL cells; out-of-grid placements
+		# are fine (they have no GridCell at all).
+		if inst.cell.x < 0 or inst.cell.x >= gen.grid_width:
+			continue
+		if inst.cell.y < 0 or inst.cell.y >= gen.grid_height:
+			continue
+		var cell: GridCell = gen.grid[inst.cell.x][inst.cell.y]
+		assert_eq(cell.cell_type, GridCell.CellType.WALL,
+			"filler at in-grid cell %s sits on a non-WALL cell" % inst.cell)
+
+func test_fillers_border_ring_extends_outside_grid() -> void:
+	var biome := _make_biome()
+	biome.outdoor_mode = true
+	biome.filler_spawns = [_make_filler_spawn(1, 3)]
+	var gen := _make_generator(biome)
+	# At least one filler must land at a cell strictly outside the grid
+	# bounds — proves border_ring_depth is wired through.
+	var any_outside: bool = false
+	for inst in gen.fillers:
+		if inst.cell.x < 0 or inst.cell.x >= gen.grid_width \
+				or inst.cell.y < 0 or inst.cell.y >= gen.grid_height:
+			any_outside = true
+			break
+	assert_true(any_outside,
+		"border_ring_depth = 3 should place at least one filler outside the grid")
+
+func test_fillers_deterministic_under_same_seed() -> void:
+	var biome_a := _make_biome()
+	biome_a.outdoor_mode = true
+	biome_a.filler_spawns = [_make_filler_spawn(2, 1)]
+	var gen_a := _make_generator(biome_a, 42)
+
+	var biome_b := _make_biome()
+	biome_b.outdoor_mode = true
+	biome_b.filler_spawns = [_make_filler_spawn(2, 1)]
+	var gen_b := _make_generator(biome_b, 42)
+
+	assert_eq(gen_a.fillers.size(), gen_b.fillers.size())
+	for i in range(gen_a.fillers.size()):
+		assert_eq(gen_a.fillers[i].cell, gen_b.fillers[i].cell,
+			"filler %d cell differs under same seed" % i)
+		assert_almost_eq(gen_a.fillers[i].scale, gen_b.fillers[i].scale, 0.0001,
+			"filler %d scale differs under same seed" % i)

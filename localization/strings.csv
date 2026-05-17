@@ -37,3 +37,6 @@ spinner.forest.name,Forest Spinner
 spinner.forest.description,A swirling glyph that spins you around when you step on it.
 object.teleporter.name,Teleporter
 object.teleporter.description,A rune circle that warps you to its paired partner across the level.
+filler.sparse_forest.tree.name,Sparse Forest Tree
+filler.sparse_forest.tree.description,A tall tree silhouette that frames the walkable area of the sparse forest biome.
+biome.sparse_forest.name,Sparse Forest

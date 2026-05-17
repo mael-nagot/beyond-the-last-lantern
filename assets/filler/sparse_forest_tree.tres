@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="FillerData" format=3]
+
+[ext_resource type="Script" path="res://scripts/FillerData.gd" id="1"]
+[ext_resource type="Texture2D" path="res://assets/textures/biomes/sparse_forest/fillers/tree_01.png" id="2"]
+
+[resource]
+script = ExtResource("1")
+name_key = "filler.sparse_forest.tree.name"
+description_key = "filler.sparse_forest.tree.description"
+texture = ExtResource("2")
+world_height = 4.5
+y_offset = 0.0
