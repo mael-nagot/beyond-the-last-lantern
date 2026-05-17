@@ -6,6 +6,7 @@ func test_defaults() -> void:
 	assert_eq(spawn.density_min, 2)
 	assert_eq(spawn.density_max, 4)
 	assert_almost_eq(spawn.jitter_radius, 0.4, 0.0001)
+	assert_almost_eq(spawn.front_row_bias, 0.7, 0.0001)
 	assert_eq(spawn.border_ring_depth, 4)
 	assert_almost_eq(spawn.scale_min, 0.85, 0.0001)
 	assert_almost_eq(spawn.scale_max, 1.15, 0.0001)

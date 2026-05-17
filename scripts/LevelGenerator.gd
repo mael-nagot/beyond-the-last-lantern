@@ -4333,6 +4333,14 @@ func _place_fillers() -> void:
 			continue
 		_place_one_filler_spawn(spawn)
 
+# How close to the cell edge the front-row bias pulls a sprite, as
+# a fraction of CELL_SIZE. 0.5 = exactly on the boundary (risk of
+# Z-fighting with the adjacent cell's sprites at the seam); 0.45 =
+# a small margin inside the cell so adjacent-cell sprites don't
+# overlap perfectly. Constant rather than per-spawn because it's a
+# fix for visual seam stitching, not a design knob.
+const _FILLER_FRONT_ROW_EDGE: float = 0.45
+
 func _place_one_filler_spawn(spawn: FillerSpawn) -> void:
 	var depth: int = max(0, spawn.border_ring_depth)
 	var x_min: int = -depth
@@ -4344,6 +4352,10 @@ func _place_one_filler_spawn(spawn: FillerSpawn) -> void:
 			var pos := Vector2i(x, y)
 			if not _is_filler_cell(pos):
 				continue
+			# Direction to the average of this cell's 4-adjacent FLOOR
+			# neighbours (zero if none). Cached per cell — every filler
+			# in this cell shares the same bias direction.
+			var floor_dir: Vector2 = _floor_neighbour_direction(pos)
 			# `randi()` runs through the global RNG — same source the
 			# other placers use, so a `seed(N)` ahead of `generate()`
 			# makes filler placement deterministic for tests.
@@ -4354,8 +4366,19 @@ func _place_one_filler_spawn(spawn: FillerSpawn) -> void:
 					continue
 				var jx: float = randf_range(-spawn.jitter_radius, spawn.jitter_radius)
 				var jy: float = randf_range(-spawn.jitter_radius, spawn.jitter_radius)
+				var offset := Vector2(jx, jy)
+				# Lerp the random offset toward the FLOOR-adjacent
+				# cell edge — front-row sprites cluster at the wall
+				# line so the player can read the boundary clearly.
+				# Skipped when the cell has no FLOOR neighbours
+				# (interior wall / deep border ring / isolated pillar
+				# with FLOOR on all 4 sides — direction sums to zero)
+				# or when the spawn opted out (front_row_bias = 0).
+				if spawn.front_row_bias > 0.0 and floor_dir != Vector2.ZERO:
+					var biased := floor_dir * _FILLER_FRONT_ROW_EDGE
+					offset = offset.lerp(biased, spawn.front_row_bias)
 				var scale: float = spawn.sample_scale(randf())
-				fillers.append(FillerInstance.create(fd, pos, Vector2(jx, jy), scale))
+				fillers.append(FillerInstance.create(fd, pos, offset, scale))
 
 # A cell is "fillable" if it's outside the grid (always blocked — no
 # GridCell at all) OR it's a WALL cell inside the grid. Floor cells
@@ -4368,3 +4391,30 @@ func _is_filler_cell(pos: Vector2i) -> bool:
 	if cell == null:
 		return true
 	return cell.cell_type == GridCell.CellType.WALL
+
+# Direction (normalized) toward the average of `pos`'s 4-adjacent
+# in-grid FLOOR (/ ENTRANCE / EXIT) neighbours. Used by the filler
+# placer to pull "front-row" sprites toward the walkable boundary so
+# the wall line reads clearly. Zero vector when:
+#   - the cell has no in-grid FLOOR neighbours (interior wall, deep
+#     border-ring cell that doesn't touch the grid)
+#   - the cell has FLOOR neighbours on opposite sides that cancel out
+#     (single-wall pillar surrounded by floor — the direction sum is
+#     zero so there's no "front" to bias toward)
+func _floor_neighbour_direction(pos: Vector2i) -> Vector2:
+	var dir := Vector2.ZERO
+	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+		var npos: Vector2i = pos + d
+		if _is_in_grid_floor(npos):
+			dir += Vector2(d.x, d.y)
+	if dir == Vector2.ZERO:
+		return Vector2.ZERO
+	return dir.normalized()
+
+func _is_in_grid_floor(pos: Vector2i) -> bool:
+	if pos.x < 0 or pos.x >= grid_width or pos.y < 0 or pos.y >= grid_height:
+		return false
+	var cell: GridCell = grid[pos.x][pos.y]
+	if cell == null:
+		return false
+	return cell.cell_type != GridCell.CellType.WALL

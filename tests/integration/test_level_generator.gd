@@ -4276,7 +4276,8 @@ func test_partition_stress_sweep_25_seeds() -> void:
 # Helper: build a FillerSpawn referencing a single FillerData with
 # fixed density and a zero-radius jitter (so per-sprite world position
 # is deterministic from the cell alone). Border ring is configurable
-# per test.
+# per test. `front_row_bias` defaults to 0 here so legacy tests get
+# clean Vector2.ZERO offsets — the bias-specific test opts in.
 func _make_filler_spawn(density: int = 2, border_ring: int = 0, scale: float = 1.0) -> FillerSpawn:
 	var data := FillerData.new()
 	data.world_height = 4.0
@@ -4285,6 +4286,7 @@ func _make_filler_spawn(density: int = 2, border_ring: int = 0, scale: float = 1
 	spawn.density_min = density
 	spawn.density_max = density
 	spawn.jitter_radius = 0.0
+	spawn.front_row_bias = 0.0
 	spawn.border_ring_depth = border_ring
 	spawn.scale_min = scale
 	spawn.scale_max = scale
@@ -4369,3 +4371,51 @@ func test_fillers_deterministic_under_same_seed() -> void:
 			"filler %d cell differs under same seed" % i)
 		assert_almost_eq(gen_a.fillers[i].scale, gen_b.fillers[i].scale, 0.0001,
 			"filler %d scale differs under same seed" % i)
+
+func test_fillers_front_row_bias_pulls_toward_floor_edge() -> void:
+	# With bias = 1.0 and no random jitter, every filler in a WALL
+	# cell adjacent to a single FLOOR neighbour should land at the
+	# cell edge facing that neighbour (offset.dot(floor_dir) > 0).
+	var biome := _make_biome()
+	biome.outdoor_mode = true
+	var spawn := _make_filler_spawn(1, 0)
+	spawn.front_row_bias = 1.0
+	biome.filler_spawns = [spawn]
+	var gen := _make_generator(biome, 42)
+	var any_biased: bool = false
+	for inst in gen.fillers:
+		if inst.cell.x < 0 or inst.cell.x >= gen.grid_width:
+			continue
+		if inst.cell.y < 0 or inst.cell.y >= gen.grid_height:
+			continue
+		var floor_dir := Vector2.ZERO
+		for d in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			var npos: Vector2i = inst.cell + d
+			if npos.x < 0 or npos.x >= gen.grid_width:
+				continue
+			if npos.y < 0 or npos.y >= gen.grid_height:
+				continue
+			if gen.grid[npos.x][npos.y].cell_type != GridCell.CellType.WALL:
+				floor_dir += Vector2(d.x, d.y)
+		if floor_dir == Vector2.ZERO:
+			continue  # interior wall or balanced-direction pillar
+		floor_dir = floor_dir.normalized()
+		assert_true(inst.cell_offset.dot(floor_dir) > 0.0,
+			"filler at cell %s with floor_dir %s should have positive-dot offset but got %s" % [inst.cell, floor_dir, inst.cell_offset])
+		any_biased = true
+	assert_true(any_biased,
+		"expected at least one filler in a WALL cell that borders a FLOOR cell")
+
+func test_fillers_front_row_bias_zero_keeps_offset_at_zero() -> void:
+	# bias = 0 + jitter_radius = 0 → every offset is exactly Vector2.ZERO.
+	# Pins the regression where the bias code accidentally moved sprites
+	# even when the spawn opted out.
+	var biome := _make_biome()
+	biome.outdoor_mode = true
+	var spawn := _make_filler_spawn(2, 1)  # already sets front_row_bias = 0
+	biome.filler_spawns = [spawn]
+	var gen := _make_generator(biome, 42)
+	assert_true(gen.fillers.size() > 0, "expected at least one filler placed")
+	for inst in gen.fillers:
+		assert_eq(inst.cell_offset, Vector2.ZERO,
+			"filler at %s should have zero offset (bias=0, jitter=0) but got %s" % [inst.cell, inst.cell_offset])

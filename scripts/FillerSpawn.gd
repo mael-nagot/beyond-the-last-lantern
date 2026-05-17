@@ -35,6 +35,22 @@ extends Resource
 # don't seam-stitch perfectly.
 @export_range(0.0, 0.5) var jitter_radius: float = 0.4
 
+# How strongly to bias sprites in WALL cells that border a FLOOR
+# cell toward that FLOOR-adjacent edge. 0.0 = pure random jitter
+# (organic but visually ambiguous — a tree can land far from the
+# wall line and create the illusion of a walkable gap; the player
+# tries to step forward and bumps an invisible wall). 1.0 = sprite
+# pushed all the way to the cell edge facing the FLOOR neighbour
+# (uniform "row of trees marking the wall" look). 0.7 gives a
+# strong wall-line read while still leaving lateral scatter from
+# the random component for organic feel.
+#
+# Only applies to fillers in cells that are 4-adjacent to a FLOOR
+# cell (the "wall line"). Interior wall cells (no FLOOR neighbours)
+# and isolated pillars (FLOOR on all 4 sides — direction sums to
+# zero) keep pure random jitter.
+@export_range(0.0, 1.0) var front_row_bias: float = 0.7
+
 # Number of cells beyond the grid edge to also fill. 0 = only WALL
 # cells inside the grid (you'll see floor end → sky abruptly at the
 # grid border). 4 = 4 extra cells in every direction (~18 metres,

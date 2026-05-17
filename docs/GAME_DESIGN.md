@@ -312,7 +312,7 @@ The sky background is overridden per biome:
 
 Leave those biome arrays empty for outdoor biomes.
 
-**Wayfinding caveat.** Trees don't read as "you can't walk here" as instantly as solid walls. Density carries the illusion — typical setup is 3–5 sprites per blocked cell with sub-cell jitter and a 4-cell border ring, so the player never sees a gap that invites a step-test. Fog hides the seam where the filler ring ends and the void begins.
+**Wayfinding caveat.** Trees don't read as "you can't walk here" as instantly as solid walls. Density carries some of the illusion, but the heavy lifting is `FillerSpawn.front_row_bias` — sprites in WALL cells that border a FLOOR cell are pulled toward the floor-adjacent edge of their cell so the wall line clusters right at the boundary the player is approaching. Without this bias, random jitter can leave a tree at the far side of its cell and create the visual impression of a walkable gap that the player tries to step into and bumps an invisible wall. Default bias is 0.7 (strong wall-line read with lateral scatter for organic feel); tune up to 1.0 for a clearer boundary or down to 0 for pure random scatter. Typical setup also uses 3–5 sprites per blocked cell and a 4-cell border ring; fog hides the seam where the filler ring ends.
 
 ---
 
