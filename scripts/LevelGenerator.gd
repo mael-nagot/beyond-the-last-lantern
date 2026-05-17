@@ -4352,10 +4352,17 @@ func _place_one_filler_spawn(spawn: FillerSpawn) -> void:
 			var pos := Vector2i(x, y)
 			if not _is_filler_cell(pos):
 				continue
-			# Direction to the average of this cell's 4-adjacent FLOOR
-			# neighbours (zero if none). Cached per cell — every filler
-			# in this cell shares the same bias direction.
-			var floor_dir: Vector2 = _floor_neighbour_direction(pos)
+			# Cardinal directions toward this cell's 4-adjacent FLOOR
+			# neighbours. Empty for interior walls / deep border-ring
+			# cells. Cached per cell — every filler in this cell
+			# picks from the same list. Per-filler picking (vs.
+			# averaging into one direction) handles cells with FLOOR
+			# on opposite sides correctly: a wall sandwiched between
+			# two parallel corridors needs trees clustered at BOTH
+			# edges so the wall line reads from either corridor;
+			# averaging cancels those directions to zero and leaves
+			# the cell with no bias at all.
+			var floor_dirs: Array[Vector2i] = _floor_neighbour_dirs(pos)
 			# `randi()` runs through the global RNG — same source the
 			# other placers use, so a `seed(N)` ahead of `generate()`
 			# makes filler placement deterministic for tests.
@@ -4367,30 +4374,36 @@ func _place_one_filler_spawn(spawn: FillerSpawn) -> void:
 				var jx: float = randf_range(-spawn.jitter_radius, spawn.jitter_radius)
 				var jy: float = randf_range(-spawn.jitter_radius, spawn.jitter_radius)
 				var offset := Vector2(jx, jy)
-				# Front-row bias: decompose the random offset into
-				# a TOWARDS-FLOOR component (along `floor_dir`) and a
-				# PERPENDICULAR component (along the wall tangent),
-				# bias only the towards-floor component toward the
-				# cell edge, and leave the perpendicular component
-				# untouched. Without this decomposition a dense
-				# spawn (density 12+) piles every sprite into a
-				# tiny region near the floor-adjacent corner because
-				# the lerp compresses BOTH axes — designers want a
-				# wall line that scatters laterally, not a clump.
+				# Front-row bias: pick ONE of this cell's FLOOR
+				# neighbours uniformly per sprite, then decompose
+				# the random offset into a TOWARDS-FLOOR component
+				# (along the picked direction) and a PERPENDICULAR
+				# component (along the wall tangent), bias only the
+				# towards-floor component toward the cell edge, and
+				# leave the perpendicular component untouched.
+				#
+				# Per-filler picking (instead of one shared direction)
+				# means a cell with two FLOOR neighbours splits its
+				# fillers between them: half cluster at one edge,
+				# half at the other. A parallel-walls case (FLOOR on
+				# N and S) marks both edges; a corner case (FLOOR on
+				# N and W) marks both walls instead of clumping
+				# trees in the NW corner.
 				#
 				# Skipped when the cell has no FLOOR neighbours
-				# (interior wall / deep border ring / isolated pillar
-				# with FLOOR on all 4 sides — direction sums to zero)
-				# or when the spawn opted out (front_row_bias = 0).
-				if spawn.front_row_bias > 0.0 and floor_dir != Vector2.ZERO:
+				# (interior wall / deep border ring) or when the
+				# spawn opted out (front_row_bias = 0).
+				if spawn.front_row_bias > 0.0 and not floor_dirs.is_empty():
+					var chosen: Vector2i = floor_dirs[randi() % floor_dirs.size()]
+					var floor_dir := Vector2(chosen.x, chosen.y)
 					var along: float = offset.dot(floor_dir)
 					var perp: Vector2 = offset - floor_dir * along
 					var biased_along: float = lerp(along, _FILLER_FRONT_ROW_EDGE, spawn.front_row_bias)
 					offset = floor_dir * biased_along + perp
-					# Diagonal floor_dir (corner cells with FLOOR
-					# on two perpendicular sides) can push the
-					# combined offset past the cell boundary;
-					# clamp so the sprite stays inside its cell.
+					# Defensive clamp — picked direction is always
+					# axis-aligned now so the offset can't escape
+					# the cell, but the clamp doesn't cost anything
+					# and protects against future changes.
 					offset.x = clamp(offset.x, -0.5, 0.5)
 					offset.y = clamp(offset.y, -0.5, 0.5)
 				var scale: float = spawn.sample_scale(randf())
@@ -4408,24 +4421,21 @@ func _is_filler_cell(pos: Vector2i) -> bool:
 		return true
 	return cell.cell_type == GridCell.CellType.WALL
 
-# Direction (normalized) toward the average of `pos`'s 4-adjacent
-# in-grid FLOOR (/ ENTRANCE / EXIT) neighbours. Used by the filler
-# placer to pull "front-row" sprites toward the walkable boundary so
-# the wall line reads clearly. Zero vector when:
+# List of cardinal directions toward `pos`'s in-grid FLOOR
+# (/ ENTRANCE / EXIT) neighbours. Used by the filler placer to pick
+# one front-row direction per sprite, so a cell with FLOOR on
+# multiple sides gets its sprites split between those edges instead
+# of clumped at an averaged-direction corner (or, in the cancelling
+# parallel-walls case, getting no bias at all). Empty when:
 #   - the cell has no in-grid FLOOR neighbours (interior wall, deep
 #     border-ring cell that doesn't touch the grid)
-#   - the cell has FLOOR neighbours on opposite sides that cancel out
-#     (single-wall pillar surrounded by floor — the direction sum is
-#     zero so there's no "front" to bias toward)
-func _floor_neighbour_direction(pos: Vector2i) -> Vector2:
-	var dir := Vector2.ZERO
+func _floor_neighbour_dirs(pos: Vector2i) -> Array[Vector2i]:
+	var dirs: Array[Vector2i] = []
 	for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
 		var npos: Vector2i = pos + d
 		if _is_in_grid_floor(npos):
-			dir += Vector2(d.x, d.y)
-	if dir == Vector2.ZERO:
-		return Vector2.ZERO
-	return dir.normalized()
+			dirs.append(d)
+	return dirs
 
 func _is_in_grid_floor(pos: Vector2i) -> bool:
 	if pos.x < 0 or pos.x >= grid_width or pos.y < 0 or pos.y >= grid_height:

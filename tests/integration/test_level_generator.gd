@@ -4374,8 +4374,11 @@ func test_fillers_deterministic_under_same_seed() -> void:
 
 func test_fillers_front_row_bias_pulls_toward_floor_edge() -> void:
 	# With bias = 1.0 and no random jitter, every filler in a WALL
-	# cell adjacent to a single FLOOR neighbour should land at the
-	# cell edge facing that neighbour (offset.dot(floor_dir) > 0).
+	# cell that borders a FLOOR cell should land at the cell edge
+	# facing ONE of its FLOOR neighbours. The placer picks per-filler
+	# (not the averaged direction), so a T-junction with FLOOR on
+	# three sides splits its fillers between those three edges — the
+	# test must accept any one of them as a valid bias.
 	var biome := _make_biome()
 	biome.outdoor_mode = true
 	var spawn := _make_filler_spawn(1, 0)
@@ -4388,20 +4391,25 @@ func test_fillers_front_row_bias_pulls_toward_floor_edge() -> void:
 			continue
 		if inst.cell.y < 0 or inst.cell.y >= gen.grid_height:
 			continue
-		var floor_dir := Vector2.ZERO
-		for d in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+		var floor_dirs: Array[Vector2i] = []
+		for d: Vector2i in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
 			var npos: Vector2i = inst.cell + d
 			if npos.x < 0 or npos.x >= gen.grid_width:
 				continue
 			if npos.y < 0 or npos.y >= gen.grid_height:
 				continue
 			if gen.grid[npos.x][npos.y].cell_type != GridCell.CellType.WALL:
-				floor_dir += Vector2(d.x, d.y)
-		if floor_dir == Vector2.ZERO:
-			continue  # interior wall or balanced-direction pillar
-		floor_dir = floor_dir.normalized()
-		assert_true(inst.cell_offset.dot(floor_dir) > 0.0,
-			"filler at cell %s with floor_dir %s should have positive-dot offset but got %s" % [inst.cell, floor_dir, inst.cell_offset])
+				floor_dirs.append(d)
+		if floor_dirs.is_empty():
+			continue  # interior wall
+		var matched: bool = false
+		for d: Vector2i in floor_dirs:
+			var dv := Vector2(d.x, d.y)
+			if inst.cell_offset.dot(dv) > 0.1:
+				matched = true
+				break
+		assert_true(matched,
+			"filler at cell %s should be biased toward one of %s but offset is %s" % [inst.cell, floor_dirs, inst.cell_offset])
 		any_biased = true
 	assert_true(any_biased,
 		"expected at least one filler in a WALL cell that borders a FLOOR cell")
@@ -4481,3 +4489,63 @@ func test_fillers_front_row_bias_preserves_lateral_spread() -> void:
 		checked = true
 		break
 	assert_true(checked, "no eligible single-floor-neighbour cell found in test seed")
+
+func test_fillers_front_row_bias_splits_between_opposite_floor_neighbours() -> void:
+	# A WALL cell with FLOOR on TWO opposite sides (e.g. N and S, a
+	# wall sandwiched between two parallel corridors) must mark
+	# BOTH edges — not get zero bias because the directions cancel.
+	# Pins the regression where averaging cancelled to (0, 0) and
+	# left the cell with pure random scatter.
+	var biome := _make_biome()
+	biome.outdoor_mode = true
+	var spawn := _make_filler_spawn(20, 0)
+	spawn.jitter_radius = 0.4
+	spawn.front_row_bias = 1.0
+	biome.filler_spawns = [spawn]
+	var gen := _make_generator(biome, 42)
+	# Find a WALL cell with FLOOR on opposite sides (N+S or W+E).
+	var checked: bool = false
+	for cell_x in range(gen.grid_width):
+		if checked:
+			break
+		for cell_y in range(gen.grid_height):
+			if checked:
+				break
+			var cell := Vector2i(cell_x, cell_y)
+			if gen.grid[cell_x][cell_y].cell_type != GridCell.CellType.WALL:
+				continue
+			var opposite_pair: Vector2i = Vector2i.ZERO
+			var has_n: bool = cell_y - 1 >= 0 and gen.grid[cell_x][cell_y - 1].cell_type != GridCell.CellType.WALL
+			var has_s: bool = cell_y + 1 < gen.grid_height and gen.grid[cell_x][cell_y + 1].cell_type != GridCell.CellType.WALL
+			var has_w: bool = cell_x - 1 >= 0 and gen.grid[cell_x - 1][cell_y].cell_type != GridCell.CellType.WALL
+			var has_e: bool = cell_x + 1 < gen.grid_width and gen.grid[cell_x + 1][cell_y].cell_type != GridCell.CellType.WALL
+			if has_n and has_s and not has_w and not has_e:
+				opposite_pair = Vector2i(0, 1)
+			elif has_w and has_e and not has_n and not has_s:
+				opposite_pair = Vector2i(1, 0)
+			else:
+				continue
+			# Gather fillers in this cell.
+			var cell_fillers: Array = []
+			for inst: FillerInstance in gen.fillers:
+				if inst.cell == cell:
+					cell_fillers.append(inst)
+			if cell_fillers.size() < 5:
+				continue  # need enough samples for the split to be meaningful
+			# Count fillers biased toward each side of the opposite pair.
+			var positive_side: int = 0
+			var negative_side: int = 0
+			for inst: FillerInstance in cell_fillers:
+				var along: float = inst.cell_offset.x * opposite_pair.x + inst.cell_offset.y * opposite_pair.y
+				if along > 0.1:
+					positive_side += 1
+				elif along < -0.1:
+					negative_side += 1
+			# Both sides should receive at least one filler — without
+			# per-filler picking, every filler would land near
+			# offset = 0 (no bias) and neither side would count.
+			assert_true(positive_side > 0 and negative_side > 0,
+				"cell %s with FLOOR on opposite sides should split fillers between edges; got positive=%d negative=%d (of %d)" % [cell, positive_side, negative_side, cell_fillers.size()])
+			checked = true
+	assert_true(checked,
+		"no eligible parallel-walls cell found in test seed (try a different seed if the layout has none)")
