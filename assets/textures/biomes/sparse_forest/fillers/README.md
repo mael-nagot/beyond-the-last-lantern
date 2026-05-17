@@ -14,11 +14,11 @@ sprites). One PNG per silhouette variant.
 
 ## Files
 
-- `tree_01.png` — primary tree silhouette referenced by
+- `tree01.png` — primary tree silhouette referenced by
   [`assets/filler/sparse_forest_tree.tres`](../../../../filler/sparse_forest_tree.tres).
-  **Drop the PNG here before testing the SparseForest biome** — without
-  it the FillerData will load with no texture and the level will look
-  empty outside the walkable area.
+- `tree02.png` — second variant referenced as an inline `FillerData`
+  sub-resource inside the SparseForest biome `.tres`.
 
-Add more variants as `tree_02.png`, `bush_01.png`, etc., and reference
-them from new `FillerData` resources in `assets/filler/`.
+Add more variants as `tree03.png`, `bush01.png`, `rock01.png`, etc.,
+and reference them either from new `FillerData` resources in
+`assets/filler/` or as inline sub-resources on the biome.

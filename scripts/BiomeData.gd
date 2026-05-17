@@ -48,6 +48,26 @@ extends Resource
 # false.
 @export var filler_spawns: Array[FillerSpawn] = []
 
+# Textures for the floor under fillers (and the floor extending past
+# the grid edge). Same `BiomeTextureEntry` resource as the walkable
+# floor pool — supports weights, placement flags, and
+# min_distance_to_same so designers can mix forest litter, dirt
+# patches, and exposed roots under the trees. Empty falls back to
+# `floor_textures` (so a biome with one floor look everywhere
+# doesn't need to duplicate the array). Only used when
+# `outdoor_mode = true`.
+@export var filler_floor_textures: Array[BiomeTextureEntry] = []
+
+# How many cells beyond the grid edge to extend the outdoor floor
+# in every direction. The floor is drawn under WALL cells inside
+# the grid AND across this border ring outside it, so the player
+# sees ground stretching out beneath the trees rather than a sharp
+# edge of world. Defaults to 8 (matches the typical filler border
+# of 4 with extra slack so the floor visibly extends past the last
+# tree before fog swallows it). Only used when
+# `outdoor_mode = true`.
+@export var outdoor_floor_extent: int = 8
+
 # Flat background colour to override on the WorldEnvironment when
 # entering this biome. Alpha = 0 means "don't override" (the
 # WorldEnvironment keeps whatever background is currently set). Alpha

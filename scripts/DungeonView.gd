@@ -175,6 +175,7 @@ func setup(gen: LevelGenerator) -> void:
 	_build_teleporters()
 	_build_wall_decorations()
 	_ensure_fillers_root()
+	_build_outdoor_floors()
 	_build_fillers()
 	_place_camera_at_entrance()
 	_apply_biome_environment()
@@ -1188,6 +1189,56 @@ func _build_wall_decorations() -> void:
 		var node := _make_wall_decoration_node(inst)
 		if node != null:
 			_decorations_root.add_child(node)
+
+# Extends floor geometry under filler sprites and out across the
+# `outdoor_floor_extent` border ring. Without this pass, outdoor
+# biomes only have floor under FLOOR cells (the walkable area),
+# so trees appear to float on the sky background — broken depth
+# cue. With it, the player sees ground stretching out beneath the
+# trees and fog smoothly hides the edge.
+#
+# Texture pool: `biome.filler_floor_textures` if non-empty, else
+# `biome.floor_textures`. Same `BiomeTextureEntry` picker the main
+# mesh uses (deterministic position-hash, supports weights and
+# min_distance_to_same), with a fresh placement history so under-
+# filler choices don't fight the walkable-floor history for
+# variety distribution.
+#
+# Indoor biomes early-out — the function is a no-op when
+# `outdoor_mode = false`.
+func _build_outdoor_floors() -> void:
+	if biome == null or not biome.outdoor_mode:
+		return
+	var pool: Array[BiomeTextureEntry] = biome.filler_floor_textures
+	if pool.is_empty():
+		pool = biome.floor_textures
+	if pool.is_empty():
+		return
+	var extent: int = max(0, biome.outdoor_floor_extent)
+	# Local history so this pass picks variety independently from
+	# the walkable-floor pass — they conceptually represent two
+	# different surfaces (path vs. undergrowth) even when they
+	# share a texture pool by default.
+	var history: Dictionary = {}
+	for x in range(-extent, generator.grid_width + extent):
+		for y in range(-extent, generator.grid_height + extent):
+			var pos := Vector2i(x, y)
+			# Skip cells that already have a floor quad from the
+			# main `_build_mesh` pass (FLOOR / ENTRANCE / EXIT).
+			# Out-of-grid cells fall through.
+			if pos.x >= 0 and pos.x < generator.grid_width \
+					and pos.y >= 0 and pos.y < generator.grid_height:
+				var cell = generator.get_cell(pos.x, pos.y)
+				if cell != null and cell.cell_type != GridCell.CellType.WALL:
+					continue
+			var entry: BiomeTextureEntry = BiomeTextureEntry.pick_for(
+				pool, ObjectSpawn.PLACEMENT_CORRIDOR, pos, history)
+			if entry == null:
+				continue
+			_record_history(history, entry, pos)
+			var cx = x * CELL_SIZE + CELL_SIZE * 0.5
+			var cy = y * CELL_SIZE + CELL_SIZE * 0.5
+			_add_horizontal_quad(Vector3(cx, 0.0, cy), _material_for_entry(entry))
 
 # Outdoor-mode filler sprites (trees / rocks / bushes). Iterates
 # `generator.fillers` and creates one Sprite3D per entry, parented

@@ -293,11 +293,12 @@ Biomes are stored as `BiomeData` resources (`.tres` files) in `res://assets/biom
 
 Some biomes are open-air — a sparse forest, a beach, a clifftop path — and have no solid walls. The player still moves on the same grid, but the impassable space outside the walkable area is filled with **billboarded filler sprites** (trees, rocks, bushes) instead of wall geometry. The sky is visible past the silhouettes.
 
-A biome opts in by setting `outdoor_mode = true`. Three things change automatically:
+A biome opts in by setting `outdoor_mode = true`. Four things change automatically:
 
 1. **No wall geometry.** The renderer skips wall quads on every floor cell.
 2. **No ceiling.** Outdoor biomes never render a ceiling regardless of `show_ceiling`.
 3. **Fillers spawn instead.** Each `FillerSpawn` entry on the biome seeds N sprites per blocked cell, plus a configurable ring of cells outside the grid (so the horizon fades into trees instead of stopping at the grid edge).
+4. **Floor extends past the walkable area.** A second floor-quad pass draws ground under every WALL cell inside the grid and across `outdoor_floor_extent` cells outside it, sampled from `filler_floor_textures` (or `floor_textures` as a fallback). Without this the trees float on the sky background and the player loses their depth cue.
 
 The sky background is overridden per biome:
 - `sky_material` (e.g. a `PanoramaSkyMaterial` with a panoramic texture) takes precedence when set.
