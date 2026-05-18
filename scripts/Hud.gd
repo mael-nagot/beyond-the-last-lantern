@@ -4,8 +4,16 @@ extends CanvasLayer
 const UI_MARGIN     = 4.0
 const SCREEN_MARGIN = 4.0
 
+## Preferred ratio of dungeon-view height to width in portrait
+## orientation. >1 = taller dungeon view at the cost of HUD vertical
+## space. The HUD reduces this toward `min_viewport_ratio` on tablets
+## where the HUD would otherwise be too cramped.
 @export var viewport_ratio_portrait:  float = 1.15
+## Same as `viewport_ratio_portrait` but for landscape orientation.
 @export var viewport_ratio_landscape: float = 1.15
+## Lower bound the HUD is willing to shrink the dungeon view to when
+## fitting the UI on small screens. 1.0 = square (the HUD will start
+## scaling UI elements down rather than going below this).
 @export var min_viewport_ratio: float = 1.0
 
 @onready var hud_root     : Control       = $HUDRoot

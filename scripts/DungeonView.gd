@@ -1,12 +1,34 @@
 class_name DungeonView
 extends Node3D
 
+## Per-scene fallback for ceiling rendering. Once `biome` is assigned,
+## the biome's `show_ceiling` takes over — this only matters when
+## previewing the scene without a biome configured.
 @export var show_ceiling: bool = true
+## Player camera height above the floor, in world units (~metres).
+## Default 1.8 = adult human eye level. Lower values feel like a
+## crouching / small character; higher feels giant.
 @export var camera_eye_height: float = 1.8
+## Per-scene fallback for wall height. Once `biome` is assigned, the
+## biome's `wall_height` takes over.
 @export var wall_height: float = 6.3
+## The biome resource that drives all visuals + generation parameters
+## (textures, fog, ambient, grid size, object pools …). Assigned by
+## Game.gd at runtime; the inline value is a convenience for previewing
+## a single scene in the editor.
 @export var biome: BiomeData
+## Camera vertical field-of-view in degrees. ~70 = realistic, ~100 =
+## wider / more "old-school dungeon crawler". Higher widens peripheral
+## vision but increases fisheye distortion at edges.
 @export var fov: float = 100
+## Aspect-ratio multiplier for the dungeon SubViewport in portrait
+## orientation. >1 makes the dungeon view taller than the
+## SubViewportContainer (the HUD compensates). 1.0 = exact fit.
+## Default 1.15 gives the dungeon a bit more vertical room than the
+## HUD allows, which feels less cramped on a phone.
 @export var viewport_ratio_portrait:  float = 1.15
+## Aspect-ratio multiplier for the dungeon SubViewport in landscape
+## orientation. Same semantics as `viewport_ratio_portrait`.
 @export var viewport_ratio_landscape: float = 1.15
 
 const CELL_SIZE = 4.6
