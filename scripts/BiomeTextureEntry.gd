@@ -19,22 +19,30 @@ const PLACEMENT_ROOM     := 2
 const PLACEMENT_DEAD_END := 4
 const PLACEMENT_ANY      := PLACEMENT_CORRIDOR | PLACEMENT_ROOM | PLACEMENT_DEAD_END
 
+## The albedo (base colour) texture for this variant. Required.
 @export var albedo: Texture2D
+## Which cell classifications this variant is allowed to render on.
+## A "mossy dead-end wall" sets DEAD_END only; a "vaulted room
+## ceiling" sets ROOM only; a generic stone wall leaves all three on.
+## Empty selection or no matching entry falls back to the full pool —
+## a quad never renders blank.
 @export_flags("Corridor", "Room", "Dead End") var placement: int = PLACEMENT_ANY
 
-# Relative pick frequency among entries that pass classification +
-# distance filters. weight = 0 excludes the entry from rolls (useful
-# for designers temporarily disabling a variant without removing it);
-# negative values are clamped to 0. If every eligible entry has weight
-# 0 we fall back to a uniform pick so a quad never goes blank.
+## Relative pick frequency among entries that pass classification +
+## distance filters. weight = 0 excludes the entry from rolls (useful
+## for designers temporarily disabling a variant without removing it);
+## negative values are clamped to 0. If every eligible entry has
+## weight 0, the picker falls back to a uniform pick so a quad never
+## goes blank.
 @export var weight: int = 1
 
-# Minimum Manhattan distance (in tiles) to the nearest already-placed
-# cell using the SAME entry. Use ~3-5 to spread a "rare cracked stone"
-# variant out instead of letting it cluster. 0 = no spacing rule. If
-# the constraint can't be satisfied at a cell (every matching entry
-# would violate its own rule), the picker relaxes the rule and picks
-# anyway — better a slight cluster than a missing texture.
+## Minimum Manhattan distance (in tiles) to the nearest already-placed
+## cell using the SAME entry. Use ~3–5 to spread a "rare cracked
+## stone" variant out instead of letting it cluster. 0 = no spacing
+## rule. If the constraint can't be satisfied at a cell (every
+## matching entry would violate its own rule), the picker relaxes the
+## rule and picks anyway — better a slight cluster than a missing
+## texture.
 @export var min_distance_to_same: int = 0
 
 func allows(placement_type: int) -> bool:

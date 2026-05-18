@@ -1,31 +1,35 @@
 class_name MapPopup
 extends Control
 
+## Debug toggle — when true, reveals the ENTIRE map regardless of
+## what the player has explored. Used during level-design validation
+## so the developer can see the full layout. Should be false in
+## shipping builds. Also toggled live by F3 in Game.gd.
 @export var debug_reveal_all: bool = false
-# When true, draws a small upward-pointing triangle on every trap cell:
-# red for STEP traps, orange for TIMED. Off by default — leaks design
-# info to the player. Flip on in the Inspector while validating Phase 8
-# Task 3 trap placement (Subtask B).
+## When true, draws a small upward-pointing triangle on every trap
+## cell: red for STEP traps, orange for TIMED. Off by default — leaks
+## design info to the player. Flip on in the Inspector while
+## validating trap placement.
 @export var debug_show_traps: bool = true
-# When true, draws a small arrow on every explored projectile-trap
-# launcher cell, pointing in the projectile's fire direction. Mirrors
-# `debug_show_traps` — off by default in shipping, flipped on in the
-# Inspector to validate Subtask C placement (corridor coverage,
-# escape distance, fire direction toward junctions).
+## When true, draws a small arrow on every explored projectile-trap
+## launcher cell, pointing in the projectile's fire direction.
+## Mirrors `debug_show_traps` — flip on in the Inspector to validate
+## launcher placement (corridor coverage, escape distance, fire
+## direction toward junctions, plate cell linkage).
 @export var debug_show_projectile_traps: bool = true
-# When true, draws a small purple swirl on every explored spinner
-# cell. Mirrors `debug_show_traps` — used to validate Phase 8 Task 8
-# spinner placement (corridor coverage, room density, exclusivity vs
-# other floor hazards). Off in shipping so the spinner glyph doesn't
-# leak hazard info before the player encounters one.
+## When true, draws a small purple swirl on every explored spinner
+## cell. Mirrors `debug_show_traps` — used to validate spinner
+## placement (corridor coverage, room density, exclusivity vs other
+## floor hazards). Off in shipping so the spinner glyph doesn't leak
+## hazard info before the player encounters one.
 @export var debug_show_spinners: bool = true
-# When true, draws a filled circle glyph on every explored teleporter
-# endpoint cell. Hue is rotated per pair via `TeleporterInstance.pair_index`
-# (modulo `_TELEPORTER_HUE_COUNT`) so the player can see at a glance
-# which two cells link. Unlike traps/spinners, teleporters are meant
-# to be readable on the map — finding the matched pair is the whole
-# point of the glyph. Defaults to true; left as an export so it can
-# be flipped off for screenshots / level-design tests if needed.
+## When true, draws a filled circle glyph on every explored
+## teleporter endpoint cell. Hue is rotated per pair so the player
+## can see at a glance which two cells link. Unlike traps / spinners,
+## teleporters are meant to be readable on the map — finding the
+## matched pair is the whole point of the glyph. Defaults to true;
+## left as an export so it can be flipped off for screenshots /
+## level-design tests.
 @export var debug_show_teleporters: bool = true
 
 var map_data: MapData

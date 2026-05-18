@@ -35,37 +35,50 @@ enum Direction {
 	RANDOM,
 }
 
-@export var name_key: String = ""        # translation key
+## Translation key for the spinner's display name. Use
+## `get_display_name()` to fetch the translated text.
+@export var name_key: String = ""
+## Translation key for the spinner's description tooltip.
 @export_multiline var description_key: String = ""
 
 @export_group("Rotation")
-# Inclusive range used by the placer to roll each instance's fixed
-# rotation count. Set min == max for a fully deterministic spinner;
-# a wider range gives each placed instance its own surprise factor.
-# Values are number of 90° turns — 4 = a full revolution.
+## Minimum number of 90° turns the spinner inflicts. Set min == max
+## for a fully deterministic spinner; a wider range gives each placed
+## instance its own surprise factor. 4 = a full revolution (player
+## ends up facing the same direction they started).
 @export_range(1, 8) var min_spins: int = 1
+## Maximum number of 90° turns the spinner inflicts. Must be ≥
+## `min_spins`. Each instance rolls a concrete value in this range
+## once at placement and keeps it for its lifetime.
 @export_range(1, 8) var max_spins: int = 3
+## Direction policy. CLOCKWISE / COUNTER_CLOCKWISE = every instance
+## sharing this data spins the same way. RANDOM = each instance
+## picks CW or CCW once at placement, so different spinners with
+## this data may disagree (the same spinner still spins the player
+## the same way every trigger).
 @export var direction: Direction = Direction.RANDOM
 
 @export_group("Timing")
-# Duration of each 90° turn during the chained spin. Must be >= 0.12
-# to leave the rotation tween in DungeonView (`rotate_camera_to`,
-# fixed at 0.12s) time to settle before the next step kicks in;
-# shorter values produce a janky compound rotation as successive
-# tweens fight for `camera.rotation_degrees:y`. Default 0.13 leaves
-# a 0.01s buffer.
+## Duration of each 90° turn during the chained spin, in seconds.
+## Must be >= 0.12 to leave the rotation tween in DungeonView
+## (`rotate_camera_to`, fixed at 0.12s) time to settle before the
+## next step kicks in; shorter values produce a janky compound
+## rotation as successive tweens fight for `camera.rotation_degrees:y`.
+## Default 0.13 leaves a 0.01s buffer.
 @export var spin_step_duration: float = 0.13
 
 @export_group("Art")
-# Top-down decal drawn flat on the floor (mirrors the spike-trap
-# hole pattern). Optional — null = invisible spinner (the player
-# only feels the spin). Visible decals are recommended so players
-# can learn to recognise them.
+## Top-down decal drawn flat on the floor (mirrors the spike-trap
+## hole pattern). Optional — null = invisible spinner (the player
+## only feels the spin). Visible decals are recommended so players
+## can learn to recognise them.
 @export var decal_sprite: Texture2D
-# Decal size in world units. 1.0 = exactly one cell wide / deep.
+## Decal size in world units. 1.0 = exactly one cell wide / deep.
+## Smaller values leave floor visible around the decal.
 @export var decal_world_size: float = 1.0
-# Vertical offset above the floor plane. 0.01 keeps the decal above
-# floor Z-fights (same convention as the spike-trap holes).
+## Vertical offset above the floor plane. 0.01 keeps the decal above
+## floor Z-fights (same convention as the spike-trap holes). Don't
+## set to 0 unless you want flicker on the spinner's texture.
 @export var y_offset: float = 0.01
 ## Continuous Y-axis rotation rate, in degrees per second, applied
 ## to the decal so the spinner visually advertises itself even when
@@ -88,9 +101,9 @@ enum Direction {
 @export_range(0, 16, 1) var visual_frame_count: int = 0
 
 @export_group("Audio")
-# Played once per 90° turn while the player is being spun. If null
-# falls back to the global turn sound — designers can opt out of a
-# bespoke spinner whoosh by leaving this empty.
+## Played once per 90° turn while the player is being spun. If null,
+## falls back to the global turn sound — designers can opt out of a
+## bespoke spinner whoosh by leaving this empty.
 @export var spin_sound: AudioStream
 
 func get_display_name() -> String:

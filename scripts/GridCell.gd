@@ -3,12 +3,20 @@ extends Resource
 
 enum CellType { WALL, FLOOR, ENTRANCE, EXIT }
 
+## What this cell represents on the map: WALL (impassable),
+## FLOOR (walkable empty space), ENTRANCE (the player spawn point),
+## EXIT (the level goal). Set by `LevelGenerator` during generation.
 @export var cell_type: CellType = CellType.WALL
 
-# Which sides have a wall (true = wall present)
+## True when this cell has a wall on its north side. Walls are stored
+## per-cell so two adjacent floor cells with a wall between them both
+## have the wall flagged on their facing side. Set by LevelGenerator.
 @export var wall_north: bool = true
+## True when this cell has a wall on its south side. See `wall_north`.
 @export var wall_south: bool = true
+## True when this cell has a wall on its east side. See `wall_north`.
 @export var wall_east: bool  = true
+## True when this cell has a wall on its west side. See `wall_north`.
 @export var wall_west: bool  = true
 
 # Object placed on this cell (null = none). One ObjectInstance per cell

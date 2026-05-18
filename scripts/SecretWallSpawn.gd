@@ -27,17 +27,26 @@ enum GateMode {
 	               # as optional side-paths to bonus loot.
 }
 
+## Minimum number of secret walls to attempt placing per level.
 @export var count_min: int = 1
+## Maximum number of secret walls to attempt placing per level.
+## Actual count may be lower if the geometry can't satisfy the
+## chosen `gate_mode` constraint.
 @export var count_max: int = 1
 
-# When != NONE, placement only commits an edge if "treating this edge
-# as a sealed wall" would cut off at least one content cell of the
-# selected kind from the entrance. A secret wall that hides nothing is
-# pointless, hence the default of ANY_CONTENT — the same gate-something
-# rule key-locked doors enforce.
+## What the secret wall must hide.
+## NONE = no requirement (the wall can sit anywhere — designer's risk
+## that it hides nothing).
+## ANY_CONTENT = sealing this edge must cut off at least one chest,
+## lever, key, or exit cell from the entrance (default).
+## LOOT_ONLY = stricter — must hide a chest or non-key floor item
+## AND must NOT also gate progression (exit, lever, key). Lets
+## designers ship secret walls as pure optional side-rewards.
 @export var gate_mode: GateMode = GateMode.ANY_CONTENT
 
-# Minimum Manhattan distance (in tiles) this secret wall must keep
-# from any already-placed object (chests, doors, levers, traps). 0 =
-# no spacing rule. Mirrors ObjectSpawn.min_distance_to_other_object.
+## Minimum Manhattan distance (in tiles) this secret wall must keep
+## from any already-placed object (chests, doors, levers, traps,
+## other secret walls). 0 = no spacing rule. Triggers farthest-point
+## insertion when > 0, graceful degrade with warning when geometry
+## can't satisfy.
 @export var min_distance_to_other_object: int = 0
