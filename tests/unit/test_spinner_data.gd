@@ -12,6 +12,9 @@ func test_default_field_values() -> void:
 	assert_eq(data.decal_world_size, 1.0)
 	assert_eq(data.y_offset, 0.01)
 	assert_eq(data.visual_rotation_degrees_per_second, 45.0)
+	# Default 0 = smooth continuous spin; designers opt into the
+	# stepped "spritesheet" look per-variant in the .tres.
+	assert_eq(data.visual_frame_count, 0)
 	assert_null(data.spin_sound)
 
 func test_get_display_name_unknown_key_falls_back_to_key() -> void:

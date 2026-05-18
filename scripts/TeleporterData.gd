@@ -78,6 +78,15 @@ extends Resource
 # magic"), but different pairs feel independent. ~1.6 (a bit over
 # PI/2) gives a noticeable offset without looking like a chase.
 @export_range(0.0, 6.3, 0.1) var pulse_phase_per_pair: float = 1.6
+## Stepped-animation frame count for the pulse. 0 = smooth sine
+## breathing (default — V1 behaviour). 4 / 6 / 8 = "spritesheet"
+## look: the glow + alpha + light energy snap between N discrete
+## brightness levels along the sine cycle instead of interpolating.
+## The cycle SPEED is still controlled by `pulse_speed` (one full
+## breath = `2π / pulse_speed` seconds); the frame count quantizes
+## which brightness levels show up. Values >12 are technically
+## allowed but visually indistinguishable from smooth.
+@export_range(0, 16, 1) var pulse_frame_count: int = 0
 
 @export_group("Placement offset")
 # How far (in world units) the sprite shifts toward the player

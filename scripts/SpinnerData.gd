@@ -67,11 +67,25 @@ enum Direction {
 # Vertical offset above the floor plane. 0.01 keeps the decal above
 # floor Z-fights (same convention as the spike-trap holes).
 @export var y_offset: float = 0.01
-# Continuous Y-axis rotation rate, in degrees per second, applied
-# to the decal so the spinner visually advertises itself even when
-# not triggered. 0 = static decal. ~45 = a leisurely swirl;
-# ~180 = aggressive. Designers can crank this for hazard biomes.
+## Continuous Y-axis rotation rate, in degrees per second, applied
+## to the decal so the spinner visually advertises itself even when
+## not triggered. 0 = static decal. ~45 = a leisurely swirl;
+## ~180 = aggressive. Designers can crank this for hazard biomes.
+## Combined with `visual_frame_count` for the stepped look: the rate
+## still controls how FAST a full revolution completes (one revolution
+## = 360 / rate seconds); the frame count just quantizes which angles
+## the decal snaps to. Drop the rate when using a low frame count
+## (4 frames at 45°/s reads as a clean tick; 4 frames at 180°/s reads
+## as flicker).
 @export var visual_rotation_degrees_per_second: float = 45.0
+## Stepped-animation frame count for the decal rotation. 0 = smooth
+## continuous spin (default — V1 behaviour). 4 / 6 / 8 = "spritesheet"
+## look: the decal snaps to N equally-spaced angles per full
+## revolution instead of rotating smoothly. Pair with a low
+## `visual_rotation_degrees_per_second` so each tick reads as a
+## deliberate frame rather than a flicker. Values >12 are technically
+## allowed but visually indistinguishable from smooth.
+@export_range(0, 16, 1) var visual_frame_count: int = 0
 
 @export_group("Audio")
 # Played once per 90° turn while the player is being spun. If null

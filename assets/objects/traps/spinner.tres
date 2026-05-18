@@ -9,5 +9,7 @@ script = ExtResource("1_gdr2x")
 min_spins = 2
 max_spins = 4
 decal_sprite = ExtResource("1_cobqh")
+visual_rotation_degrees_per_second = 120.0
+visual_frame_count = 6
 spin_sound = ExtResource("3_4icm2")
 metadata/_custom_type_script = "uid://ceunvfqs3y5as"
