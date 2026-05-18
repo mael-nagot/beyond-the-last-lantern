@@ -948,15 +948,24 @@ func _make_spinner_decal(spinner: SpinnerInstance) -> Node3D:
 	root.add_child(mesh)
 	return root
 
-# Advances each spinner root's Y rotation by
-# `data.visual_rotation_degrees_per_second × delta`. Direction sign
-# matches the instance's resolved direction so a clockwise spinner
-# decal visually spins clockwise when viewed from above (Godot's
-# right-hand convention: looking down -Y, positive Y rotation is
-# counter-clockwise — hence the negation for CLOCKWISE).
-func _update_spinner_rotations(delta: float) -> void:
+# Sets each spinner root's Y rotation to an angle DERIVED FROM CLOCK
+# TIME (not accumulated from delta). Direction sign matches the
+# instance's resolved direction so a clockwise spinner decal visually
+# spins clockwise when viewed from above (Godot's right-hand
+# convention: looking down -Y, positive Y rotation is counter-
+# clockwise — hence the negation for CLOCKWISE).
+#
+# Time-based rather than delta-accumulated so `visual_frame_count > 0`
+# can quantize cleanly: a stepped spinner snaps to N equally-spaced
+# angles per full revolution. Accumulating delta then snapping would
+# drift toward the same pose on every tick (the snap would feed back
+# into the next frame's accumulator); deriving from absolute time
+# means the underlying angle keeps growing and the snap just lags by
+# at most one step.
+func _update_spinner_rotations(_delta: float) -> void:
 	if _spinner_visuals.is_empty():
 		return
+	var t: float = Time.get_ticks_msec() / 1000.0
 	for spinner in _spinner_visuals.keys():
 		var root: Node3D = _spinner_visuals[spinner]
 		if not is_instance_valid(root) or spinner == null or spinner.data == null:
@@ -965,8 +974,17 @@ func _update_spinner_rotations(delta: float) -> void:
 		if rate == 0.0:
 			continue
 		var dir_sign: float = -1.0 if spinner.is_clockwise() else 1.0
-		var step: float = deg_to_rad(rate * dir_sign) * delta
-		root.rotation.y = fmod(root.rotation.y + step, TAU)
+		var angle: float = deg_to_rad(rate * dir_sign) * t
+		var frame_count: int = spinner.data.visual_frame_count
+		if frame_count > 0:
+			# Quantize to N equally-spaced angles per full revolution
+			# ("spritesheet" look). `floor` snaps to the most recent
+			# frame in whichever direction time is flowing (dir_sign
+			# baked into the angle already), so the visual ticks
+			# forward in lockstep with rotation direction.
+			var step_size: float = TAU / float(frame_count)
+			angle = floor(angle / step_size) * step_size
+		root.rotation.y = fmod(angle, TAU)
 
 # Phase 15 Task 6 — teleporter rendering. Each TeleporterInstance has
 # TWO endpoints; we render BOTH as identical-looking UPRIGHT Sprite3D
@@ -1156,10 +1174,24 @@ func _update_teleporter_pulse(_delta: float) -> void:
 		if data.pulse_amount <= 0.0 or data.pulse_speed <= 0.0:
 			continue
 		var phase: float = entry.get("pulse_phase", 0.0)
+		# Phase-quantize for the stepped "spritesheet" look when
+		# `pulse_frame_count > 0`: snap the phase to N equally-spaced
+		# samples per full cycle BEFORE evaluating sine. Each frame
+		# then holds for an equal duration (uniform-time playback,
+		# like a real spritesheet) and the brightness levels are
+		# `sin(2π·i/N)` for i in [0, N) — uneven in value (the sine
+		# clusters near ±1 at the peaks) but even in time. Quantizing
+		# the sine OUTPUT instead would give uniform brightness levels
+		# but uneven dwell time, which reads less like a spritesheet.
+		var phase_total: float = t * data.pulse_speed + phase
+		var frame_count: int = data.pulse_frame_count
+		if frame_count > 0:
+			var step_size: float = TAU / float(frame_count)
+			phase_total = floor(phase_total / step_size) * step_size
 		# sine in [-1, 1], scaled by pulse_amount into [-amount, amount],
 		# centred on 1.0 so the multiplier swings between
 		# (1 - amount) and (1 + amount).
-		var swing: float = sin(t * data.pulse_speed + phase) * data.pulse_amount
+		var swing: float = sin(phase_total) * data.pulse_amount
 		var multiplier: float = 1.0 + swing
 		var sprite_node: SpriteBase3D = entry.get("sprite_node", null)
 		if is_instance_valid(sprite_node):

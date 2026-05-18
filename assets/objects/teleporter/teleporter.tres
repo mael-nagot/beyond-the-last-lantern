@@ -13,6 +13,7 @@ world_height = 5.4
 glow_multiplier = 1.1
 pulse_amount = 0.25
 pulse_speed = 4.1
+pulse_frame_count = 6
 lean_toward_player = 1.5
 light_color = Color(0.60067844, 0.9551669, 0.9398262, 1)
 light_energy = 2.0

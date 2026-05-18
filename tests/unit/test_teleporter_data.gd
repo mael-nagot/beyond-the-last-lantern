@@ -15,6 +15,9 @@ func test_default_field_values() -> void:
 	assert_eq(data.pulse_amount, 0.5)
 	assert_eq(data.pulse_speed, 3.0)
 	assert_eq(data.pulse_phase_per_pair, 1.6)
+	# Default 0 = smooth sine breathing; designers opt into the
+	# stepped "spritesheet" look per-variant in the .tres.
+	assert_eq(data.pulse_frame_count, 0)
 	# Lean defaults to 0 — designers opt into the "rune leans toward
 	# the player" effect per-biome.
 	assert_eq(data.lean_toward_player, 0.0)
