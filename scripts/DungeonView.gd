@@ -2010,8 +2010,13 @@ func _item_world_position(grid_pos: Vector2i, stack_index: int, inst: ItemInstan
 # A previous `_item_tween` is killed so consecutive moves / turns don't
 # fight each other for the sprite's position property.
 func _refresh_item_positions(animated: bool = false) -> void:
-	if _item_tween != null and _item_tween.is_valid():
-		_item_tween.kill()
+	# A natural-end tween becomes invalid but stays non-null, so the
+	# lazy-create check (`if _item_tween == null`) below would skip
+	# creation and call tween_property on a dead tween — a back-to-back
+	# spinner rotation reliably hits this. Always drop the reference.
+	if _item_tween != null:
+		if _item_tween.is_valid():
+			_item_tween.kill()
 		_item_tween = null
 	# Tween is created lazily on the first sprite that actually needs to
 	# move. Creating it up-front would emit a "started with no Tweeners"
