@@ -73,6 +73,27 @@ enum Trigger {
 ## Rendered as a vertical Sprite3D BILLBOARD_FIXED_Y, anchored
 ## bottom-on-floor. Visible only when the trap is EXTENDED.
 @export var extended_sprite: Texture2D
+## Optional first intermediate frame between RETRACTED and EXTENDED
+## (closer to retracted — short spike just starting to emerge).
+## Same canvas size as `extended_sprite`, with spike pixels drawn
+## lower in the frame so the rendered sprite shows a shorter
+## protrusion at the same bottom anchor. If null (default), the
+## extension animation is skipped and the renderer just toggles
+## visibility instantly — preserves the original snappy behaviour
+## for variants that don't have artwork yet.
+@export var extended_sprite_frame1: Texture2D
+## Optional second intermediate frame (closer to fully extended —
+## spike about 2/3 out). Same rules as `extended_sprite_frame1`.
+## Both frames must be non-null for the animation to play.
+@export var extended_sprite_frame2: Texture2D
+## Per-frame dwell time, in seconds, for the extending / retracting
+## animation. With 2 intermediate frames the full extension takes
+## 2 × duration (hidden → frame1 → frame2 → extended in two steps).
+## Retraction mirrors this. 0.03 = ~30 ms per frame, the trap feels
+## punchy without losing the windup. Larger values (0.06+) read as
+## a slow, telegraphed extension. Only used when both intermediate
+## frames are set.
+@export var extension_frame_duration: float = 0.03
 ## Per-spike height in world units. Default 1.2 keeps the spike
 ## visually substantial against the default 1.0-unit hole; smaller
 ## values feel like floor pricks, larger values like room-filling
