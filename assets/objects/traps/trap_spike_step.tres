@@ -5,12 +5,16 @@
 [ext_resource type="AudioStream" uid="uid://cvs0j06b8q3os" path="res://assets/sounds/objects/traps/spike01_deactivate.ogg" id="2_hrto5"]
 [ext_resource type="Texture2D" uid="uid://byysk4gqx836r" path="res://assets/textures/objects/traps/spike01_extended.png" id="3_ttecm"]
 [ext_resource type="Texture2D" uid="uid://br0q6g1y5xxn5" path="res://assets/textures/objects/traps/spike01_hole.png" id="4_gvpod"]
+[ext_resource type="Texture2D" uid="uid://bu38ulauj2q6r" path="res://assets/textures/objects/traps/spike01_extended_frame1.png" id="4_ttecm"]
+[ext_resource type="Texture2D" uid="uid://ciiirvfflkf4r" path="res://assets/textures/objects/traps/spike01_extended_frame2.png" id="5_gvpod"]
 
 [resource]
 script = ExtResource("1_5w80r")
 step_activation_duration = 0.1
 holes_sprite = ExtResource("4_gvpod")
 extended_sprite = ExtResource("3_ttecm")
+extended_sprite_frame1 = ExtResource("4_ttecm")
+extended_sprite_frame2 = ExtResource("5_gvpod")
 grid_cols = 3
 grid_rows = 3
 activate_sound = ExtResource("1_5mer3")

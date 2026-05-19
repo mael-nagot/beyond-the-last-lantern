@@ -650,6 +650,14 @@ func _door_y_rotation_deg(door: DoorInstance) -> float:
 func _build_traps() -> void:
 	for child in _traps_root.get_children():
 		child.queue_free()
+	# Kill any in-flight extension tweens from the previous build — the
+	# Sprite3D nodes they target are about to be queue_freed. The
+	# callbacks are guarded by `is_instance_valid` so they'd no-op, but
+	# leaving a doomed tween running burns frames.
+	for entry in _trap_visuals.values():
+		var prev_tween: Variant = entry.get("tween", null)
+		if prev_tween != null and prev_tween is Tween and prev_tween.is_running():
+			prev_tween.kill()
 	_trap_visuals.clear()
 	if generator == null:
 		return
@@ -688,6 +696,14 @@ func rebuild_projectile_traps() -> void:
 # Cheap per-tick path: flip the spike subtree's `visible` flag without
 # rebuilding the trap. Game.gd calls this on each ACTIVATED /
 # DEACTIVATED event from TrapInstance.tick.
+#
+# When the TrapData has both `extended_sprite_frame1` and
+# `extended_sprite_frame2` set, the transition is animated by swapping
+# the texture on every spike Sprite3D at fixed intervals:
+#   extending: hidden → frame1 → frame2 → extended (2 dwells)
+#   retracting: extended → frame2 → frame1 → hidden (2 dwells)
+# Otherwise the visibility flag is flipped instantly (original
+# behaviour, preserved for trap variants without intermediate art).
 func update_trap_visual(trap: TrapInstance) -> void:
 	if trap == null:
 		return
@@ -695,8 +711,59 @@ func update_trap_visual(trap: TrapInstance) -> void:
 	if entry == null:
 		return
 	var spikes_root: Node3D = entry["spikes_root"]
-	if is_instance_valid(spikes_root):
+	if not is_instance_valid(spikes_root):
+		return
+	var data: TrapData = trap.data
+	var sprites: Array = entry.get("sprites", [])
+	var animate: bool = data != null \
+		and data.extended_sprite_frame1 != null \
+		and data.extended_sprite_frame2 != null \
+		and not sprites.is_empty()
+	# Kill any in-flight animation so a fast retrigger (rare with the
+	# default timings, but possible if the designer pushes durations
+	# below the animation length) replaces it cleanly instead of
+	# stacking texture-swap callbacks.
+	var prev: Variant = entry.get("tween", null)
+	if prev != null and prev is Tween and prev.is_running():
+		prev.kill()
+	entry["tween"] = null
+	if not animate:
 		spikes_root.visible = trap.is_extended()
+		return
+	var step: float = max(0.001, data.extension_frame_duration)
+	var t := create_tween()
+	if trap.is_extended():
+		# Extending. Make spikes visible at the first intermediate
+		# frame straight away — any delay here feels like input lag.
+		spikes_root.visible = true
+		_set_trap_sprite_textures(sprites, data.extended_sprite_frame1)
+		t.tween_interval(step)
+		t.tween_callback(_set_trap_sprite_textures.bind(sprites, data.extended_sprite_frame2))
+		t.tween_interval(step)
+		t.tween_callback(_set_trap_sprite_textures.bind(sprites, data.extended_sprite))
+	else:
+		# Retracting. The "fully extended" state has been on-screen for
+		# the activation duration already, so we skip showing it again
+		# and step straight down through frame2 → frame1 → hidden.
+		_set_trap_sprite_textures(sprites, data.extended_sprite_frame2)
+		t.tween_interval(step)
+		t.tween_callback(_set_trap_sprite_textures.bind(sprites, data.extended_sprite_frame1))
+		t.tween_interval(step)
+		t.tween_callback(_hide_trap_spikes.bind(spikes_root, sprites, data.extended_sprite))
+	entry["tween"] = t
+
+func _set_trap_sprite_textures(sprites: Array, tex: Texture2D) -> void:
+	for s in sprites:
+		if s is Sprite3D and is_instance_valid(s):
+			s.texture = tex
+
+# End-of-retraction callback: hide the spike subtree and reset the
+# texture to `extended_sprite` so the next activation builds up from
+# a clean baseline (frame1 set explicitly at start, but defensive).
+func _hide_trap_spikes(spikes_root: Node3D, sprites: Array, reset_tex: Texture2D) -> void:
+	if is_instance_valid(spikes_root):
+		spikes_root.visible = false
+	_set_trap_sprite_textures(sprites, reset_tex)
 
 # Per-trap "lean toward player" offset for the spike subtree. Mirrors
 # the cell-object lean (used by chests) but applies only to the
@@ -769,6 +836,11 @@ func _make_trap_spikes(trap: TrapInstance) -> Dictionary:
 	spikes_root.name = "Spikes"
 	spikes_root.visible = trap.is_extended()
 	spikes_root.position = _trap_spike_offset(trap)
+	# Collected so `update_trap_visual` can swap the texture on every
+	# spike billboard in lockstep when the animation frames are set.
+	# Required because the FIXED_Y billboard rules out a MultiMesh
+	# approach, so each spike is its own Sprite3D node.
+	var sprites: Array = []
 	if data.extended_sprite != null:
 		var positions := _trap_grid_positions_local(data)
 		var tex: Texture2D = data.extended_sprite
@@ -796,6 +868,7 @@ func _make_trap_spikes(trap: TrapInstance) -> Dictionary:
 			if x_scale != 1.0:
 				sprite.scale = Vector3(x_scale, 1.0, 1.0)
 			spikes_root.add_child(sprite)
+			sprites.append(sprite)
 	root.add_child(spikes_root)
 
 	# Note: TIMED trap activate / deactivate audio used to live on a
@@ -810,6 +883,8 @@ func _make_trap_spikes(trap: TrapInstance) -> Dictionary:
 	return {
 		"root": root,
 		"spikes_root": spikes_root,
+		"sprites": sprites,
+		"tween": null,
 	}
 
 # Append the per-decal world transforms for THIS trap into the shared
