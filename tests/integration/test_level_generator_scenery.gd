@@ -229,6 +229,78 @@ func test_walkable_scenery_allowed_on_entrance_and_exit() -> void:
 # Reachability — non-walkable scenery must never strand a cell
 # -----------------------------------------------------------------
 
+func test_scenery_never_on_projectile_trap_plate_cell() -> void:
+	# A flower or tree on the pressure-plate decal visually fights the
+	# trigger art AND mimics the "item on plate disables trap" rule —
+	# exclude ALL scenery (walkable or not) from plate cells. Drive a
+	# 100%-coverage walkable spawn so the placer tries every eligible
+	# cell; the failure mode would be a flower landing on the plate.
+	var biome := _make_biome()
+	var trap_data := _make_projectile_trap_data(8, 0)
+	trap_data.trigger = ProjectileTrapData.Trigger.PRESSURE_PLATE
+	trap_data.min_plate_to_launcher_distance = 1
+	trap_data.max_plate_to_junction_distance = 8
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(trap_data, 1.0, 1)]
+	var spawn := ScenerySpawn.new()
+	spawn.scenery = _make_scenery(true)
+	spawn.dead_end_chance = 1.0
+	spawn.corridor_segment_chance = 1.0
+	spawn.corridor_coverage_min_percent = 100.0
+	spawn.corridor_coverage_max_percent = 100.0
+	spawn.room_chance = 1.0
+	spawn.room_coverage_min_percent = 100.0
+	spawn.room_coverage_max_percent = 100.0
+	biome.scenery_spawns = [spawn]
+	var any_plate_seen: bool = false
+	for s in [12345, 99999, 55555, 42, 31337]:
+		var gen := _make_generator_seeded(biome, s)
+		var plate_cells: Dictionary = {}
+		for ptrap in gen.projectile_traps:
+			if ptrap != null and ptrap.has_plate():
+				plate_cells[ptrap.plate_cell] = true
+		if plate_cells.is_empty():
+			continue
+		any_plate_seen = true
+		for inst in gen.scenery:
+			assert_false(plate_cells.has(inst.cell),
+				"scenery at %s overlaps a projectile-trap plate cell (seed %d)" % [inst.cell, s])
+	assert_true(any_plate_seen,
+		"no plated projectile traps placed across 5 seeds — test scenario broken")
+
+func test_non_walkable_scenery_never_on_projectile_path_cell() -> void:
+	# A tree on any cell along a launcher's projectile flight blocks
+	# the corridor / room the projectile crosses — the trap loses its
+	# threat zone and the player loses an escape route. Verified by
+	# walking each launcher's full path and checking no tree sits on it.
+	var biome := _make_biome()
+	var trap_data := _make_projectile_trap_data(8, 0)
+	biome.projectile_trap_spawns = [_make_projectile_trap_spawn(trap_data, 1.0, 1)]
+	var spawn := ScenerySpawn.new()
+	spawn.scenery = _make_scenery(false)  # non-walkable trees
+	spawn.dead_end_chance = 1.0
+	spawn.corridor_segment_chance = 1.0
+	spawn.corridor_coverage_min_percent = 100.0
+	spawn.corridor_coverage_max_percent = 100.0
+	spawn.room_chance = 1.0
+	spawn.room_coverage_min_percent = 100.0
+	spawn.room_coverage_max_percent = 100.0
+	biome.scenery_spawns = [spawn]
+	var any_trap_seen: bool = false
+	for s in [12345, 99999, 55555, 42, 31337]:
+		var gen := _make_generator_seeded(biome, s)
+		if gen.projectile_traps.is_empty():
+			continue
+		any_trap_seen = true
+		var path_cells: Dictionary = {}
+		for ptrap in gen.projectile_traps:
+			for p in _projectile_path_until_wall(gen, ptrap):
+				path_cells[p] = true
+		for inst in gen.scenery:
+			assert_false(path_cells.has(inst.cell),
+				"non-walkable scenery at %s overlaps a projectile flight path (seed %d)" % [inst.cell, s])
+	assert_true(any_trap_seen,
+		"no projectile traps placed across 5 seeds — test scenario broken")
+
 func test_non_walkable_scenery_preserves_entrance_exit_reachability() -> void:
 	# A tree placement must never cut off the exit from the entrance.
 	# Run a high-coverage non-walkable spawn and verify BFS from
@@ -400,3 +472,53 @@ func _make_item_data() -> ItemData:
 	item.item_name = "item.test.name"
 	item.stackable = true
 	return item
+
+# Builds a generator on an explicit seed (the shared `_make_generator`
+# always uses RNG_SEED; the projectile-trap tests sweep multiple seeds
+# to guarantee a trap actually lands).
+func _make_generator_seeded(biome: BiomeData, rng_seed: int) -> LevelGenerator:
+	seed(rng_seed)
+	var gen := LevelGenerator.new()
+	add_child_autofree(gen)
+	gen.configure(biome)
+	gen.generate()
+	return gen
+
+# Mirrors the same-named helper in test_level_generator.gd — a minimal
+# TIMED projectile-trap template with a non-null launcher texture.
+func _make_projectile_trap_data(max_escape: int = 5, min_distance: int = 0) -> ProjectileTrapData:
+	var data := ProjectileTrapData.new()
+	data.trigger = ProjectileTrapData.Trigger.TIMED
+	data.max_escape_distance = max_escape
+	data.min_distance_to_other_projectile_trap = min_distance
+	data.name_key = "test.projectile_trap"
+	var img := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+	data.launcher_texture = ImageTexture.create_from_image(img)
+	return data
+
+func _make_projectile_trap_spawn(trap: ProjectileTrapData, corridor_chance: float, max_per_segment: int = 1, placement: int = ObjectSpawn.PLACEMENT_CORRIDOR) -> ProjectileTrapSpawn:
+	var spawn := ProjectileTrapSpawn.new()
+	spawn.trap = trap
+	spawn.corridor_chance = corridor_chance
+	spawn.corridor_max_per_segment = max_per_segment
+	spawn.placement = placement
+	return spawn
+
+# Walks a launcher's projectile flight from the cell in front of the
+# wall until it hits a wall — the same set of cells the generator
+# records in `_projectile_path_cells`.
+func _projectile_path_until_wall(gen: LevelGenerator, inst) -> Array:
+	var path: Array = []
+	var fire: Vector2i = inst.fire_direction()
+	var step: int = 1
+	var step_limit: int = gen.grid_width + gen.grid_height + 2
+	while step <= step_limit:
+		var p: Vector2i = inst.cell + fire * step
+		if p.x < 0 or p.x >= gen.grid_width or p.y < 0 or p.y >= gen.grid_height:
+			break
+		var c: GridCell = gen.grid[p.x][p.y]
+		if c.cell_type == GridCell.CellType.WALL:
+			break
+		path.append(p)
+		step += 1
+	return path
