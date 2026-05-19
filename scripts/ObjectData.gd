@@ -71,6 +71,15 @@ enum Category {
 ## Area3D is created either way, so the player gets feedback rather
 ## than a silent dead click.
 @export var interactable: bool = true
+## Seconds to hold between flipping the object to its "opened" state
+## (sprite swap + `interact_sound`) and showing any follow-up popup.
+## Only chests use this today: it delays the loot popup so the open
+## sprite and the open sound register before the modal covers the
+## view — reads as "I opened the chest, *then* here's the loot"
+## rather than the popup appearing instantly. 0.0 = no delay (popup
+## opens immediately); ~0.3–0.5 is a good feel. Re-clicking an
+## already-open chest skips the delay entirely.
+@export var popup_delay: float = 0.0
 
 @export_group("Sound")
 ## Played on a successful interaction (chest opens, door swings,

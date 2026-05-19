@@ -13,5 +13,6 @@ closed_sprite = ExtResource("2_oq0si")
 opened_sprite = ExtResource("4_pvq6l")
 world_height = 2.0
 lean_toward_player = 2.0
+popup_delay = 0.3
 interact_sound = ExtResource("3_cc1gw")
 metadata/_custom_type_script = "uid://br4c1mxr8q1a"

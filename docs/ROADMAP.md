@@ -222,6 +222,12 @@ Floor pickup plays `ItemData.pickup_drop_sound` (see `Game._on_pickup_pressed`),
 1. ✅ `_on_loot_item_taken(slot_index)`: snapshots `item.stack_count` before `add_item`, plays the item's `pickup_drop_sound` only when the count actually dropped (handles the bar-full edge case where nothing transferred)
 2. ✅ `_on_loot_take_all()`: picks the first item-with-a-sound up-front (mirroring `_on_pickup_pressed`), plays it once at the end iff anything was transferred — single sound, never N
 
+#### Task 1 polish 2 — Chest open beat before the loot popup ✅
+The loot popup appeared the same frame the chest was clicked, so the open sprite + open sound never registered before the modal covered the view.
+1. ✅ `ObjectData.popup_delay: float` (seconds; default 0.0 = instant) — `chest_wooden.tres` set to 0.4
+2. ✅ `Game._open_chest`: on a first open, after the sprite swap + `interact_sound`, holds `popup_delay` seconds before `LootPopup.open()`. Re-clicking an already-open chest skips the delay (sprite is already swapped)
+3. ✅ `Game._chest_opening` flag — true during the beat; folded into `_is_world_paused()` so movement is gated, and makes `_open_chest` drop re-clicks on any chest until the popup is up
+
 #### Task 2a — Decorative doors (direct-click toggle) ✅ (code; awaits manual asset/biome wiring)
 Doors live on the EDGE between two adjacent corridor cells, never on a `GridCell`.
 1. ✅ `DoorInstance.gd` (RefCounted, extends `ObjectInstance`) — stores `cell_a`, `cell_b` canonically; `axis()`, `is_edge_blocked()`, static `canonical_pair` / `edge_key` / `create_door` helpers

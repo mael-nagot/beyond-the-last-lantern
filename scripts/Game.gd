@@ -56,6 +56,13 @@ var _teleporter_just_arrived_cell: Vector2i = _TELEPORTER_NO_CELL
 # document the timing intent without re-reading the magic number.
 const _TELEPORTER_FADE_DURATION: float = 0.18
 
+# True while a chest is mid-open: the open sprite + interact sound
+# have fired and we're holding `ObjectData.popup_delay` seconds before
+# the loot popup appears. Folded into `_is_world_paused()` so the
+# player can't move during the beat, and used to drop re-clicks (on
+# this or any other chest) until the popup is up.
+var _chest_opening: bool = false
+
 func _ready() -> void:
 	var dungeon_view      = $DungeonView
 	var player_controller = $DungeonView/PlayerController
@@ -254,6 +261,10 @@ func _pull_lever(lever: LeverInstance) -> void:
 		SoundManager.play(changed_door_data.interact_sound)
 
 func _open_chest(instance: ObjectInstance) -> void:
+	# Drop the click outright while another chest's open-beat is still
+	# running — the loot popup for that one hasn't appeared yet.
+	if _chest_opening:
+		return
 	if not instance.data.interactable:
 		_play_locked_feedback(instance.data)
 		return
@@ -264,6 +275,13 @@ func _open_chest(instance: ObjectInstance) -> void:
 		SoundManager.play(instance.data.interact_sound)
 		if _dungeon_view != null:
 			_dungeon_view.rebuild_objects()
+		# Hold a beat so the open sprite + sound land before the loot
+		# popup covers the view. Re-clicking an already-open chest
+		# skips this — the sprite is already swapped.
+		if instance.data.popup_delay > 0.0:
+			_chest_opening = true
+			await get_tree().create_timer(instance.data.popup_delay).timeout
+			_chest_opening = false
 	if instance.has_remaining_loot():
 		if _hud != null and _hud.loot_popup != null:
 			_hud.loot_popup.open(instance)
@@ -453,8 +471,8 @@ func _is_world_paused() -> bool:
 	# Spinner spins also gate input — they're internal (no SceneTree
 	# pause) so they don't fight the existing pause-source registry,
 	# but they need the same "drop player input" behaviour. Teleporter
-	# warps share the same model.
-	return _spinner_spinning or _teleporter_warping
+	# warps and the chest-open beat share the same model.
+	return _spinner_spinning or _teleporter_warping or _chest_opening
 
 func _update_map() -> void:
 	if _hud and _player_controller:
