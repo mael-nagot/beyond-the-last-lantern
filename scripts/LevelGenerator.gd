@@ -4643,28 +4643,51 @@ func _cell_eligible_for_scenery(pos: Vector2i, spawn: ScenerySpawn) -> bool:
 			return false
 	return true
 
-# Commits a scenery placement at `pos`. For walkable scenery this
-# always succeeds (the cell stays walkable so no reachability check
-# is needed). For non-walkable scenery this places the sprite, runs a
-# BFS reachability check, and rolls the placement back if the check
-# fails. Returns true iff the placement is kept.
+# Commits a scenery placement at `pos`. Rolls the per-cell density
+# from `spawn.density_min..density_max` and emits that many
+# SceneryInstance entries — all sharing the same `cell` but with
+# per-sprite jitter offset + scale rolled from the spawn. For
+# walkable scenery this always succeeds. For non-walkable scenery
+# we snapshot reachability, install the FIRST sprite (which is what
+# `is_blocked` reads — the rest are pure visual additions on a cell
+# that's already blocked), re-BFS, and roll back if reachability
+# breaks. Returns true iff the placement is kept.
 func _try_commit_scenery_at(spawn: ScenerySpawn, pos: Vector2i) -> bool:
 	var data: SceneryData = spawn.scenery
 	var cell: GridCell = grid[pos.x][pos.y]
-	var inst := SceneryInstance.create(data, pos)
-	if data.walkable:
-		cell.scenery = inst
-		scenery.append(inst)
-		return true
-	# Non-walkable: snapshot reachability BEFORE placement, install
-	# the tree, re-BFS, and verify nothing newly-stranded.
-	var before: Dictionary = _bfs_walkable_from(entrance_pos)
-	cell.scenery = inst
-	if not _placement_preserves_reachability(pos, before):
-		cell.scenery = null
+	var density: int = spawn.sample_density(randi())
+	if density <= 0:
 		return false
-	scenery.append(inst)
+	var first := SceneryInstance.create(data, pos, _sample_scenery_offset(spawn), spawn.sample_scale(randf()))
+	if not data.walkable:
+		# Snapshot BEFORE mutating the cell — same pattern chests use
+		# in `_try_place_object`. The BFS only depends on
+		# `cell.is_blocked` which flips when we set cell.scenery, so
+		# checking ONCE per cell is enough — adding more sprites on
+		# the same cell can't change reachability.
+		var before: Dictionary = _bfs_walkable_from(entrance_pos)
+		cell.scenery = first
+		if not _placement_preserves_reachability(pos, before):
+			cell.scenery = null
+			return false
+	else:
+		cell.scenery = first
+	scenery.append(first)
+	for i in range(1, density):
+		var extra := SceneryInstance.create(data, pos, _sample_scenery_offset(spawn), spawn.sample_scale(randf()))
+		scenery.append(extra)
 	return true
+
+# Samples a per-sprite sub-cell offset for the given spawn. Returns
+# Vector2.ZERO when `jitter_radius == 0` so single-sprite spawns
+# preserve the original "snapped to cell centre" behaviour. Otherwise
+# returns a random offset in [-r, +r] on both axes, where r is
+# `spawn.jitter_radius` (fractions of CELL_SIZE).
+func _sample_scenery_offset(spawn: ScenerySpawn) -> Vector2:
+	var r: float = spawn.jitter_radius
+	if r <= 0.0:
+		return Vector2.ZERO
+	return Vector2(randf_range(-r, r), randf_range(-r, r))
 
 func _too_close_to_same_scenery(pos: Vector2i, data: SceneryData, min_distance: int) -> bool:
 	if min_distance <= 0 or data == null:

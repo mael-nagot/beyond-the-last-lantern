@@ -49,16 +49,31 @@ Each `ScenerySpawn` holds:
 | `corridor_coverage_min_percent` / `max_percent` | What fraction of the hit segment's eligible cells to fill |
 | `room_chance` | % of rooms that get scenery |
 | `room_coverage_min_percent` / `max_percent` | What fraction of the hit room's eligible cells to fill |
-| `min_distance_to_same` | Manhattan distance between two placements of the SAME `SceneryData` |
+| `min_distance_to_same` | Manhattan distance between two placements of the SAME `SceneryData` (CELL to cell, not sprite to sprite) |
+| `density_min` / `density_max` | Sprites per PLACED cell. (1, 1) = one centred sprite. > 1 = a cluster (e.g. 2 trees, 5 flowers on the same tile) |
+| `jitter_radius` | How far each sprite scatters from cell centre, in fractions of `CELL_SIZE`. 0 = always centred (right for `density = 1`); 0.25–0.4 for multi-sprite clusters |
+| `scale_min` / `scale_max` | Per-sprite world-height multiplier so cloned trees don't all read at exactly the same size. (1.0, 1.0) = no variance |
 
 All three chances default to 0.0 — an empty spawn entry is a no-op,
 so designers can add a `ScenerySpawn` to a biome and tune one knob
-at a time.
+at a time. Density / jitter / scale all default to "single centred
+sprite at the data's configured size" so existing biomes get the
+original one-object-per-tile look until the designer opts into
+multi-sprite.
 
 Mixing trees + flowers? Use TWO `ScenerySpawn` entries — one per
 type. Cross-type spacing doesn't constrain (`min_distance_to_same`
 only applies within ONE `SceneryData`), so a tree and a flower can
 sit on adjacent cells.
+
+## Map rendering
+
+Non-walkable scenery cells (trees) render on the map exactly like
+walls — the cell's floor rect is skipped and neighbouring walkable
+cells draw a wall line on their shared border. The player sees a
+solid wall-shaped outline where the tree blocks the path, matching
+the visual cue in the 3D view. Walkable scenery (flowers) has no
+map presence — it's a floor tile the player can step through.
 
 ## Existing scenery
 

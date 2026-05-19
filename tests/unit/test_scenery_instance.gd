@@ -5,6 +5,16 @@ func test_create_sets_fields() -> void:
 	var inst := SceneryInstance.create(data, Vector2i(3, 7))
 	assert_same(inst.data, data)
 	assert_eq(inst.cell, Vector2i(3, 7))
+	assert_eq(inst.cell_offset, Vector2.ZERO,
+		"default cell_offset should be zero so single-sprite placements stay centred")
+	assert_almost_eq(inst.scale, 1.0, 0.0001,
+		"default scale should be 1.0 so single-sprite placements render at data world_height")
+
+func test_create_with_offset_and_scale() -> void:
+	var data := SceneryData.new()
+	var inst := SceneryInstance.create(data, Vector2i(4, 4), Vector2(0.25, -0.3), 1.2)
+	assert_eq(inst.cell_offset, Vector2(0.25, -0.3))
+	assert_almost_eq(inst.scale, 1.2, 0.0001)
 
 func test_blocks_movement_false_for_walkable() -> void:
 	var data := SceneryData.new()

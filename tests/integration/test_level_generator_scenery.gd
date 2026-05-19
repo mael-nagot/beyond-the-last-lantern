@@ -248,6 +248,82 @@ func test_non_walkable_scenery_preserves_entrance_exit_reachability() -> void:
 	assert_true(reachable.has(gen.exit_pos),
 		"exit no longer reachable from entrance after non-walkable scenery placement")
 
+func test_density_greater_than_one_emits_multiple_sprites_per_cell() -> void:
+	# With density_min = density_max = 3 every placed cell must
+	# produce exactly 3 SceneryInstance entries that all share the
+	# same cell coord — proves multi-sprite placement is wired.
+	var biome := _make_biome()
+	var spawn := ScenerySpawn.new()
+	spawn.scenery = _make_scenery(true)  # walkable so no BFS rollbacks
+	spawn.room_chance = 1.0
+	spawn.room_coverage_min_percent = 30.0
+	spawn.room_coverage_max_percent = 30.0
+	spawn.density_min = 3
+	spawn.density_max = 3
+	spawn.jitter_radius = 0.3
+	biome.scenery_spawns = [spawn]
+	var gen := _make_generator(biome)
+	assert_gt(gen.scenery.size(), 0, "should place at least one placement at 30% coverage")
+	# Bucket by cell — every cell that received scenery must have
+	# exactly 3 entries.
+	var per_cell: Dictionary = {}
+	for inst in gen.scenery:
+		per_cell[inst.cell] = per_cell.get(inst.cell, 0) + 1
+	for cell_pos in per_cell.keys():
+		assert_eq(per_cell[cell_pos], 3,
+			"cell %s got %d sprites, expected 3 (density_min == density_max == 3)" % [cell_pos, per_cell[cell_pos]])
+
+func test_density_one_emits_single_centred_sprite() -> void:
+	# Default density (1, 1) keeps the original "one centred sprite
+	# per cell" behaviour — cell_offset must stay zero.
+	var biome := _make_biome()
+	var spawn := ScenerySpawn.new()
+	spawn.scenery = _make_scenery(true)
+	spawn.room_chance = 1.0
+	spawn.room_coverage_min_percent = 30.0
+	spawn.room_coverage_max_percent = 30.0
+	# density_min / density_max / jitter_radius left at defaults
+	biome.scenery_spawns = [spawn]
+	var gen := _make_generator(biome)
+	assert_gt(gen.scenery.size(), 0, "should place at least one sprite")
+	for inst in gen.scenery:
+		assert_eq(inst.cell_offset, Vector2.ZERO,
+			"single-sprite placement should snap to cell centre (cell_offset == 0)")
+		assert_almost_eq(inst.scale, 1.0, 0.0001,
+			"default scale range (1.0, 1.0) should render every sprite at 1.0")
+
+func test_non_walkable_density_greater_than_one_keeps_cell_blocked_once() -> void:
+	# Non-walkable scenery with density > 1 places N sprites on the
+	# same cell — but the cell must only flip is_blocked ONCE (one
+	# pointer in cell.scenery). Regression guard against any future
+	# refactor that overwrites cell.scenery per sprite and loses the
+	# is_blocked behaviour after the first one.
+	var biome := _make_biome()
+	var spawn := ScenerySpawn.new()
+	spawn.scenery = _make_scenery(false)  # non-walkable trees
+	spawn.room_chance = 1.0
+	spawn.room_coverage_min_percent = 20.0
+	spawn.room_coverage_max_percent = 20.0
+	spawn.density_min = 2
+	spawn.density_max = 2
+	spawn.jitter_radius = 0.25
+	biome.scenery_spawns = [spawn]
+	var gen := _make_generator(biome)
+	# Every placed cell should have its is_blocked flipped, and the
+	# entrance ↔ exit path must still survive.
+	var per_cell: Dictionary = {}
+	for inst in gen.scenery:
+		per_cell[inst.cell] = per_cell.get(inst.cell, 0) + 1
+	for cell_pos in per_cell.keys():
+		var cell: GridCell = gen.grid[cell_pos.x][cell_pos.y]
+		assert_true(cell.is_blocked,
+			"cell %s should be blocked by non-walkable scenery" % cell_pos)
+		assert_not_null(cell.scenery,
+			"cell %s should have its scenery pointer set" % cell_pos)
+	var reachable: Dictionary = _bfs_reachable_floor(gen, gen.entrance_pos)
+	assert_true(reachable.has(gen.exit_pos),
+		"exit must remain reachable when non-walkable scenery is multi-sprite")
+
 func test_min_distance_same_respected_when_satisfiable() -> void:
 	# Two trees of the same scenery type must stay min_distance_to_same
 	# apart when geometry allows it. Run with a low coverage and a
