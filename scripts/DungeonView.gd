@@ -73,6 +73,14 @@ var _decorations_root: Node3D
 # biomes — the build step short-circuits when biome.outdoor_mode is
 # false or generator.fillers is empty.
 var _fillers_root: Node3D
+# Walkable-area scenery (trees, flowers, mushrooms, rocks). Parented
+# under its own root so a level rebuild can free the whole subtree in
+# one go without touching the other rendered classes. Each sprite is
+# also tracked in `_scenery_sprites` (Vector2i -> Sprite3D) so
+# `_refresh_scenery_positions` can cheaply re-apply the lean offset on
+# player turns — same pattern as `_object_sprites` for chests.
+var _scenery_root: Node3D
+var _scenery_sprites: Dictionary = {}
 # Original WorldEnvironment background settings, captured the first
 # time `_apply_biome_environment` runs. Used to RESTORE the indoor
 # defaults when switching from an outdoor biome back to an indoor one
@@ -199,6 +207,8 @@ func setup(gen: LevelGenerator) -> void:
 	_ensure_fillers_root()
 	_build_outdoor_floors()
 	_build_fillers()
+	_ensure_scenery_root()
+	_build_scenery()
 	_place_camera_at_entrance()
 	_apply_biome_environment()
 	_update_viewport_size()
@@ -238,6 +248,13 @@ func _ensure_fillers_root() -> void:
 	_fillers_root = Node3D.new()
 	_fillers_root.name = "FillersRoot"
 	sub_viewport.add_child(_fillers_root)
+
+func _ensure_scenery_root() -> void:
+	if _scenery_root != null and is_instance_valid(_scenery_root):
+		return
+	_scenery_root = Node3D.new()
+	_scenery_root.name = "SceneryRoot"
+	sub_viewport.add_child(_scenery_root)
 
 func _ensure_traps_root() -> void:
 	if _traps_root != null and is_instance_valid(_traps_root):
@@ -1392,6 +1409,69 @@ func _build_fillers() -> void:
 		if sprite != null:
 			_fillers_root.add_child(sprite)
 
+# Walkable-area scenery (trees, flowers, mushrooms). Mirrors
+# `_build_objects` for chests but without the Area3D — scenery is
+# never clickable, never interactive. Non-walkable scenery still
+# blocks movement (the player can never step onto a tree cell) — that
+# rule is enforced on the model side via `GridCell.is_blocked`, not
+# here.
+func _build_scenery() -> void:
+	for child in _scenery_root.get_children():
+		child.queue_free()
+	_scenery_sprites.clear()
+	if generator == null:
+		return
+	for inst in generator.scenery:
+		if inst == null or inst.data == null or inst.data.texture == null:
+			continue
+		var data: SceneryData = inst.data
+		var sprite := Sprite3D.new()
+		sprite.texture = data.texture
+		var tex_h: int = max(1, data.texture.get_height())
+		sprite.pixel_size = data.world_height / float(tex_h)
+		sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+		sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+		sprite.position = _scenery_position(inst.cell, data)
+		_scenery_root.add_child(sprite)
+		_scenery_sprites[inst.cell] = sprite
+
+func _scenery_position(grid_pos: Vector2i, data: SceneryData) -> Vector3:
+	# Same lean rule as `_object_position` — shift the sprite toward
+	# whichever cardinal side the player is currently on so the tree
+	# reads as a solid object rather than a distant flat cluster. Walkable
+	# scenery typically leaves `lean_toward_player` at 0 (a flower
+	# centred in its cell is fine).
+	var cx: float = grid_pos.x * CELL_SIZE + CELL_SIZE * 0.5
+	var cz: float = grid_pos.y * CELL_SIZE + CELL_SIZE * 0.5
+	var ox: float = 0.0
+	var oz: float = 0.0
+	if data.lean_toward_player > 0.0:
+		var diff := _current_grid_pos - grid_pos
+		var prefer_x: bool = abs(_current_facing.x) > abs(_current_facing.y)
+		if prefer_x and diff.x != 0:
+			ox = float(signi(diff.x)) * data.lean_toward_player
+		elif (not prefer_x) and diff.y != 0:
+			oz = float(signi(diff.y)) * data.lean_toward_player
+		elif diff.x != 0:
+			ox = float(signi(diff.x)) * data.lean_toward_player
+		elif diff.y != 0:
+			oz = float(signi(diff.y)) * data.lean_toward_player
+	return Vector3(cx + ox, data.world_height * 0.5 + data.y_offset, cz + oz)
+
+func _refresh_scenery_positions() -> void:
+	# Cheap per-turn update — only sprites whose data has a non-zero
+	# lean actually need new positions, but iterating ~30-50 scenery
+	# sprites is trivial so we just touch them all.
+	for grid_pos in _scenery_sprites.keys():
+		var sprite: Sprite3D = _scenery_sprites[grid_pos]
+		if not is_instance_valid(sprite):
+			continue
+		var cell: GridCell = generator.get_cell(grid_pos.x, grid_pos.y)
+		if cell == null or cell.scenery == null or cell.scenery.data == null:
+			continue
+		sprite.position = _scenery_position(grid_pos, cell.scenery.data)
+
 func _make_filler_sprite(inst: FillerInstance) -> Sprite3D:
 	var data: FillerData = inst.data
 	var tex_h: int = data.texture.get_height()
@@ -2073,6 +2153,7 @@ func set_initial_facing(facing: Vector2i) -> void:
 	camera.rotation_degrees.y = _current_angle
 	camera.position           = _grid_to_world(_current_grid_pos.x, _current_grid_pos.y)
 	_refresh_object_positions()
+	_refresh_scenery_positions()
 	_refresh_item_positions()
 	_refresh_trap_spike_positions()
 	_refresh_teleporter_positions()
@@ -2126,6 +2207,7 @@ func rotate_camera_to(turn_right: bool, facing: Vector2i = Vector2i.ZERO) -> voi
 		if root != null and is_instance_valid(root):
 			tween.tween_property(root, "rotation_degrees:y", _current_angle, 0.12)
 	_refresh_object_positions()
+	_refresh_scenery_positions()
 	_refresh_item_positions(true)
 	_refresh_trap_spike_positions()
 	_refresh_teleporter_positions()

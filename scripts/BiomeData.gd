@@ -251,6 +251,18 @@ extends Resource
 ## actually hides a chest or floor item. Banned in outdoor biomes.
 @export var secret_wall_spawns: Array[SecretWallSpawn] = []
 
+## Walkable-area scenery — trees, flowers, mushrooms, rocks placed on
+## FLOOR cells INSIDE the dungeon (unlike `filler_spawns`, which only
+## fires on WALL cells in outdoor biomes). Each entry holds one
+## `SceneryData` and its own per-dead-end / per-corridor-segment /
+## per-room chance + coverage knobs plus a `min_distance_to_same`
+## spacing rule. Walkable scenery (flowers) lets the player step
+## through; non-walkable scenery (trees) blocks the cell like a
+## chest, with BFS reachability enforced so the level stays solvable.
+## Placed LAST so every other system's cells are known and excluded
+## (traps, chests, levers, items, entrance/exit, etc.).
+@export var scenery_spawns: Array[ScenerySpawn] = []
+
 ## Teleporter config for this biome (SINGULAR — not an array — one
 ## teleporter style per biome). `island_count_max <= 1` = Phase A
 ## "shortcut" mode that places `count_min..count_max` random warp
