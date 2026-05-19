@@ -73,6 +73,17 @@ var _decorations_root: Node3D
 # biomes — the build step short-circuits when biome.outdoor_mode is
 # false or generator.fillers is empty.
 var _fillers_root: Node3D
+# Walkable-area scenery (trees, flowers, mushrooms, rocks). Parented
+# under its own root so a level rebuild can free the whole subtree in
+# one go without touching the other rendered classes. Each sprite is
+# tracked in `_scenery_sprites` (SceneryInstance -> Sprite3D) so
+# `_refresh_scenery_positions` can cheaply re-apply the lean offset on
+# player turns — same pattern as `_object_sprites` for chests. Keyed by
+# instance (not cell) because a cell with `density > 1` produces N
+# Sprite3Ds that all share the same cell coord; the per-instance
+# lookup is the only way to refresh them independently.
+var _scenery_root: Node3D
+var _scenery_sprites: Dictionary = {}
 # Original WorldEnvironment background settings, captured the first
 # time `_apply_biome_environment` runs. Used to RESTORE the indoor
 # defaults when switching from an outdoor biome back to an indoor one
@@ -199,6 +210,8 @@ func setup(gen: LevelGenerator) -> void:
 	_ensure_fillers_root()
 	_build_outdoor_floors()
 	_build_fillers()
+	_ensure_scenery_root()
+	_build_scenery()
 	_place_camera_at_entrance()
 	_apply_biome_environment()
 	_update_viewport_size()
@@ -238,6 +251,13 @@ func _ensure_fillers_root() -> void:
 	_fillers_root = Node3D.new()
 	_fillers_root.name = "FillersRoot"
 	sub_viewport.add_child(_fillers_root)
+
+func _ensure_scenery_root() -> void:
+	if _scenery_root != null and is_instance_valid(_scenery_root):
+		return
+	_scenery_root = Node3D.new()
+	_scenery_root.name = "SceneryRoot"
+	sub_viewport.add_child(_scenery_root)
 
 func _ensure_traps_root() -> void:
 	if _traps_root != null and is_instance_valid(_traps_root):
@@ -1392,6 +1412,82 @@ func _build_fillers() -> void:
 		if sprite != null:
 			_fillers_root.add_child(sprite)
 
+# Walkable-area scenery (trees, flowers, mushrooms). Mirrors
+# `_build_objects` for chests but without the Area3D — scenery is
+# never clickable, never interactive. Non-walkable scenery still
+# blocks movement (the player can never step onto a tree cell) — that
+# rule is enforced on the model side via `GridCell.is_blocked`, not
+# here. Each `SceneryInstance` produces ONE Sprite3D; cells with
+# density > 1 produce N instances + N sprites, each with its own
+# sub-cell jitter offset and per-sprite scale.
+func _build_scenery() -> void:
+	for child in _scenery_root.get_children():
+		child.queue_free()
+	_scenery_sprites.clear()
+	if generator == null:
+		return
+	for inst in generator.scenery:
+		if inst == null or inst.data == null or inst.data.texture == null:
+			continue
+		var data: SceneryData = inst.data
+		var sprite := Sprite3D.new()
+		sprite.texture = data.texture
+		var tex_h: int = max(1, data.texture.get_height())
+		# pixel_size is derived from the SCALED world height so per-
+		# sprite scale variance (subtle "this tree is a bit smaller")
+		# changes the on-screen size without re-importing the texture.
+		var effective_height: float = data.world_height * inst.scale
+		sprite.pixel_size = effective_height / float(tex_h)
+		sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+		sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+		sprite.position = _scenery_position(inst)
+		_scenery_root.add_child(sprite)
+		_scenery_sprites[inst] = sprite
+
+func _scenery_position(inst: SceneryInstance) -> Vector3:
+	# Cell-centred position + per-sprite sub-cell jitter + optional
+	# player-facing lean (same rule as `_object_position` for chests —
+	# shift the sprite toward whichever cardinal side the player is
+	# currently on so the tree reads as a solid object rather than a
+	# flat cluster). Walkable scenery typically leaves
+	# `lean_toward_player` at 0 (a flower centred in its cell is fine).
+	# The sub-cell jitter is applied ON TOP of the lean so a cluster of
+	# trees in one cell all lean together but stay scattered.
+	var data: SceneryData = inst.data
+	var grid_pos: Vector2i = inst.cell
+	var cx: float = grid_pos.x * CELL_SIZE + CELL_SIZE * 0.5
+	var cz: float = grid_pos.y * CELL_SIZE + CELL_SIZE * 0.5
+	var ox: float = 0.0
+	var oz: float = 0.0
+	if data.lean_toward_player > 0.0:
+		var diff := _current_grid_pos - grid_pos
+		var prefer_x: bool = abs(_current_facing.x) > abs(_current_facing.y)
+		if prefer_x and diff.x != 0:
+			ox = float(signi(diff.x)) * data.lean_toward_player
+		elif (not prefer_x) and diff.y != 0:
+			oz = float(signi(diff.y)) * data.lean_toward_player
+		elif diff.x != 0:
+			ox = float(signi(diff.x)) * data.lean_toward_player
+		elif diff.y != 0:
+			oz = float(signi(diff.y)) * data.lean_toward_player
+	# Sub-cell jitter (fractions of CELL_SIZE) — applied AFTER the
+	# lean so a cluster scatters around the leaned anchor.
+	var jx: float = inst.cell_offset.x * CELL_SIZE
+	var jz: float = inst.cell_offset.y * CELL_SIZE
+	var effective_height: float = data.world_height * inst.scale
+	return Vector3(cx + ox + jx, effective_height * 0.5 + data.y_offset, cz + oz + jz)
+
+func _refresh_scenery_positions() -> void:
+	# Cheap per-turn update — only sprites whose data has a non-zero
+	# lean actually need new positions, but iterating the dict is
+	# trivial so we just touch them all.
+	for inst in _scenery_sprites.keys():
+		var sprite: Sprite3D = _scenery_sprites[inst]
+		if not is_instance_valid(sprite) or inst == null or inst.data == null:
+			continue
+		sprite.position = _scenery_position(inst)
+
 func _make_filler_sprite(inst: FillerInstance) -> Sprite3D:
 	var data: FillerData = inst.data
 	var tex_h: int = data.texture.get_height()
@@ -1914,8 +2010,13 @@ func _item_world_position(grid_pos: Vector2i, stack_index: int, inst: ItemInstan
 # A previous `_item_tween` is killed so consecutive moves / turns don't
 # fight each other for the sprite's position property.
 func _refresh_item_positions(animated: bool = false) -> void:
-	if _item_tween != null and _item_tween.is_valid():
-		_item_tween.kill()
+	# A natural-end tween becomes invalid but stays non-null, so the
+	# lazy-create check (`if _item_tween == null`) below would skip
+	# creation and call tween_property on a dead tween — a back-to-back
+	# spinner rotation reliably hits this. Always drop the reference.
+	if _item_tween != null:
+		if _item_tween.is_valid():
+			_item_tween.kill()
 		_item_tween = null
 	# Tween is created lazily on the first sprite that actually needs to
 	# move. Creating it up-front would emit a "started with no Tweeners"
@@ -2073,6 +2174,7 @@ func set_initial_facing(facing: Vector2i) -> void:
 	camera.rotation_degrees.y = _current_angle
 	camera.position           = _grid_to_world(_current_grid_pos.x, _current_grid_pos.y)
 	_refresh_object_positions()
+	_refresh_scenery_positions()
 	_refresh_item_positions()
 	_refresh_trap_spike_positions()
 	_refresh_teleporter_positions()
@@ -2126,6 +2228,7 @@ func rotate_camera_to(turn_right: bool, facing: Vector2i = Vector2i.ZERO) -> voi
 		if root != null and is_instance_valid(root):
 			tween.tween_property(root, "rotation_degrees:y", _current_angle, 0.12)
 	_refresh_object_positions()
+	_refresh_scenery_positions()
 	_refresh_item_positions(true)
 	_refresh_trap_spike_positions()
 	_refresh_teleporter_positions()

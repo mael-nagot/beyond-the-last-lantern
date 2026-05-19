@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="SceneryData" format=3 uid="uid://mct8aw7ia6mb"]
+
+[ext_resource type="Script" uid="uid://dkmjh0glt8swg" path="res://scripts/SceneryData.gd" id="1_a6mse"]
+[ext_resource type="Texture2D" uid="uid://ckbpb07xppw3r" path="res://assets/textures/objects/scenery/forest_tree_big.png" id="2_ap0p1"]
+
+[resource]
+script = ExtResource("1_a6mse")
+name_key = "scenery.forest_tree.name"
+walkable = false
+texture = ExtResource("2_ap0p1")
+world_height = 4.0
+lean_toward_player = 1.2
+metadata/_custom_type_script = "uid://dkmjh0glt8swg"

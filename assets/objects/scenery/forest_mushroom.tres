@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="SceneryData" format=3 uid="uid://bjbxuww6s26ij"]
+
+[ext_resource type="Script" uid="uid://dkmjh0glt8swg" path="res://scripts/SceneryData.gd" id="1_onf75"]
+[ext_resource type="Texture2D" uid="uid://cxaefxjqgj21m" path="res://assets/textures/objects/scenery/forest_mushroom.png" id="2_onf75"]
+
+[resource]
+script = ExtResource("1_onf75")
+name_key = "scenery.forest_mushroom.name"
+texture = ExtResource("2_onf75")
+lean_toward_player = 0.5
+metadata/_custom_type_script = "uid://dkmjh0glt8swg"

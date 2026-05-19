@@ -227,6 +227,16 @@ func _on_map_draw() -> void:
 			var cell = generator.get_cell(x, y)
 			if cell == null or cell.cell_type == GridCell.CellType.WALL:
 				continue
+			# Non-walkable scenery (a tree) makes the cell physically
+			# impassable even though it's a FLOOR cell. Treat it like a
+			# wall on the map: skip the floor rect (the parchment
+			# background shows through, matching the visual the player
+			# sees for real walls) and skip every per-cell marker —
+			# nothing else can occupy a scenery cell anyway. Wall lines
+			# between this cell and its walkable neighbours come from
+			# `_has_wall` returning true for scenery-blocked cells.
+			if cell.scenery != null and cell.scenery.blocks_movement():
+				continue
 
 			var rect_pos  = offset + Vector2(x * cell_size, y * cell_size)
 			var rect_size = Vector2(cell_size, cell_size)
@@ -609,4 +619,11 @@ func _has_wall(x: int, y: int) -> bool:
 	var cell = generator.get_cell(x, y)
 	if cell == null:
 		return true
-	return cell.cell_type == GridCell.CellType.WALL
+	if cell.cell_type == GridCell.CellType.WALL:
+		return true
+	# Non-walkable scenery (a tree) is rendered as a wall on the map
+	# — neighbouring floor cells should draw a wall line on their
+	# shared edge so the player can read where they can't walk.
+	if cell.scenery != null and cell.scenery.blocks_movement():
+		return true
+	return false

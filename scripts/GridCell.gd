@@ -47,18 +47,30 @@ var spinner: SpinnerInstance = null
 # the destination.
 var teleporter: TeleporterInstance = null
 
+# Scenery placed on this cell (null = none). Fifth parallel slot —
+# trees, flowers, mushrooms, rocks placed by the scenery pass which
+# runs LAST in level generation. Walkable scenery (flowers) doesn't
+# block movement; non-walkable scenery (trees) does — see
+# `is_blocked` below. Mutual exclusion against every other special-
+# content slot is enforced by the placer, so a scenery cell never
+# also holds a chest / lever / trap / spinner / teleporter / items.
+var scenery: SceneryInstance = null
+
 # Items dropped on this cell (Array[ItemInstance]). Multiple items pile up.
 var items: Array = []
 
 # Is anything blocking movement through this cell? Walls always block.
 # A cell with an object that has `blocks_movement = true` (chests, doors)
-# also blocks the player. The object's blocked state takes precedence
-# even if it sits on a FLOOR cell. Traps NEVER block — they live in
-# their own slot and exist to be walked onto.
+# also blocks the player. A cell with non-walkable scenery (a tree)
+# blocks too — same per-cell-mutex semantics, so the player can never
+# step on a tree. Traps / spinners / teleporters / walkable scenery
+# NEVER block.
 var is_blocked: bool:
 	get:
 		if cell_type == CellType.WALL:
 			return true
 		if object != null and object.data != null and object.data.blocks_movement:
+			return true
+		if scenery != null and scenery.blocks_movement():
 			return true
 		return false

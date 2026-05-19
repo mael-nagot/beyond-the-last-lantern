@@ -25,6 +25,10 @@ var projectile_trap_spawns_pool: Array[ProjectileTrapSpawn] = []
 var spinner_spawns_pool: Array[SpinnerSpawn] = []
 var wall_decorations_pool: Array[WallDecorationSpawn] = []
 var secret_wall_spawns_pool: Array[SecretWallSpawn] = []
+# Walkable-area scenery — trees / flowers / mushrooms placed on FLOOR
+# cells INSIDE the dungeon by `_place_scenery()` (which runs LAST so
+# every other system's cells are already known and excluded).
+var scenery_spawns_pool: Array[ScenerySpawn] = []
 # Outdoor-mode filler sprites — trees, rocks, bushes spawned on
 # WALL cells + border ring in `outdoor_mode` biomes (BiomeData). The
 # placement pass `_place_fillers()` is a no-op for non-outdoor biomes
@@ -128,6 +132,12 @@ var _spinner_cluster_cells: Dictionary = {}
 # Phase C will replace this with island-topology partitioning.
 var teleporters: Array[TeleporterInstance] = []
 
+# Walkable-area scenery placements — trees, flowers, mushrooms, rocks
+# placed on FLOOR cells by `_place_scenery()`. Mirrors the per-cell
+# `GridCell.scenery` slot so the renderer can iterate without a per-
+# frame grid scan.
+var scenery: Array[SceneryInstance] = []
+
 func configure(biome: BiomeData) -> void:
 	if biome == null:
 		push_error("LevelGenerator: biome is null, using defaults")
@@ -157,6 +167,7 @@ func configure(biome: BiomeData) -> void:
 	wall_decorations_pool = biome.wall_decorations
 	secret_wall_spawns_pool = biome.secret_wall_spawns
 	teleporter_spawn_config = biome.teleporter_spawn
+	scenery_spawns_pool = biome.scenery_spawns
 	filler_spawns_pool = biome.filler_spawns
 	outdoor_mode = biome.outdoor_mode
 
@@ -177,6 +188,7 @@ func generate() -> void:
 	secret_walls.clear()
 	_secret_walls_by_edge.clear()
 	teleporters.clear()
+	scenery.clear()
 	if room_count > 0:
 		_place_rooms()
 	_grow_maze()
@@ -207,6 +219,7 @@ func generate() -> void:
 	_place_secret_walls()
 	_place_teleporters()
 	_place_wall_decorations()
+	_place_scenery()
 	_place_fillers()
 
 # -------------------------------------------------------
@@ -4446,3 +4459,276 @@ func _is_in_grid_floor(pos: Vector2i) -> bool:
 	if cell == null:
 		return false
 	return cell.cell_type != GridCell.CellType.WALL
+
+# -------------------------------------------------------
+# Scenery (walkable-area decoration — trees, flowers, mushrooms)
+#
+# Scenery lives on `GridCell.scenery` and is placed LAST in
+# `generate()` so every other system's cells are known and excluded.
+# Three independent passes per spawn (additive — set chances to 0 to
+# disable a pass):
+#   1. Dead-end pass — per dead-end cell, roll `dead_end_chance`; on
+#      hit, place one sprite. Single-tile, no coverage knob.
+#   2. Corridor pass — per corridor segment (same maximal-component
+#      definition the trap / spinner clusters use), roll
+#      `corridor_segment_chance`; on hit, fill
+#      [corridor_coverage_min, corridor_coverage_max]% of the
+#      segment's eligible cells.
+#   3. Room pass — per room rect, roll `room_chance`; on hit, fill
+#      [room_coverage_min, room_coverage_max]% of the room's eligible
+#      cells.
+#
+# Exclusion rules:
+#   - Walkable scenery (flowers) excludes the cell from holding any
+#     object (chest / lever / door), trap, spinner, teleporter,
+#     projectile-trap pressure plate, or another scenery sprite.
+#     Entrance, exit, and floor items are ALLOWED — walking through
+#     a flower never hides loot. Plates are excluded because (a) a
+#     flower sprite would visually fight the plate decal and (b)
+#     items on a plate disable the trap (Game._check_pressure_plate_trigger),
+#     so a flower permanently sitting on the plate would muddy "is
+#     this trap armed?" feedback.
+#   - Non-walkable scenery (trees) excludes everything walkable
+#     scenery excludes PLUS entrance, exit, floor-item cells, AND
+#     every cell on any placed launcher's projectile path. A tree on
+#     the path blocks the corridor / room cells the projectile flies
+#     through — the trap loses its threat zone and (worse) the player
+#     loses an escape route. Plate cells are a subset of these path
+#     cells for plated launchers, so the projectile-path check
+#     subsumes the plate check for non-walkable scenery. Also runs a
+#     BFS reachability check: committing the placement must not
+#     strand any previously-reachable cell.
+#
+# Spacing: `min_distance_to_same` is enforced ACROSS ALL passes for
+# placements of the same `SceneryData`. Cross-type doesn't constrain
+# (a tree and a flower can sit on neighbouring cells).
+# -------------------------------------------------------
+func _place_scenery() -> void:
+	if scenery_spawns_pool.is_empty():
+		return
+	var segments: Array = _detect_corridor_segments()
+	# Projectile-trap plate cells are excluded for ANY scenery flavour.
+	# Gathered once up-front via the same helper the spinner placer
+	# uses; passed through each pass so the eligibility check can do
+	# O(1) lookups instead of re-scanning `projectile_traps` per cell.
+	# Non-walkable scenery also reads `_projectile_path_cells` directly
+	# (member dict, already populated by `_place_projectile_traps`) so
+	# a tree never lands on a cell the projectile flies through.
+	var plate_cells: Dictionary = _gather_plate_cells()
+	for spawn in scenery_spawns_pool:
+		if spawn == null or spawn.scenery == null:
+			continue
+		# Each spawn gets its own snapshot of reachable cells. For
+		# walkable scenery the snapshot is unused; for non-walkable it
+		# stays current across the spawn's own placements (a new tree
+		# is validated against the post-state of the previous trees in
+		# the same spawn).
+		if spawn.uses_dead_ends():
+			_place_scenery_dead_ends(spawn, plate_cells)
+		if spawn.uses_corridors():
+			_place_scenery_corridors(spawn, segments, plate_cells)
+		if spawn.uses_rooms():
+			_place_scenery_rooms(spawn, plate_cells)
+
+func _place_scenery_dead_ends(spawn: ScenerySpawn, plate_cells: Dictionary) -> void:
+	# Iterate every dead-end cell once. A dead-end is a single cell —
+	# there's no coverage knob; either the cell rolls a sprite or it
+	# doesn't. Iteration order is stable (x outer, y inner) so the
+	# seeded RNG produces deterministic placements.
+	for x in range(1, grid_width - 1):
+		for y in range(1, grid_height - 1):
+			var pos := Vector2i(x, y)
+			if not _is_dead_end(pos):
+				continue
+			if not _cell_eligible_for_scenery(pos, spawn, plate_cells):
+				continue
+			if randf() >= spawn.dead_end_chance:
+				continue
+			_try_commit_scenery_at(spawn, pos)
+
+func _place_scenery_corridors(spawn: ScenerySpawn, segments: Array, plate_cells: Dictionary) -> void:
+	for segment in segments:
+		if randf() >= spawn.corridor_segment_chance:
+			continue
+		var eligible: Array = _eligible_scenery_cells_in(segment, spawn, plate_cells)
+		if eligible.is_empty():
+			continue
+		var coverage_min: float = clamp(spawn.corridor_coverage_min_percent, 0.0, 100.0)
+		var coverage_max: float = clamp(spawn.corridor_coverage_max_percent, coverage_min, 100.0)
+		var coverage_pct: float = randf_range(coverage_min, coverage_max) / 100.0
+		var target_count: int = max(1, int(ceil(eligible.size() * coverage_pct)))
+		_place_scenery_in_cells(spawn, eligible, target_count, plate_cells)
+
+func _place_scenery_rooms(spawn: ScenerySpawn, plate_cells: Dictionary) -> void:
+	for room_obj in _room_rects:
+		var room: Rect2i = room_obj as Rect2i
+		if randf() >= spawn.room_chance:
+			continue
+		var room_cells: Array = []
+		for x in range(room.position.x, room.position.x + room.size.x):
+			for y in range(room.position.y, room.position.y + room.size.y):
+				if _in_bounds(x, y):
+					room_cells.append(Vector2i(x, y))
+		var eligible: Array = _eligible_scenery_cells_in(room_cells, spawn, plate_cells)
+		if eligible.is_empty():
+			continue
+		var coverage_min: float = clamp(spawn.room_coverage_min_percent, 0.0, 100.0)
+		var coverage_max: float = clamp(spawn.room_coverage_max_percent, coverage_min, 100.0)
+		var coverage_pct: float = randf_range(coverage_min, coverage_max) / 100.0
+		var target_count: int = max(1, int(ceil(eligible.size() * coverage_pct)))
+		_place_scenery_in_cells(spawn, eligible, target_count, plate_cells)
+
+# Tries to place up to `target_count` scenery sprites from `spawn` on
+# cells drawn from `pool`. Cells are processed in a shuffled order. The
+# `min_distance_to_same` rule is enforced as a preference: if the
+# requested distance can't be satisfied, the placer relaxes by 1 down
+# to 0 and re-tries — same graceful-degrade pattern other systems use
+# so dense rolls still produce SOME scenery rather than a silent zero.
+func _place_scenery_in_cells(spawn: ScenerySpawn, pool: Array, target_count: int, plate_cells: Dictionary) -> void:
+	if pool.is_empty() or target_count <= 0:
+		return
+	var remaining: Array = pool.duplicate()
+	remaining.shuffle()
+	var placed_count: int = 0
+	var distance: int = max(0, spawn.min_distance_to_same)
+	while placed_count < target_count and distance >= 0 and not remaining.is_empty():
+		var made_progress: bool = false
+		var leftover: Array = []
+		for pos in remaining:
+			if placed_count >= target_count:
+				leftover.append(pos)
+				continue
+			# Eligibility can drift between iterations — a tree placed
+			# earlier in this pass may have made a neighbour ineligible
+			# (BFS reachability fails for the next candidate).
+			if not _cell_eligible_for_scenery(pos, spawn, plate_cells):
+				continue
+			if distance > 0 and _too_close_to_same_scenery(pos, spawn.scenery, distance):
+				leftover.append(pos)
+				continue
+			if _try_commit_scenery_at(spawn, pos):
+				placed_count += 1
+				made_progress = true
+			else:
+				# Commit failed for a non-spacing reason (BFS) — drop
+				# this cell from the pool; relaxing distance won't help.
+				continue
+		remaining = leftover
+		if not made_progress:
+			distance -= 1
+
+func _eligible_scenery_cells_in(cells: Array, spawn: ScenerySpawn, plate_cells: Dictionary) -> Array:
+	var result: Array = []
+	for pos in cells:
+		if _cell_eligible_for_scenery(pos, spawn, plate_cells):
+			result.append(pos)
+	return result
+
+# Per-cell exclusion check. Differs by `data.walkable`:
+#   - Walkable scenery (flowers) excludes object / trap / spinner /
+#     teleporter / scenery / projectile-trap plate cells. Entrance,
+#     exit, items are allowed.
+#   - Non-walkable scenery (trees) additionally excludes entrance,
+#     exit, item cells, AND every cell on any placed launcher's
+#     projectile path — keeps trees from breaking the trap's threat
+#     zone or stranding the player behind a tree on the firing line.
+# Both flavours require a FLOOR (or ENTRANCE / EXIT for walkable
+# only) cell type.
+func _cell_eligible_for_scenery(pos: Vector2i, spawn: ScenerySpawn, plate_cells: Dictionary) -> bool:
+	if not _in_bounds(pos.x, pos.y):
+		return false
+	var cell: GridCell = grid[pos.x][pos.y]
+	if cell == null:
+		return false
+	if cell.cell_type == GridCell.CellType.WALL:
+		return false
+	if cell.object != null:
+		return false
+	if cell.trap != null:
+		return false
+	if cell.spinner != null:
+		return false
+	if cell.teleporter != null:
+		return false
+	if cell.scenery != null:
+		return false
+	# Projectile-trap pressure plate — no scenery (walkable OR not)
+	# may sit on the plate decal. See the function header for the
+	# rationale.
+	if plate_cells.has(pos):
+		return false
+	var data: SceneryData = spawn.scenery
+	if data == null:
+		return false
+	if not data.walkable:
+		# Trees / big rocks — exclude entrance, exit, and item cells
+		# so the player never finds an unwalkable wall on the spawn
+		# tile or a tree on top of loot.
+		if pos == entrance_pos or pos == exit_pos:
+			return false
+		if not cell.items.is_empty():
+			return false
+		# Never on a projectile-trap firing line. Path cells include
+		# everything from the cell directly opposite the launcher up
+		# to the cell where the projectile dies — a tree on any of
+		# them blocks the corridor / room the projectile crosses.
+		if _projectile_path_cells.has(pos):
+			return false
+	return true
+
+# Commits a scenery placement at `pos`. Rolls the per-cell density
+# from `spawn.density_min..density_max` and emits that many
+# SceneryInstance entries — all sharing the same `cell` but with
+# per-sprite jitter offset + scale rolled from the spawn. For
+# walkable scenery this always succeeds. For non-walkable scenery
+# we snapshot reachability, install the FIRST sprite (which is what
+# `is_blocked` reads — the rest are pure visual additions on a cell
+# that's already blocked), re-BFS, and roll back if reachability
+# breaks. Returns true iff the placement is kept.
+func _try_commit_scenery_at(spawn: ScenerySpawn, pos: Vector2i) -> bool:
+	var data: SceneryData = spawn.scenery
+	var cell: GridCell = grid[pos.x][pos.y]
+	var density: int = spawn.sample_density(randi())
+	if density <= 0:
+		return false
+	var first := SceneryInstance.create(data, pos, _sample_scenery_offset(spawn), spawn.sample_scale(randf()))
+	if not data.walkable:
+		# Snapshot BEFORE mutating the cell — same pattern chests use
+		# in `_try_place_object`. The BFS only depends on
+		# `cell.is_blocked` which flips when we set cell.scenery, so
+		# checking ONCE per cell is enough — adding more sprites on
+		# the same cell can't change reachability.
+		var before: Dictionary = _bfs_walkable_from(entrance_pos)
+		cell.scenery = first
+		if not _placement_preserves_reachability(pos, before):
+			cell.scenery = null
+			return false
+	else:
+		cell.scenery = first
+	scenery.append(first)
+	for i in range(1, density):
+		var extra := SceneryInstance.create(data, pos, _sample_scenery_offset(spawn), spawn.sample_scale(randf()))
+		scenery.append(extra)
+	return true
+
+# Samples a per-sprite sub-cell offset for the given spawn. Returns
+# Vector2.ZERO when `jitter_radius == 0` so single-sprite spawns
+# preserve the original "snapped to cell centre" behaviour. Otherwise
+# returns a random offset in [-r, +r] on both axes, where r is
+# `spawn.jitter_radius` (fractions of CELL_SIZE).
+func _sample_scenery_offset(spawn: ScenerySpawn) -> Vector2:
+	var r: float = spawn.jitter_radius
+	if r <= 0.0:
+		return Vector2.ZERO
+	return Vector2(randf_range(-r, r), randf_range(-r, r))
+
+func _too_close_to_same_scenery(pos: Vector2i, data: SceneryData, min_distance: int) -> bool:
+	if min_distance <= 0 or data == null:
+		return false
+	for inst in scenery:
+		if inst == null or inst.data != data:
+			continue
+		var d: int = abs(pos.x - inst.cell.x) + abs(pos.y - inst.cell.y)
+		if d < min_distance:
+			return true
+	return false

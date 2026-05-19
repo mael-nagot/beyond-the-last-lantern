@@ -9,6 +9,7 @@ res://assets/
 │   └── sparse_forest.tres     ← Sparse Forest biome (outdoor — fillers + sky)
 ├── filler/                    ← FillerData resource files — see filler/README.md
 │   └── sparse_forest_tree.tres
+├── scenery/                   ← SceneryData resource files (walkable-area trees / flowers / mushrooms placed on FLOOR cells) — see scenery/README.md
 ├── items/                     ← ItemData resource files (.tres) — see items/README.md
 ├── textures/                  ← All texture image files
 │   ├── biomes/
@@ -19,6 +20,7 @@ res://assets/
 │   │   └── sparse_forest/
 │   │       ├── fillers/       ← Tree / rock / bush PNGs (outdoor filler sprites)
 │   │       └── floors/        ← Floor textures (optional — reuses forest's by default)
+│   │   (each biome's scenery PNGs live under .../<biome>/scenery/)
 │   └── items/                 ← Item textures — see textures/items/README.md
 │       ├── icons/             ← Small square icons for the item bar
 │       └── sprites/           ← Larger sprites for floor Sprite3D billboards
