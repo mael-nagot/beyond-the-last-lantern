@@ -4,6 +4,7 @@
 [ext_resource type="Texture2D" uid="uid://cj2q5k8f4f71r" path="res://assets/textures/biomes/forest/ceilings/forest ceiling_01.png" id="2_ha57c"]
 [ext_resource type="Texture2D" uid="uid://0dehivh0qw1r" path="res://assets/textures/biomes/forest/ceilings/forest ceiling_02_sky.png" id="3_lrnxp"]
 [ext_resource type="Script" uid="uid://dwvpkpfjm8dyn" path="res://scripts/LootEntry.gd" id="4_458bs"]
+[ext_resource type="Script" uid="uid://df1t5mocjm74t" path="res://scripts/FillerSpawn.gd" id="4_fq1ml"]
 [ext_resource type="Resource" uid="uid://dltjjt1nys4br" path="res://assets/items/health_potion.tres" id="5_plw3j"]
 [ext_resource type="Texture2D" uid="uid://byxe65cung0w8" path="res://assets/textures/biomes/forest/floors/forest floor_01.png" id="6_lrnxp"]
 [ext_resource type="Script" uid="uid://c716yxx8rccyt" path="res://scripts/LinkedObjectSpawn.gd" id="7_fvx5y"]
@@ -26,7 +27,10 @@
 [ext_resource type="Script" uid="uid://cnxm6kno1kh3w" path="res://scripts/SpinnerSpawn.gd" id="22_28y6b"]
 [ext_resource type="Script" uid="uid://dgfmk8c0mn1uj" path="res://scripts/SecretWallSpawn.gd" id="22_ha57c"]
 [ext_resource type="Resource" uid="uid://bcwekrkc5e52" path="res://assets/decorations/torch01.tres" id="22_obsjo"]
+[ext_resource type="Script" uid="uid://b8v56oo2ujh0q" path="res://scripts/ScenerySpawn.gd" id="22_vgjxi"]
+[ext_resource type="Resource" uid="uid://mct8aw7ia6mb" path="res://assets/objects/scenery/forest_tree.tres" id="23_7jxni"]
 [ext_resource type="Resource" uid="uid://d2xgveel38bwc" path="res://assets/objects/traps/spinner.tres" id="23_213mq"]
+[ext_resource type="Resource" uid="uid://bjbxuww6s26ij" path="res://assets/objects/scenery/forest_mushroom.tres" id="24_vgjxi"]
 [ext_resource type="Script" uid="uid://c141nsmnc7en" path="res://scripts/TeleporterSpawn.gd" id="25_48wqn"]
 [ext_resource type="Resource" uid="uid://dnf4n7i60a5kp" path="res://assets/objects/teleporter/teleporter.tres" id="25_lrnxp"]
 [ext_resource type="Script" uid="uid://bjkjhbhykhrmp" path="res://scripts/BiomeTextureEntry.gd" id="30_tex"]
@@ -107,6 +111,30 @@ corridor_chance = 0.34
 room_chance = 0.379
 room_max_per_room = 2
 metadata/_custom_type_script = "uid://bqw57pqm6wjbx"
+
+[sub_resource type="Resource" id="Resource_manua"]
+script = ExtResource("22_vgjxi")
+scenery = ExtResource("23_7jxni")
+dead_end_chance = 0.207
+room_chance = 1.0
+room_coverage_min_percent = 22.644
+jitter_radius = 0.05
+scale_min = 1.1
+scale_max = 1.2
+metadata/_custom_type_script = "uid://b8v56oo2ujh0q"
+
+[sub_resource type="Resource" id="Resource_7jxni"]
+script = ExtResource("22_vgjxi")
+scenery = ExtResource("24_vgjxi")
+corridor_segment_chance = 0.264
+corridor_coverage_max_percent = 11.609
+room_chance = 0.276
+room_coverage_max_percent = 10.46
+min_distance_to_same = 2
+density_min = 2
+density_max = 5
+jitter_radius = 0.374
+metadata/_custom_type_script = "uid://b8v56oo2ujh0q"
 
 [sub_resource type="Resource" id="Resource_48wqn"]
 script = ExtResource("22_ha57c")
@@ -192,5 +220,6 @@ projectile_trap_spawns = Array[ExtResource("19_1qwx2")]([SubResource("Resource_2
 spinner_spawns = Array[ExtResource("22_28y6b")]([SubResource("Resource_ha57c")])
 wall_decorations = Array[ExtResource("21_evnw4")]([SubResource("Resource_3vyya")])
 secret_wall_spawns = Array[ExtResource("22_ha57c")]([SubResource("Resource_48wqn")])
+scenery_spawns = Array[ExtResource("22_vgjxi")]([SubResource("Resource_manua"), SubResource("Resource_7jxni")])
 teleporter_spawn = SubResource("Resource_lrnxp")
 move_sounds = Array[AudioStream]([ExtResource("7_sstbg"), ExtResource("8_0wobd"), ExtResource("9_nhtug")])

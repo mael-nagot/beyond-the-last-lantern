@@ -40,3 +40,5 @@ object.teleporter.description,A rune circle that warps you to its paired partner
 filler.sparse_forest.tree.name,Sparse Forest Tree
 filler.sparse_forest.tree.description,A tall tree silhouette that frames the walkable area of the sparse forest biome.
 biome.sparse_forest.name,Sparse Forest
+scenery.forest_mushroom.name,Mushroom
+scenery.forest_tree.name,Tree
