@@ -21,6 +21,10 @@ object.lever_forest.description,A wooden lever — pulling it operates a linked 
 object.door_forest_locked.name,Locked Forest Door
 object.door_forest_locked.description,A heavy door bound with iron — it needs a key.
 object.door_forest_locked.locked,It's locked. You need the right key.
+object.door_forest_hidden.name,Hidden Forest Wall
+object.door_forest_hidden.description,A section of wall that hides a passage. A nearby switch controls it.
+object.switch_forest.name,Forest Switch
+object.switch_forest.description,A wall-mounted switch wired to a nearby hidden door.
 item.key_forest.name,Forest Key
 item.key_forest.description,A key found in the forest depths.
 ui.loot.title_chest,Chest

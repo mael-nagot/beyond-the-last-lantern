@@ -66,6 +66,20 @@ var generator: LevelGenerator
 var _items_root: Node3D
 var _objects_root: Node3D
 var _doors_root: Node3D
+# Wall-mounted switches — sibling to wall decorations + projectile-trap
+# launchers in the "objects that live on wall FACES, not cells" group.
+# Each WallSwitchInstance renders as a single Sprite3D anchored to its
+# (view_cell, view_side) wall face with a child Area3D for click
+# pickability. The sprite swap (closed/opened) mirrors any linked
+# door's open state — same as LeverInstance via get_visual_opened().
+# Switches with data.hide_when_active = true and is_on_door() = true
+# vanish (sprite + Area3D) once a linked door opens; off-door switches
+# ignore the flag.
+var _wall_switches_root: Node3D
+# WallSwitchInstance -> {root: Node3D, sprite: Sprite3D}. Keyed by
+# instance so the per-click rebuild can flip a single switch's sprite
+# without walking the scene tree.
+var _wall_switch_visuals: Dictionary = {}
 var _decorations_root: Node3D
 # Outdoor-mode fillers (trees / rocks / bushes). Parented under its
 # own root so a level rebuild can free the whole subtree in one go
@@ -190,6 +204,7 @@ func setup(gen: LevelGenerator) -> void:
 	_ensure_items_root()
 	_ensure_objects_root()
 	_ensure_doors_root()
+	_ensure_wall_switches_root()
 	_ensure_decorations_root()
 	_ensure_traps_root()
 	_ensure_projectile_traps_root()
@@ -200,6 +215,7 @@ func setup(gen: LevelGenerator) -> void:
 	_build_mesh()
 	_build_objects()
 	_build_doors()
+	_build_wall_switches()
 	_build_items()
 	_build_traps()
 	_build_projectile_traps()
@@ -237,6 +253,13 @@ func _ensure_doors_root() -> void:
 	_doors_root = Node3D.new()
 	_doors_root.name = "DoorsRoot"
 	sub_viewport.add_child(_doors_root)
+
+func _ensure_wall_switches_root() -> void:
+	if _wall_switches_root != null and is_instance_valid(_wall_switches_root):
+		return
+	_wall_switches_root = Node3D.new()
+	_wall_switches_root.name = "WallSwitchesRoot"
+	sub_viewport.add_child(_wall_switches_root)
 
 func _ensure_decorations_root() -> void:
 	if _decorations_root != null and is_instance_valid(_decorations_root):
@@ -469,6 +492,16 @@ func rebuild_doors() -> void:
 	if _doors_root == null:
 		return
 	_build_doors()
+	# Wall switches care about their linked doors' state (sprite swap +
+	# hide_when_active). Refreshing both in lockstep keeps the click
+	# feedback consistent — never a "door is now open but the switch
+	# still shows its closed sprite" frame.
+	rebuild_wall_switches()
+
+func rebuild_wall_switches() -> void:
+	if _wall_switches_root == null:
+		return
+	_build_wall_switches()
 
 func _build_objects() -> void:
 	for child in _objects_root.get_children():
@@ -563,7 +596,17 @@ func _build_doors() -> void:
 	for door in generator.doors:
 		if door == null or door.data == null:
 			continue
-		var node := _make_door_node(door)
+		# Hidden doors (`appears_as_wall = true`) render as biome wall
+		# geometry when closed and as NOTHING when open — a true secret
+		# passage. The closed_sprite / opened_sprite fields are
+		# ignored. No Area3D either — the door panel mustn't be
+		# clickable; the wall switch is the only interaction surface
+		# (paired switches always render via WallSwitchesRoot).
+		var node: Node3D
+		if door.data.appears_as_wall:
+			node = _make_hidden_door_node(door)
+		else:
+			node = _make_door_node(door)
 		if node != null:
 			_doors_root.add_child(node)
 
@@ -636,6 +679,212 @@ func _door_y_rotation_deg(door: DoorInstance) -> float:
 	#   axis (0,1) (N-S corridor) → door faces +/- Z → rotate 0°
 	if door.axis() == Vector2i(1, 0):
 		return 90.0
+	return 0.0
+
+# -------------------------------------------------------
+# Hidden doors (`ObjectData.appears_as_wall = true`).
+#
+# When CLOSED: render as two flat wall quads (one drawn from each
+# side of the edge) using a single material picked deterministically
+# from `biome.wall_textures` so both faces match — a mismatched pair
+# would give the secret away. Width = CELL_SIZE (one corridor wide),
+# height = wall_height (matching the surrounding cell walls). The
+# material is the same StandardMaterial3D the regular cell-wall pass
+# uses, drawn from `_material_for_entry`, so the panel is
+# pixel-indistinguishable from any other corridor wall.
+#
+# When OPEN: render NOTHING — the corridor is open. The map renders
+# similarly (a wall LINE on the edge when closed, no edge at all
+# when open).
+#
+# No Area3D — clicking the wall does nothing. The paired wall switch
+# is the only interaction surface.
+# -------------------------------------------------------
+func _make_hidden_door_node(door: DoorInstance) -> Node3D:
+	if door.opened:
+		# True secret passage — completely open when activated. Returning
+		# an empty Node3D rather than null keeps the parent slot present
+		# (defensive against any future caller expecting the index).
+		return Node3D.new()
+	if biome == null or biome.wall_textures.is_empty():
+		return null
+	# Pick a deterministic wall variant per door so the same hidden
+	# door always uses the same texture across mesh rebuilds. Using
+	# door.cell_a as the hash position keeps the result stable.
+	var entry: BiomeTextureEntry = BiomeTextureEntry.pick_for(
+		biome.wall_textures, ObjectSpawn.PLACEMENT_CORRIDOR, door.cell_a, {})
+	if entry == null:
+		# Final fallback — pick the first non-null entry so we never
+		# render a completely blank panel (which would be MORE
+		# noticeable than a slightly-wrong texture).
+		for e in biome.wall_textures:
+			if e != null and e.albedo != null:
+				entry = e
+				break
+		if entry == null:
+			return null
+	var mat: StandardMaterial3D = _material_for_entry(entry)
+	# Anchor at the edge midpoint, oriented like a regular door (the
+	# meshes themselves don't need rotation — we build them so their
+	# normals point outward from each cell). Building two MeshInstance3Ds
+	# instead of one keeps each face's normals correct for back-face
+	# culling and matches the way the cell-wall pass renders edges.
+	var root := Node3D.new()
+	var mid_x: float = (float(door.cell_a.x + door.cell_b.x) + 1.0) * 0.5 * CELL_SIZE
+	var mid_z: float = (float(door.cell_a.y + door.cell_b.y) + 1.0) * 0.5 * CELL_SIZE
+	root.position = Vector3(mid_x, wall_height * 0.5, mid_z)
+	# Y rotation per axis: same convention as `_door_y_rotation_deg` so
+	# the quad's plane sits ON the edge (not parallel to it).
+	#   E-W corridor → axis (1, 0) → quad must run along Z → rotate 90°.
+	#   N-S corridor → axis (0, 1) → quad must run along X → rotate 0°.
+	var y_rot: float = 90.0 if door.axis() == Vector2i(1, 0) else 0.0
+	root.rotation_degrees = Vector3(0.0, y_rot, 0.0)
+	# Two co-planar quads with opposite-facing normals — same material
+	# on both, so the secret stays hidden whichever side the player is
+	# on. `flip` toggles the second quad's normal.
+	root.add_child(_make_hidden_door_quad(mat, false))
+	root.add_child(_make_hidden_door_quad(mat, true))
+	return root
+
+func _make_hidden_door_quad(mat: StandardMaterial3D, flip: bool) -> MeshInstance3D:
+	var mesh_instance := MeshInstance3D.new()
+	var quad := QuadMesh.new()
+	quad.size = Vector2(CELL_SIZE, wall_height)
+	quad.surface_set_material(0, mat)
+	mesh_instance.mesh = quad
+	# QuadMesh defaults to a vertical quad in XY plane facing +Z. To
+	# make a second quad facing -Z, flip 180° around Y. The flipped
+	# quad's normal points the opposite way so back-face culling
+	# correctly shows the right face to each side of the corridor.
+	if flip:
+		mesh_instance.rotation_degrees = Vector3(0.0, 180.0, 0.0)
+	return mesh_instance
+
+# -------------------------------------------------------
+# Wall switches — sibling to wall decorations + projectile-trap
+# launchers. Each switch is anchored to a (view_cell, view_side) wall
+# face: the player stands in view_cell looking at the wall whose
+# normal points -view_side (toward the player). The Sprite3D is
+# rotated so it faces back at the player; an Area3D + box collider
+# makes the click pickable. Sprite swap (closed/opened) mirrors any
+# linked door's `opened` state via `WallSwitchInstance.get_visual_opened()`.
+#
+# `should_hide()` (true iff data.hide_when_active is on AND the
+# switch sits on the door panel AND a linked door is open) skips
+# rendering entirely — the switch + its click area both vanish. Off-
+# door switches IGNORE the flag.
+# -------------------------------------------------------
+func _build_wall_switches() -> void:
+	for child in _wall_switches_root.get_children():
+		child.queue_free()
+	_wall_switch_visuals.clear()
+	if generator == null:
+		return
+	for sw in generator.wall_switches:
+		if sw == null or sw.data == null:
+			continue
+		if sw.should_hide():
+			continue
+		var node := _make_wall_switch_node(sw)
+		if node == null:
+			continue
+		_wall_switches_root.add_child(node)
+		# `_wall_switch_visuals` keeps the root + sprite handle around
+		# in case a future incremental update wants to swap a single
+		# switch's texture without rebuilding the whole subtree. Today
+		# `rebuild_wall_switches` just rebuilds — the dict is here for
+		# future use and consistency with `_object_sprites`.
+		_wall_switch_visuals[sw] = node
+
+func _make_wall_switch_node(sw: WallSwitchInstance) -> Node3D:
+	var data: ObjectData = sw.data
+	var tex: Texture2D = data.opened_sprite if (sw.get_visual_opened() and data.opened_sprite != null) else data.closed_sprite
+	if tex == null:
+		return null
+	var root := Node3D.new()
+	root.position = _wall_switch_position(sw)
+	root.rotation_degrees = Vector3(0.0, _wall_switch_y_rotation_deg(sw.view_side), 0.0)
+	var sprite := Sprite3D.new()
+	sprite.texture = tex
+	var tex_h: int = max(1, tex.get_height())
+	sprite.pixel_size = data.world_height / float(tex_h)
+	sprite.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+	sprite.position = Vector3.ZERO
+	# Optional horizontal stretch — usually unset for switches (small
+	# props don't need to fill the corridor like doors do).
+	if data.world_width > 0.0:
+		var tex_w: int = max(1, tex.get_width())
+		var natural_world_width: float = float(tex_w) * sprite.pixel_size
+		if natural_world_width > 0.0:
+			sprite.scale = Vector3(data.world_width / natural_world_width, 1.0, 1.0)
+	root.add_child(sprite)
+	# Click pickability. Same Area3D + box collider pattern as the
+	# door. Always created (the switch is always interactable when
+	# rendered — `should_hide` already filtered the hidden case).
+	var area := Area3D.new()
+	area.input_ray_pickable = true
+	area.set_meta("object_instance", sw)
+	# Stable single-cell sentinel for handlers that expect grid_pos —
+	# the switch's view_cell.
+	area.set_meta("grid_pos", sw.view_cell)
+	var col := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	# Box matches the sprite's logical bounds. The thin depth (0.6)
+	# matches the door's collider so a click through the sprite plane
+	# still registers.
+	var box_w: float = data.world_width if data.world_width > 0.0 else data.world_height
+	box.size = Vector3(box_w, data.world_height, 0.6)
+	col.shape = box
+	area.add_child(col)
+	root.add_child(area)
+	return root
+
+# World position of the switch sprite's centre. The wall face midpoint
+# sits half a cell from the view_cell centre in the wall direction;
+# the sprite is then shifted by `along_offset` along the wall tangent
+# (perpendicular to the wall normal in the XZ plane). NORTH/SOUTH
+# walls use +X as their tangent; EAST/WEST walls use +Z. Sign of the
+# offset is rolled at placement, so a fixed tangent direction works.
+# A tiny inward bias (0.02 world units) prevents Z-fighting with the
+# wall texture beneath, mirroring the WallDecoration `depth_offset`
+# default.
+const _WALL_SWITCH_DEPTH_BIAS: float = 0.02
+
+func _wall_switch_position(sw: WallSwitchInstance) -> Vector3:
+	var cx: float = sw.view_cell.x * CELL_SIZE + CELL_SIZE * 0.5
+	var cz: float = sw.view_cell.y * CELL_SIZE + CELL_SIZE * 0.5
+	var wall_dir := WallSwitchInstance.dir_for_side(sw.view_side)
+	# The wall face midpoint is half a cell from the cell centre in
+	# the wall direction. We then back off by the depth bias so the
+	# sprite floats slightly in front of the wall (toward the player).
+	var face_x: float = cx + float(wall_dir.x) * (CELL_SIZE * 0.5 - _WALL_SWITCH_DEPTH_BIAS)
+	var face_z: float = cz + float(wall_dir.y) * (CELL_SIZE * 0.5 - _WALL_SWITCH_DEPTH_BIAS)
+	# Tangent along the wall. NORTH/SOUTH walls run along X; EAST/WEST
+	# along Z.
+	if sw.view_side == WallSwitchInstance.SIDE_NORTH or sw.view_side == WallSwitchInstance.SIDE_SOUTH:
+		face_x += sw.along_offset
+	else:
+		face_z += sw.along_offset
+	var y: float = sw.data.world_height * 0.5 + sw.data.y_offset
+	return Vector3(face_x, y, face_z)
+
+# Rotation around Y so the sprite (which defaults to facing local -Z =
+# world north) faces back at the player who stands in view_cell. With
+# the wall on the cell's NORTH side, the player faces north when
+# looking at the switch, so the switch must face south (+Z) — rotate
+# 180°. The other three sides mirror this.
+func _wall_switch_y_rotation_deg(view_side: int) -> float:
+	match view_side:
+		WallSwitchInstance.SIDE_NORTH:
+			return 180.0
+		WallSwitchInstance.SIDE_SOUTH:
+			return 0.0
+		WallSwitchInstance.SIDE_EAST:
+			return -90.0
+		WallSwitchInstance.SIDE_WEST:
+			return 90.0
 	return 0.0
 
 # -------------------------------------------------------

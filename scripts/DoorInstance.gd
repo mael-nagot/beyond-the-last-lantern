@@ -9,6 +9,14 @@ var cell_b: Vector2i
 var linked_levers: Array = []  # Array[LeverInstance]
 var lever_logic: int = LeverLogic.AND
 
+# Wall-mounted switches that control this door (Phase 8 — wall switch
+# system). Populated by LevelGenerator for `WallSwitchedDoorSpawn`
+# clusters; empty for every other door variant. The back-link lives
+# here purely so Game.gd can refresh the switch's visual ("open" /
+# "closed" sprite swap) after the door toggles — same role
+# `linked_levers` plays for lever-pairs.
+var linked_wall_switches: Array = []  # Array[WallSwitchInstance]
+
 var lock_id: String = ""
 var unlocked: bool = false
 

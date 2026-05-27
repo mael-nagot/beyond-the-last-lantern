@@ -31,6 +31,32 @@ enum Category {
 ## open, decorative props always block. False = walkable through
 ## (most levers, campfires, decals).
 @export var blocks_movement: bool = true
+## DOOR ONLY. When true, the door is rendered as a regular wall (using
+## the biome's wall texture) while closed and as a complete void while
+## open — a true secret passage. The closed_sprite / opened_sprite
+## fields are ignored for the dungeon render path; the renderer
+## samples the biome's wall_textures pool instead so the panel is
+## pixel-indistinguishable from any other corridor wall. On the map
+## the door draws as a wall line when closed and as nothing at all
+## when open. Click-to-interact on the panel itself is disabled —
+## only a paired WallSwitchInstance can toggle the door. Decorative
+## doors and key/lever-locked doors leave this false. Reusable: any
+## future hidden door variant (quest-gated, trade-cost-gated, …)
+## flips this flag the same way.
+@export var appears_as_wall: bool = false
+## WALL-SWITCH ONLY (and only meaningful when the switch is mounted
+## ON the linked door's panel itself — distance 0 placement; the
+## flag is silently ignored for off-door switches because there's no
+## visual problem to fix when a wall-mounted switch activates a real
+## wall's worth of geometry). When true, after a linked door has been
+## opened the switch — sprite, click area, and map dash — vanishes
+## entirely. With no other way to re-close the door, this turns the
+## puzzle into a permanent one-time use. Default false preserves the
+## toggle behaviour (click again to close the door). Switches on
+## off-door walls (distance > 0) ignore this flag — the wall they
+## attach to keeps existing whether the door is open or closed, so
+## there's no need to hide them.
+@export var hide_when_active: bool = false
 
 @export_group("Art")
 ## Sprite shown when `opened = false` (the default state — closed

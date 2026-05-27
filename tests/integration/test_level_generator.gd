@@ -1331,9 +1331,12 @@ func _simulate_chain_reachable_from_entrance(gen: LevelGenerator) -> Dictionary:
 	var open_keys: Dictionary = {}
 	var collected_keys: Dictionary = {}
 	for door in gen.doors:
-		# Decorative (interactable) doors that aren't key-locked are
-		# openable from the start.
-		if door.data != null and door.data.interactable and not door.is_key_locked() and door.linked_levers.is_empty():
+		# Decorative (interactable) doors that aren't key-locked / lever-
+		# locked / wall-switch-controlled are openable from the start.
+		# Mirrors the production `_chain_reachable_from_entrance` exclusion
+		# rule (lines 1707-1714 of LevelGenerator.gd).
+		var has_wall_switch: bool = not door.linked_wall_switches.is_empty()
+		if door.data != null and door.data.interactable and not door.is_key_locked() and door.linked_levers.is_empty() and not has_wall_switch:
 			open_keys[DoorInstance.edge_key(door.cell_a, door.cell_b)] = true
 	var reachable: Dictionary = {}
 	while true:
@@ -1411,6 +1414,25 @@ func _simulate_chain_reachable_from_entrance(gen: LevelGenerator) -> Dictionary:
 			var key2 := DoorInstance.edge_key(door.cell_a, door.cell_b)
 			if not open_keys.has(key2):
 				open_keys[key2] = true
+				progressed = true
+		# Wall switches: open any switch-controlled door whose linked
+		# switch's view cell is reachable. Mirrors the production rule
+		# (LevelGenerator.gd lines ~1819 onward).
+		for door in gen.doors:
+			if door.linked_wall_switches.is_empty():
+				continue
+			var sw_key := DoorInstance.edge_key(door.cell_a, door.cell_b)
+			if open_keys.has(sw_key):
+				continue
+			var sw_should_open: bool = false
+			for sw in door.linked_wall_switches:
+				if sw == null:
+					continue
+				if reachable.has(sw.view_cell):
+					sw_should_open = true
+					break
+			if sw_should_open:
+				open_keys[sw_key] = true
 				progressed = true
 		if not progressed:
 			return reachable
@@ -4549,3 +4571,182 @@ func test_fillers_front_row_bias_splits_between_opposite_floor_neighbours() -> v
 			checked = true
 	assert_true(checked,
 		"no eligible parallel-walls cell found in test seed (try a different seed if the layout has none)")
+
+# -------------------------------------------------------
+# Wall-switched doors — switch ↔ hidden door pairs (sibling to
+# linked lever-door clusters).
+# -------------------------------------------------------
+
+func _make_switch_data() -> ObjectData:
+	var data := ObjectData.new()
+	data.category = ObjectData.Category.LEVER
+	data.blocks_movement = false
+	data.name_key = "test.switch"
+	return data
+
+func _make_hidden_door_data() -> ObjectData:
+	var data := ObjectData.new()
+	data.category = ObjectData.Category.DOOR
+	data.blocks_movement = true
+	data.appears_as_wall = true
+	data.name_key = "test.hidden_door"
+	return data
+
+func _make_wall_switched_spawn(switch_data: ObjectData, door_data: ObjectData, count_min: int, count_max: int) -> WallSwitchedDoorSpawn:
+	var spawn := WallSwitchedDoorSpawn.new()
+	spawn.switch_object = switch_data
+	spawn.door_object = door_data
+	spawn.count_min = count_min
+	spawn.count_max = count_max
+	return spawn
+
+# Count parity — one switch per door placed (each pair is a 1:1).
+func test_wall_switched_pair_emits_one_switch_and_one_door_each() -> void:
+	var biome := _make_biome()
+	biome.wall_switched_doors = [_make_wall_switched_spawn(_make_switch_data(), _make_hidden_door_data(), 2, 2)]
+	var gen := _make_generator(biome)
+	var switched_doors: Array = []
+	for door in gen.doors:
+		if not door.linked_wall_switches.is_empty():
+			switched_doors.append(door)
+	assert_eq(gen.wall_switches.size(), switched_doors.size(),
+		"wall switches (%d) and switch-linked doors (%d) should match in count" %
+		[gen.wall_switches.size(), switched_doors.size()])
+
+# Back-link: each placed switch's linked door must list the switch.
+func test_each_switch_links_back_to_exactly_one_door() -> void:
+	var biome := _make_biome()
+	biome.wall_switched_doors = [_make_wall_switched_spawn(_make_switch_data(), _make_hidden_door_data(), 2, 2)]
+	var gen := _make_generator(biome)
+	for sw in gen.wall_switches:
+		assert_eq(sw.linked_doors.size(), 1,
+			"switch at %s/%d should have exactly 1 linked door" % [sw.view_cell, sw.view_side])
+		var door: DoorInstance = sw.linked_doors[0]
+		assert_true(door.linked_wall_switches.has(sw),
+			"door at %s—%s missing back-link to its switch" % [door.cell_a, door.cell_b])
+
+# Reachability with the linked door closed — the switch must be
+# reachable from the entrance even when its door blocks the path,
+# otherwise the player can't solve the puzzle.
+func test_each_switch_reachable_with_linked_door_closed() -> void:
+	var biome := _make_biome()
+	biome.wall_switched_doors = [_make_wall_switched_spawn(_make_switch_data(), _make_hidden_door_data(), 2, 2)]
+	var gen := _make_generator(biome)
+	if gen.wall_switches.is_empty():
+		return  # seed couldn't place — fine, other tests cover placement
+	var chain: Dictionary = _simulate_chain_reachable_from_entrance(gen)
+	for sw in gen.wall_switches:
+		assert_true(chain.has(sw.view_cell),
+			"switch view_cell %s is not chain-reachable from entrance" % sw.view_cell)
+
+# Distance 0 → switch sits ON the door panel itself (view_cell is one
+# of the door's endpoints, view_side points across the door's edge).
+func test_distance_zero_switch_lives_on_door_panel() -> void:
+	var spawn := _make_wall_switched_spawn(_make_switch_data(), _make_hidden_door_data(), 2, 2)
+	spawn.min_wall_distance = 0
+	spawn.max_wall_distance = 0
+	var biome := _make_biome()
+	biome.wall_switched_doors = [spawn]
+	var gen := _make_generator(biome)
+	for sw in gen.wall_switches:
+		assert_true(sw.is_on_door(),
+			"switch at %s/%d with max=0 should sit on the door panel" % [sw.view_cell, sw.view_side])
+
+# Distance > 0 → switch is off the door, on a real wall cell within
+# the configured Manhattan range from a door endpoint.
+func test_distance_two_switch_is_off_door_within_range() -> void:
+	var spawn := _make_wall_switched_spawn(_make_switch_data(), _make_hidden_door_data(), 2, 2)
+	spawn.min_wall_distance = 1
+	spawn.max_wall_distance = 2
+	var biome := _make_biome()
+	biome.wall_switched_doors = [spawn]
+	var gen := _make_generator(biome)
+	for sw in gen.wall_switches:
+		assert_false(sw.is_on_door(),
+			"switch at %s/%d with min_wall_distance=1 should be OFF the door panel" % [sw.view_cell, sw.view_side])
+		# Min Manhattan distance from view_cell to either door endpoint
+		# must land in [min_wall_distance, max_wall_distance].
+		var door: DoorInstance = sw.linked_doors[0]
+		var d_a: int = abs(sw.view_cell.x - door.cell_a.x) + abs(sw.view_cell.y - door.cell_a.y)
+		var d_b: int = abs(sw.view_cell.x - door.cell_b.x) + abs(sw.view_cell.y - door.cell_b.y)
+		var d: int = min(d_a, d_b)
+		assert_gte(d, 1, "switch view_cell %s is too close to door %s—%s (got %d)" %
+			[sw.view_cell, door.cell_a, door.cell_b, d])
+		assert_lte(d, 2, "switch view_cell %s is too far from door %s—%s (got %d)" %
+			[sw.view_cell, door.cell_a, door.cell_b, d])
+
+# view_side validity rule: for distance > 0, the side must point at a
+# real WALL cell (the switch is mounted on a wall, not a floor↔floor
+# boundary).
+func test_offdoor_switch_view_side_points_at_real_wall() -> void:
+	var spawn := _make_wall_switched_spawn(_make_switch_data(), _make_hidden_door_data(), 2, 2)
+	spawn.min_wall_distance = 1
+	spawn.max_wall_distance = 3
+	var biome := _make_biome()
+	biome.wall_switched_doors = [spawn]
+	var gen := _make_generator(biome)
+	for sw in gen.wall_switches:
+		if sw.is_on_door():
+			# Shouldn't happen at min_wall_distance=1, but skip if it did.
+			continue
+		var npos: Vector2i = sw.view_cell + WallSwitchInstance.dir_for_side(sw.view_side)
+		assert_true(npos.x >= 0 and npos.x < gen.grid_width and npos.y >= 0 and npos.y < gen.grid_height,
+			"switch points at out-of-bounds cell %s" % npos)
+		var ncell: GridCell = gen.grid[npos.x][npos.y]
+		assert_eq(ncell.cell_type, GridCell.CellType.WALL,
+			"switch at %s/%d points at non-wall cell %s (type=%d)" %
+			[sw.view_cell, sw.view_side, npos, ncell.cell_type])
+
+# along_offset is randomised within [along_offset_min, along_offset_max]
+# with a random sign — so the abs value lands in [min, max].
+func test_along_offset_within_configured_range() -> void:
+	var spawn := _make_wall_switched_spawn(_make_switch_data(), _make_hidden_door_data(), 3, 3)
+	spawn.along_offset_min = 0.5
+	spawn.along_offset_max = 1.5
+	var biome := _make_biome()
+	biome.wall_switched_doors = [spawn]
+	var gen := _make_generator(biome)
+	for sw in gen.wall_switches:
+		var abs_off: float = abs(sw.along_offset)
+		assert_gte(abs_off, 0.5 - 0.001, "abs offset %f below min %f" % [abs_off, 0.5])
+		assert_lte(abs_off, 1.5 + 0.001, "abs offset %f above max %f" % [abs_off, 1.5])
+
+# Hidden-door flag round-trips through placement onto the DoorInstance.
+func test_appears_as_wall_propagates_to_placed_door() -> void:
+	var biome := _make_biome()
+	biome.wall_switched_doors = [_make_wall_switched_spawn(_make_switch_data(), _make_hidden_door_data(), 2, 2)]
+	var gen := _make_generator(biome)
+	for sw in gen.wall_switches:
+		var door: DoorInstance = sw.linked_doors[0]
+		assert_true(door.data.appears_as_wall,
+			"placed door %s—%s did not carry through appears_as_wall=true" % [door.cell_a, door.cell_b])
+
+# Rollback invariant — every placed switch's linked door is still in
+# gen.doors and gen._doors_by_edge. No orphan halves (a half-committed
+# pair would mean the door was placed but the switch couldn't, or
+# vice versa).
+func test_no_orphan_halves_across_seeds() -> void:
+	for s in [12345, 99999, 55555, 42, 31337]:
+		var biome := _make_biome()
+		biome.wall_switched_doors = [_make_wall_switched_spawn(_make_switch_data(), _make_hidden_door_data(), 3, 3)]
+		var gen := _make_generator(biome, s)
+		# Every switch's linked door must be in gen.doors.
+		for sw in gen.wall_switches:
+			assert_true(sw.linked_doors.size() > 0,
+				"orphan switch at seed %d view_cell=%s (no linked door)" % [s, sw.view_cell])
+			var door: DoorInstance = sw.linked_doors[0]
+			assert_true(gen.doors.has(door),
+				"orphan switch at seed %d view_cell=%s links to a door not in gen.doors" %
+				[s, sw.view_cell])
+		# Every switch-linked door must have a switch back-linked to it.
+		for door in gen.doors:
+			if door.linked_wall_switches.is_empty():
+				continue
+			var has_back := false
+			for sw in door.linked_wall_switches:
+				if gen.wall_switches.has(sw):
+					has_back = true
+					break
+			assert_true(has_back,
+				"orphan door at seed %d cells=%s—%s — its switch isn't in gen.wall_switches" %
+				[s, door.cell_a, door.cell_b])

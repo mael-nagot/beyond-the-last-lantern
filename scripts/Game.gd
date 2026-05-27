@@ -161,6 +161,9 @@ func _on_object_clicked(instance: ObjectInstance, _grid_pos: Vector2i) -> void:
 	if instance is LeverInstance:
 		_pull_lever(instance as LeverInstance)
 		return
+	if instance is WallSwitchInstance:
+		_toggle_wall_switch(instance as WallSwitchInstance)
+		return
 	if instance.is_chest():
 		_open_chest(instance)
 
@@ -257,6 +260,39 @@ func _pull_lever(lever: LeverInstance) -> void:
 	if changed_door_data != null:
 		# Brief delay so the door's "thunk" lands AFTER the lever
 		# click instead of stepping on it — reads as cause-and-effect.
+		await get_tree().create_timer(_LEVER_DOOR_SOUND_DELAY).timeout
+		SoundManager.play(changed_door_data.interact_sound)
+
+func _toggle_wall_switch(sw: WallSwitchInstance) -> void:
+	# Wall switches: a click flips every linked door's state (toggle
+	# semantics — unlike a lever which computes the door state from the
+	# union of linked-lever pulled states, a switch click is a direct
+	# flip per door). The switch's own `pulled` field is toggled too so
+	# any future feature that cares about "has the player ever clicked
+	# this switch" can read it; the renderer ignores `pulled` and goes
+	# off `get_visual_opened()` (any linked door open) instead.
+	if not sw.data.interactable:
+		_play_locked_feedback(sw.data)
+		return
+	sw.toggle()
+	var changed_door_data: ObjectData = null
+	for door in sw.linked_doors:
+		if door == null:
+			continue
+		var was_opened: bool = door.opened
+		door.opened = not door.opened
+		if door.opened != was_opened and changed_door_data == null:
+			changed_door_data = door.data
+	SoundManager.play(sw.data.interact_sound)
+	if _dungeon_view != null:
+		# rebuild_doors() also refreshes wall switches (linked_doors'
+		# state drives the switch sprite swap + the hide_when_active
+		# gate). rebuild_objects() covers the rare case where a future
+		# cell-bound object also linked to this door wants its sprite
+		# updated — cheap O(N) over a handful of objects.
+		_dungeon_view.rebuild_doors()
+		_dungeon_view.rebuild_objects()
+	if changed_door_data != null:
 		await get_tree().create_timer(_LEVER_DOOR_SOUND_DELAY).timeout
 		SoundManager.play(changed_door_data.interact_sound)
 

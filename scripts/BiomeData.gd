@@ -204,6 +204,16 @@ extends Resource
 ## clusters; every lever is guaranteed reachable from the entrance
 ## even when its linked door is closed.
 @export var linked_objects: Array[LinkedObjectSpawn] = []
+## Wall switch ↔ door pairs. Placed AFTER linked (lever) objects and
+## BEFORE key doors. Each entry produces count_min..count_max pairs:
+## a door (typically `appears_as_wall = true` for a secret-passage
+## feel, but visible doors work too) wired to a wall-mounted switch
+## that's the only interaction surface — clicking the (hidden) wall
+## does nothing. Same reachability contract as the lever-door pairs:
+## the switch is guaranteed reachable from the entrance even when the
+## linked door is closed, so the player can always solve the puzzle.
+@export var wall_switched_doors: Array[WallSwitchedDoorSpawn] = []
+
 ## Key ↔ locked-door pairs. Placed AFTER linked objects. Each entry
 ## produces count_min..count_max pairs; the key is guaranteed
 ## reachable from the entrance WITHOUT crossing its own door first.

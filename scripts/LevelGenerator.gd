@@ -19,6 +19,7 @@ var floor_items_min: int = 3
 var floor_items_max: int = 8
 var objects_pool: Array[ObjectSpawn] = []
 var linked_objects_pool: Array[LinkedObjectSpawn] = []
+var wall_switched_doors_pool: Array[WallSwitchedDoorSpawn] = []
 var key_door_spawns_pool: Array[KeyDoorSpawn] = []
 var trap_spawns_pool: Array[TrapSpawn] = []
 var projectile_trap_spawns_pool: Array[ProjectileTrapSpawn] = []
@@ -54,6 +55,16 @@ var _room_rects: Array = []
 # map iterate this); _doors_by_edge is just an O(1) lookup index.
 var doors: Array[DoorInstance] = []
 var _doors_by_edge: Dictionary = {}  # edge_key (String) -> DoorInstance
+
+# Wall-mounted switches live on FACES (a cell + cardinal direction
+# pointing into the wall / door panel) — NOT on cells. Authoritative
+# list iterated by DungeonView (renderer) and MapPopup (map drawing).
+# Cross-linked with `DoorInstance.linked_wall_switches` at placement
+# so a door toggle can refresh its switches' visuals and a switch
+# click can toggle its doors. Placement runs after lever-door
+# clusters (so already-placed doors are part of "other objects") and
+# before key-doors / items / secret walls.
+var wall_switches: Array[WallSwitchInstance] = []
 
 # Secret walls also live on EDGES. The list + index mirror doors so
 # the renderer (DungeonView) and the map (MapPopup) can iterate them
@@ -160,6 +171,7 @@ func configure(biome: BiomeData) -> void:
 	floor_items_max = biome.floor_items_max
 	objects_pool = biome.objects
 	linked_objects_pool = biome.linked_objects
+	wall_switched_doors_pool = biome.wall_switched_doors
 	key_door_spawns_pool = biome.key_door_spawns
 	trap_spawns_pool = biome.trap_spawns
 	projectile_trap_spawns_pool = biome.projectile_trap_spawns
@@ -175,6 +187,7 @@ func generate() -> void:
 	_fill_with_walls()
 	doors.clear()
 	_doors_by_edge.clear()
+	wall_switches.clear()
 	wall_decorations.clear()
 	_wall_faces_used.clear()
 	fillers.clear()
@@ -208,6 +221,7 @@ func generate() -> void:
 	_place_objects()
 	_place_doors()
 	_place_linked_objects()
+	_place_wall_switched_doors()
 	_place_key_doors()
 	_place_traps()
 	_validate_chest_lever_timed_adjacency()
@@ -1106,6 +1120,274 @@ func _candidate_edges_for_door_object(door_data: ObjectData, min_distance: int) 
 	return result
 
 # -------------------------------------------------------
+# Wall-switched doors — a switch on a wall face wired to a typically-
+# hidden door. Sibling to LinkedObjectSpawn (lever ↔ door); diverges
+# in placement because the switch lives on a wall FACE, not a floor
+# cell, so the candidate model is different. Reachability contract is
+# the same: the switch must be reachable from the entrance even when
+# the linked door is closed.
+#
+# For each WallSwitchedDoorSpawn:
+#   1. Snapshot the entrance's pre-pair chain reachability.
+#   2. Walk candidate door edges (1-wide corridor, same eligibility
+#      rule decorative + lever doors use).
+#   3. For each tentative door, build switch candidates bucketed by
+#      Manhattan distance in [min_wall_distance, max_wall_distance];
+#      then pick a distance bucket uniformly at random from the
+#      non-empty buckets and a candidate uniformly from that bucket.
+#   4. Validate the chain stays preserved with the switch's view cell
+#      treated as the "lever cell" (so a switch on the only path
+#      between entrance and the rest of the dungeon is rejected,
+#      mirroring _chain_preserved_after_cluster).
+#   5. If `door_must_gate_content` is true, the door must gate
+#      content (same _door_gates_content check the lever/key passes
+#      use).
+#   6. Commit cross-links; on any failure roll back the door + switch
+#      atomically — no orphan halves.
+# -------------------------------------------------------
+
+const _WALL_SWITCH_OUTER_ATTEMPTS := 30
+
+func _place_wall_switched_doors() -> void:
+	if wall_switched_doors_pool.is_empty():
+		return
+	for spawn in wall_switched_doors_pool:
+		if spawn == null:
+			continue
+		if spawn.switch_object == null or spawn.door_object == null:
+			push_warning("LevelGenerator: wall-switched door spawn missing switch or door — skipping")
+			continue
+		var count := randi_range(max(0, spawn.count_min), max(spawn.count_min, spawn.count_max))
+		for _i in range(count):
+			_try_place_wall_switched_pair(spawn)
+
+func _try_place_wall_switched_pair(spawn: WallSwitchedDoorSpawn) -> void:
+	var pre_chain: Dictionary = _chain_reachable_from_entrance()
+	var min_d: int = max(0, spawn.min_wall_distance)
+	var max_d: int = max(min_d, spawn.max_wall_distance)
+	# Walk candidate edges with progressively-relaxing door distance so
+	# a tight `door_min_distance_to_other_object` doesn't lock us out
+	# of placement entirely.
+	var door_min: int = max(0, spawn.door_min_distance_to_other_object)
+	while door_min >= 0:
+		var edges: Array = _candidate_edges_for_door_object(spawn.door_object, door_min)
+		edges.shuffle()
+		for _attempt in range(_WALL_SWITCH_OUTER_ATTEMPTS):
+			if edges.is_empty():
+				break
+			var edge: Array = edges.pop_back()
+			if _doors_by_edge.has(DoorInstance.edge_key(edge[0], edge[1])):
+				continue
+			var door := DoorInstance.create_door(spawn.door_object, edge[0], edge[1])
+			doors.append(door)
+			_doors_by_edge[DoorInstance.edge_key(edge[0], edge[1])] = door
+			# Switch candidates bucketed by Manhattan distance. The
+			# bucket-pick rule (uniform across non-empty buckets) gives
+			# the designer "max = 0 → on-door always; max = 1 → 50/50
+			# on-door vs adjacent wall" without min defaulting to
+			# anything other than 0.
+			var buckets: Dictionary = _build_switch_distance_buckets(door, min_d, max_d)
+			var bucket_keys: Array = buckets.keys()
+			bucket_keys.sort()
+			if bucket_keys.is_empty():
+				_rollback_wall_switched_pair(door, null)
+				continue
+			# Try buckets in random order so the chain-reachability
+			# validation can reject one bucket's switch and we can fall
+			# back to another. Without this, a switch in the only
+			# non-empty bucket that happens to gate the entrance would
+			# kill the pair.
+			bucket_keys.shuffle()
+			var committed_switch: WallSwitchInstance = null
+			for bucket_dist in bucket_keys:
+				var candidates: Array = buckets[bucket_dist]
+				candidates.shuffle()
+				for cand in candidates:
+					var sw := _commit_switch_for_door(spawn, door, cand)
+					if sw == null:
+						continue
+					# Chain-reachability validation. Unlike levers (which
+					# block their cell), the switch's view cell stays
+					# walkable, so the rule is the simpler:
+					#   - every pre-chain cell remains reachable, AND
+					#   - the switch's view cell is reachable (otherwise
+					#     the player can't click the switch and the
+					#     gated door is permanently shut even though
+					#     chain reachability marked it openable).
+					# The chain function already promotes the door to
+					# openable once the switch is reachable, so the
+					# first clause covers content behind the door too.
+					var post_chain: Dictionary = _chain_reachable_from_entrance()
+					if not _wall_switch_chain_ok(pre_chain, post_chain, sw.view_cell):
+						_uncommit_switch(sw)
+						continue
+					if spawn.door_must_gate_content and not _door_gates_content(door):
+						_uncommit_switch(sw)
+						continue
+					committed_switch = sw
+					break
+				if committed_switch != null:
+					break
+			if committed_switch != null:
+				return
+			_rollback_wall_switched_pair(door, null)
+		door_min -= 1
+	push_warning("LevelGenerator: could not place wall-switched door pair (switch='%s', door='%s')" %
+		[_obj_label(spawn.switch_object), _obj_label(spawn.door_object)])
+
+# Returns Dictionary[int -> Array[Dictionary]] keyed by Manhattan
+# distance bucket in [min_d, max_d]. Each entry in the array is a
+# candidate `{view_cell, view_side, along_offset}`. Empty buckets are
+# omitted entirely so the caller's `randi() % buckets.size()` picker
+# never lands on a dead bucket.
+#
+# `view_side` validity rule (Q6-B + on-door): for distance 0, the
+# view_side points across the door's edge from one of its endpoints
+# (two candidates per pair — one from each endpoint). For distance
+# N > 0, view_side points at a real WALL cell on a floor cell within
+# N Manhattan tiles of either door endpoint. Switches that would
+# "float" on an internal floor↔floor boundary are rejected.
+func _build_switch_distance_buckets(door: DoorInstance, min_d: int, max_d: int) -> Dictionary:
+	var buckets: Dictionary = {}
+	for dist in range(min_d, max_d + 1):
+		var cands: Array = _build_switch_candidates_at_distance(door, dist)
+		if not cands.is_empty():
+			buckets[dist] = cands
+	return buckets
+
+func _build_switch_candidates_at_distance(door: DoorInstance, dist: int) -> Array:
+	var result: Array = []
+	if dist == 0:
+		# Two on-door candidates: view from cell_a looking across at
+		# cell_b, and view from cell_b looking across at cell_a.
+		var a: Vector2i = door.cell_a
+		var b: Vector2i = door.cell_b
+		var side_ab: int = _side_for_direction(b - a)
+		var side_ba: int = _side_for_direction(a - b)
+		if side_ab >= 0:
+			result.append({"view_cell": a, "view_side": side_ab})
+		if side_ba >= 0:
+			result.append({"view_cell": b, "view_side": side_ba})
+		return result
+	# dist > 0: any floor cell within `dist` Manhattan tiles of EITHER
+	# door endpoint whose `view_side` faces a real WALL cell. Cells
+	# outside the grid or at distance < dist are skipped.
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var pos := Vector2i(x, y)
+			var cell: GridCell = grid[x][y]
+			if cell == null or cell.cell_type == GridCell.CellType.WALL:
+				continue
+			# Cell must be standable (the player must be able to stand
+			# here to view the switch). Entrance / exit count as floor
+			# for this purpose.
+			if cell.is_blocked:
+				continue
+			# Don't host a switch on a door endpoint cell — the player
+			# would have to share the cell with a door, which already
+			# feels cramped, AND the on-door distance-0 case already
+			# covers "switch right next to door".
+			if _is_any_door_endpoint(pos):
+				continue
+			var nearest_door_dist: int = min(_manhattan(pos, door.cell_a), _manhattan(pos, door.cell_b))
+			if nearest_door_dist != dist:
+				continue
+			for side in range(4):
+				var npos: Vector2i = pos + WallSwitchInstance.dir_for_side(side)
+				if not _in_bounds(npos.x, npos.y):
+					continue
+				var ncell: GridCell = grid[npos.x][npos.y]
+				if ncell == null or ncell.cell_type != GridCell.CellType.WALL:
+					continue
+				# Belt-and-braces: a real wall neighbour must NOT also
+				# be a door endpoint for this door (covered by the
+				# `dist != 0` branch, but explicit here).
+				result.append({"view_cell": pos, "view_side": side})
+	return result
+
+# Returns the WallSwitchInstance.SIDE_* enum value matching the given
+# cardinal direction vector. Returns -1 for non-cardinal / zero
+# vectors so a buggy door axis doesn't silently land on side 0.
+func _side_for_direction(d: Vector2i) -> int:
+	if d == Vector2i(0, -1):
+		return WallSwitchInstance.SIDE_NORTH
+	if d == Vector2i(1, 0):
+		return WallSwitchInstance.SIDE_EAST
+	if d == Vector2i(0, 1):
+		return WallSwitchInstance.SIDE_SOUTH
+	if d == Vector2i(-1, 0):
+		return WallSwitchInstance.SIDE_WEST
+	return -1
+
+# Build + register a WallSwitchInstance for `door` from a candidate
+# dict. Rolls the lateral along_offset (abs magnitude in
+# [along_offset_min, along_offset_max], random sign). Returns the
+# instance; caller is responsible for `_uncommit_switch` on rejection.
+func _commit_switch_for_door(spawn: WallSwitchedDoorSpawn, door: DoorInstance, cand: Dictionary) -> WallSwitchInstance:
+	var sw := WallSwitchInstance.create_switch(spawn.switch_object)
+	sw.view_cell = cand["view_cell"]
+	sw.view_side = cand["view_side"]
+	# Lateral offset: roll abs in [min, max], then random sign. World
+	# units throughout — designers configure via the spawn export.
+	var off_min: float = max(0.0, spawn.along_offset_min)
+	var off_max: float = max(off_min, spawn.along_offset_max)
+	var abs_off: float = off_min
+	if off_max > off_min:
+		abs_off = randf_range(off_min, off_max)
+	if abs_off > 0.0 and randi() % 2 == 0:
+		abs_off = -abs_off
+	sw.along_offset = abs_off
+	sw.linked_doors = [door]
+	door.linked_wall_switches.append(sw)
+	wall_switches.append(sw)
+	return sw
+
+func _uncommit_switch(sw: WallSwitchInstance) -> void:
+	if sw == null:
+		return
+	for door in sw.linked_doors:
+		if door != null:
+			door.linked_wall_switches.erase(sw)
+	wall_switches.erase(sw)
+
+func _rollback_wall_switched_pair(door: DoorInstance, sw: WallSwitchInstance) -> void:
+	_uncommit_switch(sw)
+	if door == null:
+		return
+	# Also drop any switches still bound to the door (defensive — the
+	# happy path uncommits before this fires, but if a future caller
+	# changes the order, we keep the registries consistent).
+	for existing in door.linked_wall_switches.duplicate():
+		_uncommit_switch(existing)
+	doors.erase(door)
+	_doors_by_edge.erase(DoorInstance.edge_key(door.cell_a, door.cell_b))
+
+# True iff every cell reachable BEFORE the wall-switched pair was
+# placed is still reachable AFTER (the new door + switch don't strand
+# any content), AND the switch's view cell is reachable (the player
+# can stand there to click). The chain-reachability function already
+# promotes a wall-switched door to openable once its switch is
+# reachable, so the pre ⊆ post check handles both "the switch is
+# reachable" and "content behind the door stays reachable through the
+# switch's click" without a separate excluded-edges simulation.
+func _wall_switch_chain_ok(before: Dictionary, after: Dictionary, view_cell: Vector2i) -> bool:
+	for cell_pos in before:
+		if not after.has(cell_pos):
+			return false
+	return after.has(view_cell)
+
+# Public API used by DungeonView (renderer) + MapPopup (map drawing)
+# to ask "is this view-cell + view-side hosting a wall switch?" without
+# walking the full list. Returns null when no switch is on this face.
+func get_wall_switch_at(view_cell: Vector2i, view_side: int) -> WallSwitchInstance:
+	for sw in wall_switches:
+		if sw == null:
+			continue
+		if sw.view_cell == view_cell and sw.view_side == view_side:
+			return sw
+	return null
+
+# -------------------------------------------------------
 # Key-locked doors (Phase 8 Task 2c — door + key pairs)
 #
 # For each KeyDoorSpawn we place count pairs. Each pair:
@@ -1444,7 +1726,15 @@ func _chain_reachable_from_entrance(excluded_door_keys: Dictionary = {}, extra_c
 		var k0 := DoorInstance.edge_key(door.cell_a, door.cell_b)
 		if excluded_door_keys.has(k0):
 			continue
-		if door.data != null and door.data.interactable and not door.is_key_locked() and door.linked_levers.is_empty():
+		# Wall-switch-controlled doors join lever-locked + key-locked
+		# doors in being EXCLUDED from the initial open set. The
+		# player only opens them via the linked wall switch, so the
+		# fixed-point loop below will open them once a switch becomes
+		# reachable. Without this exclusion a wall-switched door would
+		# render in chain reachability as a free pass even though the
+		# player hasn't reached its switch yet.
+		var has_wall_switch: bool = not door.linked_wall_switches.is_empty()
+		if door.data != null and door.data.interactable and not door.is_key_locked() and door.linked_levers.is_empty() and not has_wall_switch:
 			open_door_keys[k0] = true
 	# Phase 15 Task 6 — Phase C / chain reachability v3. Build the
 	# teleporter-links dict once at the top so every BFS iteration of
@@ -1519,6 +1809,33 @@ func _chain_reachable_from_entrance(excluded_door_keys: Dictionary = {}, extra_c
 						break
 			if should_open:
 				open_door_keys[key] = true
+				progressed = true
+		# Wall switches: open any switch-locked door whose linked
+		# switch's view cell is reachable. A switch is reachable when
+		# the player can stand on its view_cell (the cell IS reachable
+		# in the current BFS — the switch is just a wall sprite there).
+		# Multi-switch clusters are NOT a thing today (each
+		# WallSwitchedDoorSpawn places exactly one switch per door),
+		# but if a future cluster appears the rule is OR: any reachable
+		# switch opens its linked doors. Mirrors the lever OR-logic
+		# path.
+		for door in doors:
+			if door.linked_wall_switches.is_empty():
+				continue
+			var sw_key := DoorInstance.edge_key(door.cell_a, door.cell_b)
+			if excluded_door_keys.has(sw_key):
+				continue
+			if open_door_keys.has(sw_key):
+				continue
+			var sw_should_open: bool = false
+			for sw in door.linked_wall_switches:
+				if sw == null:
+					continue
+				if reachable.has(sw.view_cell):
+					sw_should_open = true
+					break
+			if sw_should_open:
+				open_door_keys[sw_key] = true
 				progressed = true
 		# Unlock every locked door whose key is collected.
 		for door in doors:

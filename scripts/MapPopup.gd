@@ -322,12 +322,56 @@ func _on_map_draw() -> void:
 	# door currently blocks; outline-only when it's open. Only drawn
 	# if BOTH endpoint cells have been explored, so the slab doesn't
 	# leak fog-of-war info about unvisited corridors.
+	# Hidden doors (`appears_as_wall = true`) skip the slab entirely —
+	# they get a separate pass below that renders them as wall LINES
+	# when closed and as NOTHING when open. A slab on a hidden door
+	# would give the puzzle away on the map.
 	for door in generator.doors:
 		if door == null:
+			continue
+		if door.data != null and door.data.appears_as_wall:
 			continue
 		if not map_data.is_explored(door.cell_a) or not map_data.is_explored(door.cell_b):
 			continue
 		_draw_door_slab(door, offset, cell_size, line_width)
+
+	# Hidden doors (`appears_as_wall = true`) — when closed, render as
+	# a regular wall LINE on the edge between cell_a and cell_b (same
+	# geometry the cell-wall loop would draw if there were a real wall
+	# on this edge). When open, draw nothing at all — the corridor
+	# reads as continuous through the (now-vanished) panel. Only
+	# drawn if BOTH endpoints are explored (the player has to have
+	# seen the corridor before the wall line shows up). The result:
+	# closed hidden door is pixel-indistinguishable from a real wall;
+	# open hidden door reveals the passage on the map after the
+	# switch is clicked.
+	for door in generator.doors:
+		if door == null or door.data == null:
+			continue
+		if not door.data.appears_as_wall:
+			continue
+		if door.opened:
+			continue
+		if not map_data.is_explored(door.cell_a) or not map_data.is_explored(door.cell_b):
+			continue
+		_draw_hidden_door_wall_line(door, offset, cell_size, wall_color, line_width)
+
+	# Wall-mounted switches — small tick mark on the wall they're
+	# mounted on (perpendicular to that wall), centred at the wall
+	# face midpoint shifted by `along_offset` along the wall tangent.
+	# Brown when no linked door is open (closed); blue when any is
+	# open. Only drawn if the view_cell is explored — the switch is
+	# visible from there. Switches whose `should_hide()` is true
+	# (hide_when_active + on-door + door open) are skipped, mirroring
+	# the 3D view's dispplay rule.
+	for sw in generator.wall_switches:
+		if sw == null or sw.data == null:
+			continue
+		if sw.should_hide():
+			continue
+		if not map_data.is_explored(sw.view_cell):
+			continue
+		_draw_wall_switch_dash(sw, offset, cell_size, line_width)
 
 	# Draw secret walls as a faint wall line on the edge between the
 	# two endpoint cells — same geometry as a real wall edge but at
@@ -610,6 +654,91 @@ func _draw_secret_wall_marker(sw: SecretWallInstance, offset: Vector2, cell_size
 		var x0: float = float(sw.cell_a.x) * cell_size + offset.x
 		var x1: float = x0 + cell_size
 		map_draw.draw_line(Vector2(x0, by), Vector2(x1, by), faint, line_width)
+
+# Hidden-door wall line — same geometry the cell-wall loop draws for
+# a real wall on the edge (full alpha, same colour), so the closed
+# panel is pixel-indistinguishable from any other wall on the map.
+# The corresponding "open" branch just doesn't draw anything (caller
+# skips the door entirely when `door.opened == true`), turning the
+# secret passage into a hole on the map.
+func _draw_hidden_door_wall_line(door: DoorInstance, offset: Vector2, cell_size: float, wall_color: Color, line_width: float) -> void:
+	var axis: Vector2i = door.axis()
+	if axis == Vector2i(1, 0):
+		# E-W corridor — boundary is the vertical line at x = cell_b.x,
+		# running for one cell's height starting at cell_a.y.
+		var bx: float = float(door.cell_b.x) * cell_size + offset.x
+		var y0: float = float(door.cell_a.y) * cell_size + offset.y
+		var y1: float = y0 + cell_size
+		map_draw.draw_line(Vector2(bx, y0), Vector2(bx, y1), wall_color, line_width)
+	else:
+		# N-S corridor — boundary is the horizontal line at y = cell_b.y.
+		var by: float = float(door.cell_b.y) * cell_size + offset.y
+		var x0: float = float(door.cell_a.x) * cell_size + offset.x
+		var x1: float = x0 + cell_size
+		map_draw.draw_line(Vector2(x0, by), Vector2(x1, by), wall_color, line_width)
+
+# Wall-mounted switch dash. A short tick mark crossing the wall edge
+# at right angles, centred at the wall face midpoint + along_offset
+# along the wall tangent. Brown when closed (no linked door open),
+# blue when open (any linked door open). Dash colours match the
+# brown/blue convention in the design handoff.
+const _WALL_SWITCH_DASH_LENGTH_FRACTION: float = 0.4  # of map cell_size
+# World-space CELL_SIZE — must match DungeonView.CELL_SIZE. Used to
+# convert the switch's `along_offset` (world units) to map pixels.
+const _DUNGEON_CELL_SIZE: float = 4.6
+
+func _draw_wall_switch_dash(sw: WallSwitchInstance, offset: Vector2, cell_size: float, line_width: float) -> void:
+	# Wall face midpoint in map pixels — same convention the
+	# `_has_wall` loop uses for each cell's edges.
+	var view_cell := sw.view_cell
+	var view_side: int = sw.view_side
+	var cx_pix: float = (float(view_cell.x) + 0.5) * cell_size + offset.x
+	var cy_pix: float = (float(view_cell.y) + 0.5) * cell_size + offset.y
+	var face_x: float = cx_pix
+	var face_y: float = cy_pix
+	# Tick direction = along the wall axis (so the dash is
+	# perpendicular to the wall). Wall axis convention matches
+	# DungeonView's tangent rule: NORTH/SOUTH walls run along X, EAST/
+	# WEST walls run along Y in the map.
+	var tick_dir: Vector2 = Vector2.ZERO
+	var perp: Vector2 = Vector2.ZERO  # the perpendicular axis used to lay the tick across the wall
+	match view_side:
+		WallSwitchInstance.SIDE_NORTH:
+			face_y = float(view_cell.y) * cell_size + offset.y
+			tick_dir = Vector2(1, 0)
+			perp = Vector2(0, 1)
+		WallSwitchInstance.SIDE_SOUTH:
+			face_y = float(view_cell.y + 1) * cell_size + offset.y
+			tick_dir = Vector2(1, 0)
+			perp = Vector2(0, 1)
+		WallSwitchInstance.SIDE_EAST:
+			face_x = float(view_cell.x + 1) * cell_size + offset.x
+			tick_dir = Vector2(0, 1)
+			perp = Vector2(1, 0)
+		WallSwitchInstance.SIDE_WEST:
+			face_x = float(view_cell.x) * cell_size + offset.x
+			tick_dir = Vector2(0, 1)
+			perp = Vector2(1, 0)
+		_:
+			return
+	# Convert along_offset (world units) → map pixels.
+	var offset_pixels: float = sw.along_offset / _DUNGEON_CELL_SIZE * cell_size
+	var center: Vector2 = Vector2(face_x, face_y) + tick_dir * offset_pixels
+	# Dash is a short line CROSSING the wall edge — half on each side.
+	var dash_half: float = cell_size * _WALL_SWITCH_DASH_LENGTH_FRACTION * 0.5
+	var p_start: Vector2 = center - perp * dash_half
+	var p_end: Vector2 = center + perp * dash_half
+	# Switch colour mirrors `get_visual_opened()` — any linked door
+	# open → switch reads as "activated" (blue); none open → "idle"
+	# (brown).
+	var color: Color
+	if sw.get_visual_opened():
+		color = Color(0.20, 0.50, 0.85)  # activated blue
+	else:
+		color = Color(0.45, 0.25, 0.10)  # idle brown — same hue as door slabs
+	# Slightly thicker than wall lines so the dash reads as a marker,
+	# not a wall.
+	map_draw.draw_line(p_start, p_end, color, max(line_width * 1.2, 2.0))
 
 func redraw() -> void:
 	if map_draw != null:

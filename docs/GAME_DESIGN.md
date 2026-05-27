@@ -219,8 +219,8 @@ Objects attached to walls, rendered as sprites on the wall face.
 | Object | Type |
 |---|---|
 | Painting | Decoration |
-| Switch/Lever | Activates doors, bridges, reveals secrets |
-| Door | Blocks passage until opened (key, switch, or spell) |
+| Switch/Lever | Activates doors, bridges, reveals secrets. Levers are cell-bound (the player clicks a sprite standing in the lever's tile); wall switches sit on a wall face (the player clicks a sprite on the wall — no tile occupancy). Both flip every linked door. |
+| Door | Blocks passage until opened (key, switch, lever, or spell). Doors with `appears_as_wall = true` render as a regular wall when closed (so the player can't tell it's a door) and disappear entirely when open — true secret passages. These are paired with a wall-mounted switch that's the only visible cue and the only interaction surface; clicking elsewhere on the (hidden) wall does nothing. A `hide_when_active` switch sitting on the door panel itself vanishes when its door opens, making the puzzle a permanent one-shot. |
 | Torch/Lantern | Light source, affects Shadow enemies |
 | Secret wall | Looks like a normal corridor wall; the player can walk through it freely. The map draws the wall line at reduced opacity — observant players notice the lighter line and try walking through. Placement requires the wall to gate content. ANY_CONTENT mode allows gating anything (chest/lever/key/exit); LOOT_ONLY mode REQUIRES the wall to gate a chest or non-key floor item AND REJECTS placements that would also gate the exit, a lever, or a key — so secret walls in that mode are always pure side-rewards. |
 
